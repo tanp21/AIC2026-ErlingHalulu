@@ -1,0 +1,13 @@
+[project]
+name = "aic-hcmc"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "jupyter",
+    "ipykernel",
+    "tensorflow",
+    "opencv-python-headless",
+    "ffmpeg-python",
+    "tqdm",
+    "transnetv2 @ git+https://github.com/soCzech/TransNetV2.git",
+]

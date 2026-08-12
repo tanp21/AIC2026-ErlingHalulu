@@ -1,0 +1,7 @@
+data/
+.venv/
+.direnv/
+result
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
