@@ -5,9 +5,31 @@ requires-python = ">=3.12"
 dependencies = [
     "jupyter",
     "ipykernel",
-    "tensorflow",
+    "tensorflow[and-cuda]",
     "opencv-python-headless",
     "ffmpeg-python",
     "tqdm",
     "transnetv2 @ git+https://github.com/soCzech/TransNetV2.git",
+    "open-clip-torch>=3.3.0",
+    "pyarrow>=25.0.1",
+    "faiss-cpu>=1.9.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "elasticsearch>=9.0.0,<10",
+    "sentence-transformers>=5.0.0",
+]
+
+# The production image deliberately excludes notebooks, TensorFlow, and the
+# keyframe-extraction toolchain.  Docker installs only this locked group.
+[dependency-groups]
+server = [
+    "opencv-python-headless",
+    "ffmpeg-python",
+    "open-clip-torch>=3.3.0",
+    "pyarrow>=25.0.1",
+    "faiss-cpu>=1.9.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "elasticsearch>=9.0.0,<10",
+    "sentence-transformers>=5.0.0",
 ]

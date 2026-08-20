@@ -1,0 +1,30 @@
+import { describe, expect, it } from "vitest";
+
+import { decodeFrameMap, resolveFrameId } from "./frameMap";
+
+describe("exact frame map", () => {
+  const mapping = decodeFrameMap({
+    videoId: "V",
+    timeBaseNumerator: 1,
+    timeBaseDenominator: 90000,
+    firstPts: 9000,
+    ptsDeltas: [3003, 2997],
+    frameCount: 3,
+  });
+
+  it("resolves mediaTime to an exact source frame for VFR PTS", () => {
+    expect(resolveFrameId(mapping, 12003 / 90000)).toBe(1);
+    expect(resolveFrameId(mapping, 15000 / 90000)).toBe(2);
+  });
+
+  it("does not guess when mediaTime is not a frame PTS", () => {
+    expect(resolveFrameId(mapping, 12004 / 90000)).toBeNull();
+  });
+
+  it("rejects malformed delta payloads", () => {
+    expect(() => decodeFrameMap({
+      videoId: "V", timeBaseNumerator: 1, timeBaseDenominator: 1000,
+      firstPts: 0, ptsDeltas: [10, 0], frameCount: 3,
+    })).toThrow("strictly increasing");
+  });
+});
