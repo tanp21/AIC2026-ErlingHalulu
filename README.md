@@ -36,6 +36,20 @@ cd frontend && npm ci && npm run build && cd ..
 
 Docker tự build frontend trong image nên không cần commit `static/dist`.
 
+### Chặn token và secret khỏi Git
+
+Kích hoạt hook của repository một lần sau khi clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Mỗi commit sẽ chạy Gitleaks trên staged changes bằng binary local hoặc Docker và
+fail-closed nếu cả hai không có. GitHub Actions fetch toàn bộ history rồi quét lại
+khi push, mở pull request và hằng ngày. Không thêm secret thật vào allowlist;
+nếu một credential từng xuất hiện trong Git, phải revoke/rotate trước rồi mới xử
+lý lịch sử.
+
 ## Chạy an toàn cho đội 5 người
 
 Kiến trúc production là:

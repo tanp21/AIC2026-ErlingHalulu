@@ -8,6 +8,14 @@ COLAB_NOTEBOOK = ROOT / "notebooks" / "colab_extract_keyframes.ipynb"
 
 
 class RepositorySecurityTests(unittest.TestCase):
+    def test_gitleaks_guards_commits_and_full_history(self):
+        hook = (ROOT / ".githooks" / "pre-commit").read_text()
+        workflow = (ROOT / ".github" / "workflows" / "gitleaks.yml").read_text()
+        self.assertIn("--pre-commit", hook)
+        self.assertIn("--staged", hook)
+        self.assertIn("fetch-depth: 0", workflow)
+        self.assertIn("gitleaks/gitleaks-action", workflow)
+
     def test_remote_tools_do_not_embed_google_oauth_credentials(self):
         for path in (REMOTE_EXTRACTOR, COLAB_NOTEBOOK):
             source = path.read_text()
