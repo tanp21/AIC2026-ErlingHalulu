@@ -1,62 +1,58 @@
-# Báo cáo: Đánh giá độ an toàn khi downscale keyframes KXX về HD (720p)
+# Report: Safety Evaluation of Downscaling KXX Keyframes to HD (720p)
 
-**Ngày:** 2026-08-16
-**Dữ liệu:** `data/2025/keyframes/K01–K20` (558.246 keyframes PNG, gốc 1920×1080)
-**Nguyên tắc:** Không sửa đổi dữ liệu gốc trong `./data`. Toàn bộ thí nghiệm chạy trong `/tmp/opencode`.
+**Date:** 2026-08-16
 
----
+**Dataset:** `data/2025/keyframes/K01–K20` (558,246 PNG keyframes, originally 1920×1080)
 
-## 1. Kết luận tổng quan
+**Constraint:** The source data in `./data` was not modified. All experiments ran in `/tmp/opencode`.
 
-**An toàn** để downscale toàn bộ keyframes KXX về 720p cho kì thi kiểu Video Browser Showdown (VBS).
+## 1. Executive summary
 
-| Mặt đánh giá | Kết quả |
-|---|---|
-| Retrieval / tìm kiếm (embedding) | **Không ảnh hưởng** |
-| Hiển thị (thumbnail) | **An toàn** (99.95% frame gần như giống hệt) |
-| Hiển thị (full-res zoom, ~0.05% frame tần số cao) | Mất chi tiết mịn nếu soi kỹ |
+Downscaling all KXX keyframes to 720p is **safe** for a Video Browser Showdown-style competition.
 
----
+| Evaluation area | Result |
+| --- | --- |
+| Retrieval embeddings | **No impact** |
+| Thumbnail display | **Safe**; 99.95% of frames are nearly identical |
+| Full-resolution zoom on ~0.05% of high-frequency frames | Fine detail may be lost under close inspection |
 
-## 2. Retrieval / tìm kiếm — chứng minh không ảnh hưởng
+## 2. Retrieval impact
 
-Embed 500 keyframe ngẫu nhiên bằng đúng model pipeline `PE-Core-bigG-14-448`
-(open_clip, GPU RTX 3060, fp16) ở hai phiên bản: 1080p gốc và 720p downscale.
+The evaluation embedded 500 random keyframes with the production `PE-Core-bigG-14-448` pipeline using OpenCLIP, an RTX 3060 GPU, and FP16. Each frame was tested at its original 1080p resolution and after downscaling to 720p.
 
-| Chỉ số | Giá trị |
-|---|---|
-| Cosine similarity (1080p vs 720p) | min **0.9909**, mean **0.9979**, median **0.9982** |
-| Tự tìm lại chính mình trong 500 frame | **top-1 = 100%**, top-10 = 100%, rank tệ nhất = 0 |
+| Metric | Result |
+| --- | --- |
+| Cosine similarity, 1080p vs. 720p | min **0.9909**, mean **0.9979**, median **0.9982** |
+| Self-retrieval among 500 frames | **top-1 = 100%**, top-10 = 100%, worst rank = 0 |
 
-**Giải thích:** model resize mọi ảnh về 448×448 trước khi embed. Vì 1080p và 720p
-cùng tỉ lệ 16:9, sau `Resize(448)` cả hai đều thành 796×448 → center-crop 448×448
-giống hệt nhau. Do đó downscale 1080→720 gần như không làm thay đổi embedding,
-và kết quả tìm kiếm giữ nguyên thứ hạng.
+The model resizes every image to 448×448 before embedding. Because 1080p and 720p share a 16:9 aspect ratio, `Resize(448)` produces 796×448 in both cases before the same 448×448 center crop. The 1080p-to-720p conversion therefore has negligible effect on embeddings and preserves retrieval ranking.
 
----
+## 3. Display differences
 
-## 3. Hiển thị — phân bố sai khác (mẫu 50k + 40k)
+The display evaluation used this sequence: original 1080p → 720p with `INTER_AREA` → 1080p with `LANCZOS4` → PSNR/SSIM measurement.
 
-So sánh: gốc 1080p → downscale 720p (INTER_AREA) → phóng lại 1080p (LANCZOS4) → đo PSNR/SSIM.
+### 3.1 PSNR distribution
 
-### 3.1 Phân bố PSNR (mẫu 40.000 frame, seed=99)
+Results for a 40,000-frame sample with `seed=99`:
 
-| Ngưỡng | Tỉ lệ frame | Số frame (ước trên 558k) |
-|---|---|---|
-| < 25 dB (hỏng nặng, nhìn thấy rõ) | **0.005%** | ~28 |
+| Threshold | Share of frames | Estimated count across 558k frames |
+| --- | --- | --- |
+| < 25 dB; severe, clearly visible degradation | **0.005%** | ~28 |
 | < 28 dB | 0.015% | ~84 |
-| < 30 dB (thấy khác biệt) | **0.045%** | ~251 |
+| < 30 dB; visible difference | **0.045%** | ~251 |
 | < 32 dB | 0.135% | ~750 |
-| < 35 dB | 1.578% | ~8.800 |
+| < 35 dB | 1.578% | ~8,800 |
 | < 40 dB | 45.9% | — |
 | < 45 dB | 95.0% | — |
 
-- **min ≈ 18.4 dB, mean = 40.3 dB, max = 54.2 dB** (min được cập nhật từ mẫu 100k; mẫu 50k trước đó cho 21 dB — đuôi phân bố dày, giá trị cực tiểu thật trên 558k có thể còn thấp hơn)
+The distribution had **min ≈ 18.4 dB, mean = 40.3 dB, and max = 54.2 dB**. The minimum was updated from a 100,000-frame sample; the earlier 50,000-frame sample produced 21 dB. The distribution has a heavy tail, so the true minimum across all 558,000 frames may be lower.
 
-### 3.2 Top frame khác nhau nhiều nhất (mẫu 50k, seed=7)
+### 3.2 Frames with the largest differences
+
+Results for a 50,000-frame sample with `seed=7`:
 
 | PSNR (dB) | Path |
-|---|---|
+| --- | --- |
 | 18.37 | `K17/K17_V010/015481.png` |
 | 19.46 | `K19/K19_V014/003736.png` |
 | 21.47 | `K19/K19_V023/039321.png` |
@@ -64,29 +60,21 @@ So sánh: gốc 1080p → downscale 720p (INTER_AREA) → phóng lại 1080p (LA
 | 23.33 | `K17/K17_V012/003111.png` |
 | 23.62 | `K17/K17_V021/001848.png` |
 
-(Danh sách đầy đủ 50 frame tệ nhất là artifact local và không được commit.)
+The complete list of the 50 worst frames remains a local artifact and is not committed.
 
-**Nhận xét:** frame tệ nhất đều có nội dung tần số cao (chữ nhỏ, lưới, hoa văn dày)
-và tập trung ở các video K19, K20, K18, K17, K14, K16. Frame ít chi tiết (edge thấp)
-thì PSNR rất cao (>50 dB) — gần như không đổi.
+The worst frames contain high-frequency content such as small text, grids, and dense patterns. They are concentrated in K19, K20, K18, K17, K14, and K16 videos. Low-detail frames achieve very high PSNR values above 50 dB and remain nearly unchanged.
 
----
+## 4. Recommendation
 
-## 4. Khuyến nghị
+1. **Downscale all KXX keyframes to 720p** for VBS-style retrieval. The experiment found no retrieval impact, and 720p provides more than enough detail for 200–400 px thumbnails.
+2. **Preserve selected 1080p frames only if fine-text inspection matters.** Approximately 0.05% of high-frequency frames may lose sharpness at full-resolution zoom.
+3. Expect a storage reduction of approximately **30–40%**.
 
-1. **Downscale toàn bộ KXX về 720p là an toàn** cho kì thi VBS-like:
-   - Retrieval không đổi (đã chứng minh thực nghiệm).
-   - Hiển thị thumbnail (~200–400px) thấp hơn nhiều so với 720p → dư sức.
-2. **Rủi ro còn lại:** nếu kì thi yêu cầu đọc chữ nhỏ ở full-res zoom trên ~0.05%
-   frame tần số cao, 720p có thể mất nét. Giải pháp thận trọng: giữ riêng ~0.05%
-   frame tệ nhất ở 1080p.
-3. Tiết kiệm dung lượng dự kiến: **~30–40%**.
+## 5. Local artifacts
 
----
+The following files were generated in `/tmp/opencode/kf_cmp_full/` and are not part of the repository:
 
-## 5. File đính kèm (trong `/tmp/opencode/kf_cmp_full/`)
-
-- `worst0_003894.png` — bản gốc 1080p của frame tệ nhất
-- `worst0_003894_720.png` — bản 720p
-- `worst0_003894_diff5x.png` — bản đồ sai khác (khuếch đại ×5)
-- `worst0_side_by_side.png` — ghép cạnh nhau (gốc | 720p | diff)
+- `worst0_003894.png` — original 1080p version of the worst frame
+- `worst0_003894_720.png` — 720p version
+- `worst0_003894_diff5x.png` — difference map amplified 5×
+- `worst0_side_by_side.png` — original, 720p, and difference map side by side
