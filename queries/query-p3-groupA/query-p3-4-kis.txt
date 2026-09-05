@@ -1,0 +1,1 @@
+Cảnh quay các con động vật nối đuôi nhau. Con đi đầu lớn nhất, các con phía sau có kích thước lần lượt là nhỏ lớn nhỏ lớn. Tuy nhiên, ở vị trí thứ 2 có 2 con đi song song. Sau đó là cảnh con chim ở trên cây.

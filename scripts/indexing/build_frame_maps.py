@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
 
-import frame_maps
+from backend import frame_maps
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -75,7 +75,7 @@ def aligned_times(id_video, id_frame, video_ids, load_map):
         frames = id_frame[rows]
         if np.any(frames < 0) or np.any(frames >= len(mapping.pts)):
             raise ValueError(f"indexed frame outside PTS map: {video_ids[int(video_idx)]}")
-        times[rows] = mapping.pts[frames] * (mapping.time_base_num / mapping.time_base_den)
+        times[rows] = (mapping.pts[frames] - mapping.pts[0]) * (mapping.time_base_num / mapping.time_base_den)
     return times
 
 

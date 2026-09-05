@@ -34,6 +34,9 @@ class RepositorySecurityTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 self.assertNotIn("/home/tanp21", path.read_text())
 
+    def test_brainstorm_artifacts_are_ignored(self):
+        self.assertIn("/.superpowers/", (ROOT / ".gitignore").read_text().splitlines())
+
 
 if __name__ == "__main__":
     unittest.main()

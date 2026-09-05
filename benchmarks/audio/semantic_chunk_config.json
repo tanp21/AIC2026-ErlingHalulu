@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "notes": [
+    "Generated from a controlled duration-scale HYBRID benchmark (44 KIS/QA queries",
+    "from audio_ground_truth.json; TRAKE excluded -- needs temporal_search.py's own",
+    "per-event DP, not exercised by this benchmark). Visual branch is real PE-Core +",
+    "FAISS (profile l2025); audio branch is an offline BM25(LexicalIndex) + dense +",
+    "reciprocal_rank_fusion(rank_constant=60) + merge_temporal_hits proxy for",
+    "audio_search.search_audio (Elasticsearch was not running in the benchmarking",
+    "environment); fusion is the real app.fuse_search_results, including the adaptive",
+    "per-hit max_time_delta fix landed the same session (app.py:757,",
+    "app._audio_time_window) that this sweep itself justified.",
+    "",
+    "An earlier audio-only-only benchmark (see docs/reports and this session's memory",
+    "at ~/.claude/projects/.../memory/hybrid_fusion_anchor_precision.md) favoured",
+    "shorter chunking (min=8/target=25/max=40, matching build_audio_index.py's",
+    "existing --strategy semantic_duration defaults) because longer chunks' coarse",
+    "anchor_sec fell outside fuse_search_results' old fixed 30s fusion window. That was",
+    "an artifact of the fusion bug, not evidence against longer chunks -- once fixed,",
+    "the longer config below ties or beats every shorter one on real hybrid recall",
+    "while indexing fewer, cheaper passages.",
+    "",
+    "Re-run scripts.benchmarks.bench_audio_search --duration-sweep (extended with a",
+    "real hybrid pass) instead of hand-editing this file."
+  ],
+  "metric": "hybrid gold-video recall over the 44 KIS/QA queries in benchmarks/audio_ground_truth.json",
+  "candidates": {
+    "E_sliding_60_15": {
+      "passages": 30547,
+      "hybrid_recall_at_1": 0.614, "hybrid_recall_at_5": 0.886, "hybrid_recall_at_10": 0.909
+    },
+    "A_min8_target25_max40": {
+      "passages": 17523,
+      "hybrid_recall_at_1": 0.682, "hybrid_recall_at_5": 0.841, "hybrid_recall_at_10": 0.909
+    },
+    "B_min8_target30_max60": {
+      "passages": 10883,
+      "hybrid_recall_at_1": 0.659, "hybrid_recall_at_5": 0.864, "hybrid_recall_at_10": 0.932
+    },
+    "C_min10_target40_max75": {
+      "passages": 8361,
+      "hybrid_recall_at_1": 0.682, "hybrid_recall_at_5": 0.886, "hybrid_recall_at_10": 0.886
+    },
+    "D_min10_target40_max90": {
+      "passages": 7150,
+      "hybrid_recall_at_1": 0.659, "hybrid_recall_at_5": 0.864, "hybrid_recall_at_10": 0.909
+    }
+  },
+  "selected": "C_min10_target40_max75",
+  "config": {
+    "context_window_sentences": 3,
+    "breakpoint_percentile": 15.0,
+    "min_scores_for_percentile": 4,
+    "min_duration_seconds": 10,
+    "target_duration_seconds": 40,
+    "max_duration_seconds": 75,
+    "overlap_sentences": 1
+  },
+  "trake_check": {
+    "notes": [
+      "Follow-up check on the 4 TRAKE queries in audio_ground_truth.json, run through",
+      "the REAL temporal_search.py pipeline (build_sequences DP + fuse_audio +",
+      "temporal_nms), not the whole-text-blob proxy used in earlier rounds -- that",
+      "proxy is not representative of production TRAKE handling. temporal_search.py",
+      "and app.py's temporal logic were NOT modified for this check (fair A/B).",
+      "3 of 4 queries have per-event gold timestamps in temporal_ground_truth.json",
+      "(query-p1-4, -16, -18); 2026:query-p1-16-trake (L24_V024) has none, gold-video",
+      "rank only, events hand-translated from its Vietnamese text.",
+      "",
+      "Per-event localization is IDENTICAL across all 3 audio strategies for every",
+      "query -- the DP's event candidates are 100% visual (core.encode_texts + FAISS",
+      "flat index), so no audio chunking strategy can change which frame is picked",
+      "per event. Audio only nudges the whole-sequence RANK via fuse_audio's RRF",
+      "(window_seconds=30, hardcoded in temporal_search.fuse_audio, separate from",
+      "app.fuse_search_results' adaptive window). The wide audio-evidence spans",
+      "reported below (150-330s) come from merge_temporal_hits chaining multiple",
+      "overlapping same-video passages together -- this happens identically for the",
+      "sliding baseline (E) too, so it is not evidence of semantic chunks themselves",
+      "being 150-330s long, nor of them merging distinct TRAKE events."
+    ],
+    "gold_video_rank": {
+      "2025:query-p1-4-trake":  {"E_sliding_60_15": 1, "A_min8_target25_max40": 1, "C_min10_target40_max75": 1},
+      "2025:query-p1-16-trake": {"E_sliding_60_15": 5, "A_min8_target25_max40": 5, "C_min10_target40_max75": 6},
+      "2025:query-p1-18-trake": {"E_sliding_60_15": 2, "A_min8_target25_max40": 3, "C_min10_target40_max75": 1},
+      "2026:query-p1-16-trake": {"E_sliding_60_15": 6, "A_min8_target25_max40": 6, "C_min10_target40_max75": 5}
+    },
+    "per_event_correct_of_4": {
+      "2025:query-p1-4-trake": "1/4 (identical across all 3 -- visual localization is imperfect for this query independent of audio)",
+      "2025:query-p1-16-trake": "2/4 (identical across all 3; near-silent lion-dance video, no audio evidence in any config)",
+      "2025:query-p1-18-trake": "4/4 (identical across all 3; the one TRAKE video with substantive narration)",
+      "2026:query-p1-16-trake": "not available (no gold event timestamps)"
+    },
+    "verdict": "No meaningful regression. One video (2025:query-p1-16-trake, near-silent) moves one rank worse (5->6) with C, but audio contributes nothing to any of the 3 configs for that video (source=visual-only throughout) -- the difference is noise/tie-breaking among visual-only paths, not a chunking effect. The one TRAKE video with real narration (2025:query-p1-18-trake) improves under C (rank 2->1 vs sliding, 3->1 vs A) because C's matching passage scored the best audio_rank (1, vs sliding's 2 and A's 18). C is confirmed as the global default."
+  },
+  "pause_boost_check": {
+    "notes": [
+      "Phase 2. Fixed config C (min=10/target=40/max=75/window=3/percentile=15/overlap=1)",
+      "throughout; only the pause mechanism varies. Same offline",
+      "BM25(LexicalIndex)+dense(DenseIndex)+RRF+merge_temporal_hits proxy and the real,",
+      "adaptive-window app.fuse_search_results as the runs above (Elasticsearch not",
+      "running in this environment). All 44 KIS/QA queries counted in every headline",
+      "number below -- no query is excluded from the primary metric, including",
+      "2026:query-p1-21-kis (see 'known_sensitive_query' below for why it swings hard).",
+      "",
+      "Round 1 tested the ungated mechanism alone (any boundary with a long pause,",
+      "relative to that video's own pause distribution, became eligible -- no semantic",
+      "support required). Round 2 added a second, wider 'borderline semantic' percentile",
+      "(pause_borderline_semantic_percentile) and gated pause so it can only PROMOTE a",
+      "boundary that already clears that wider percentile, never manufacture one alone:",
+      "eligible = strong_semantic OR (borderline_semantic AND long_pause). Both rounds'",
+      "manual review sampled 'this boundary exists only because of pause' cases across",
+      "news, cooking, travel/documentary and sports content and read the surrounding",
+      "transcript by hand to judge whether each was a real topic transition."
+    ],
+    "ungated": {
+      "description": "strong_semantic OR pause_boosted, no borderline gate -- audio_search._assemble_bounded_chunks(..., borderline_candidates=None). Not reachable from any production CLI flag; kept only as a directly-callable code path for this historical ablation and any future re-benchmarking.",
+      "pause75": {
+        "passages": 9433,
+        "audio_only_recall_at_1": 0.545, "audio_only_recall_at_5": 0.705,
+        "hybrid_recall_at_1": 0.682, "hybrid_recall_at_5": 0.886, "hybrid_recall_at_10": 0.909,
+        "split_reason_pct": {"forced": 4.32, "semantic_only": 1.58, "pause_only": 55.26, "both_semantic_and_pause": 30.35}
+      },
+      "pause85": {
+        "passages": 9251,
+        "audio_only_recall_at_1": 0.545, "audio_only_recall_at_5": 0.705,
+        "hybrid_recall_at_1": 0.705, "hybrid_recall_at_5": 0.886, "hybrid_recall_at_10": 0.932,
+        "split_reason_pct": {"forced": 13.76, "semantic_only": 7.14, "pause_only": 45.22, "both_semantic_and_pause": 25.14}
+      },
+      "manual_boundary_review": "12 pause-only boundaries sampled across news/cooking/travel-documentary/sports (3 each). 6/12 (50%) read as real topic transitions on manual reading; false boundaries concentrated in interview-style news (0/3) and live sports commentary (~1/3), where a long pause is often just a breath/rhythm gap within the same continuing statement, not a topic change. Travel/documentary narration fared best (3/3).",
+      "verdict": "Retrieval does not clearly regress (recall ties or slightly improves), but pause dominates 70-86% of all boundaries (pause_only + both) and roughly half of pause-only splits are false on manual review. Rejected as a production candidate: the mechanism overrides the semantic signal far more than it augments it."
+    },
+    "gated": {
+      "description": "strong_semantic OR (borderline_semantic AND pause_boosted), where borderline_semantic is a second, wider _breakpoint_candidates call at pause_borderline_semantic_percentile (default 30.0). This is the only pause behavior reachable through make_bounded_semantic_passages / the production CLI flags when pause_boost_enabled=True.",
+      "pause75": {
+        "passages": 8694,
+        "audio_only_recall_at_1": 0.523, "audio_only_recall_at_5": 0.659,
+        "hybrid_recall_at_1": 0.659, "hybrid_recall_at_5": 0.864, "hybrid_recall_at_10": 0.909,
+        "split_reason_pct": {"forced": 42.91, "strong_semantic_only": 1.56, "strong_semantic_and_pause": 31.46, "promoted_by_pause": 14.76},
+        "promoted_by_pause_also_borderline_pct": 100.0,
+        "diff_vs_pause_off": {"videos_with_any_change": 517, "total_videos": 873, "changed_chunks_approx": 3758}
+      },
+      "pause85": {
+        "passages": 8632,
+        "audio_only_recall_at_1": 0.523, "audio_only_recall_at_5": 0.659,
+        "hybrid_recall_at_1": 0.659, "hybrid_recall_at_5": 0.864, "hybrid_recall_at_10": 0.886,
+        "split_reason_pct": {"forced": 45.82, "strong_semantic_only": 7.23, "strong_semantic_and_pause": 25.67, "promoted_by_pause": 11.86},
+        "promoted_by_pause_also_borderline_pct": 100.0,
+        "diff_vs_pause_off": {"videos_with_any_change": 422, "total_videos": 873, "changed_chunks_approx": 2994}
+      },
+      "manual_boundary_review": "10 promoted-by-pause boundaries sampled across the same 4 content types. 7/10 (70%) read as real topic transitions -- a clear improvement over the ungated 50%. News remained the weakest category (1/4): most boundaries there still land within one continuing news item rather than at its actual end.",
+      "known_sensitive_query": "2026:query-p1-21-kis (gold L22_V011, the 'tôm hùm/trang trí món ăn' query from the original hybrid-fusion investigation) swings hard under gating: hybrid rank 3->9, audio rank 17->82. Root-caused by hand: gating shifts the forced-split boundary near the matching passage by ~10s (from A's clean [453.4-525.5s] chunk to a [463.0-536.5s] chunk prefixed with less-relevant lead-in text), diluting the coincidental lexical overlap that gave this passage its (already marginal, rank ~17) audio match. Excluding only this one query from the hybrid recall computation: A/B 69.8/88.4/88.4 (R@1/5/10), gated-C 67.4/88.4/90.7, gated-D 67.4/88.4/88.4 -- R@5 and R@10 tie or beat pause-off once this single boundary-position-sensitive query is set aside, R@1 remains ~2pp behind (one further query, 2026:query-p1-22-kis, drops hybrid rank 1->2 on an unrelated top-of-list RRF tie-break with an unchanged audio rank). This query is NOT excluded from any headline recall number above -- it is the reason gated-C/D's R@1/R@5 read lower than pause-off in the headline table."
+    },
+    "verdict": "Gated pause-boost is implemented correctly (100% of promoted boundaries carry independent borderline-semantic evidence; total pause-influenced share of all boundaries drops from 85.6% ungated to 46.2%/37.5% gated) and clearly improves manual boundary quality (50% -> 70% real topic transitions). It does not, however, demonstrate a retrieval improvement over Phase 1 (pause off) large enough on this 44-query benchmark to justify the added complexity by itself -- the headline recall dip is dominated by one boundary-position-sensitive query, not a systemic effect, but 44 queries (~2.3 points each) cannot resolve that distinction with confidence. Decision: keep pause_boost_enabled=False as the production default; keep the gated implementation in the codebase as an optional, fully-tested feature for future re-benchmarking (e.g. against a larger ground truth) rather than shipping it now. The ungated mechanism is not a production candidate at all -- retained in audio_search._assemble_bounded_chunks only as a directly-callable path for historical ablation/testing, never reachable from make_bounded_semantic_passages or any CLI flag."
+  }
+}

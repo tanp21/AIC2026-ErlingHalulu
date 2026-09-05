@@ -12,7 +12,11 @@ export interface FrameMap extends FrameMapPayload {
 }
 
 export function decodeFrameMap(payload: FrameMapPayload): FrameMap {
-  if (payload.timeBaseNumerator <= 0 || payload.timeBaseDenominator <= 0) {
+  if (![payload.timeBaseNumerator, payload.timeBaseDenominator, payload.firstPts, payload.frameCount]
+    .every(Number.isSafeInteger)) {
+    throw new Error("frame map metadata must be safe integers");
+  }
+  if (payload.timeBaseNumerator <= 0 || payload.timeBaseDenominator <= 0 || payload.frameCount <= 0) {
     throw new Error("invalid time base");
   }
   const pts = [payload.firstPts];
@@ -25,7 +29,7 @@ export function decodeFrameMap(payload: FrameMapPayload): FrameMap {
 }
 
 export function resolveFrameId(mapping: FrameMap, mediaTime: number): number | null {
-  const target = Math.round(mediaTime * mapping.timeBaseDenominator / mapping.timeBaseNumerator);
+  const target = mapping.firstPts + Math.round(mediaTime * mapping.timeBaseDenominator / mapping.timeBaseNumerator);
   let low = 0;
   let high = mapping.pts.length - 1;
   while (low <= high) {
@@ -36,6 +40,10 @@ export function resolveFrameId(mapping: FrameMap, mediaTime: number): number | n
     else high = middle - 1;
   }
   return null;
+}
+
+export function frameTime(mapping: FrameMap, frameId: number): number {
+  return (mapping.pts[frameId] - mapping.firstPts) * mapping.timeBaseNumerator / mapping.timeBaseDenominator;
 }
 
 export async function fetchFrameMap(videoId: string): Promise<FrameMap> {

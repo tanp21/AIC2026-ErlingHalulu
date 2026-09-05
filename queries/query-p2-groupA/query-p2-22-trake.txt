@@ -1,0 +1,4 @@
+Một cảnh quay từ camera an ninh về một lần khám xét.
+E1: Người cảnh sát vẫy tay đưa nghi phạm vào phòng.
+E2: Sau khi vào phòng, cảnh sát ra hiệu chỉ tay vào vị trí cần đứng. Hãy lấy cảnh đầu tiên chỉ tay được thực hiện
+E2: Khoảnh khắc đầu tiên cảnh sát hoàn toàn khom người xuống để quét kiểm tra

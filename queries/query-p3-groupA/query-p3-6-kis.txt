@@ -1,0 +1,1 @@
+Cảnh quay các dãy xe nối đuôi nhau với xe đầu tiên màu trắng. Sau đó là cảnh quay gần hơn đến chiếc xe đầu tiên. Ta thấy đèn xe mỗi bên là hình chữ U ngược đang nhấp nháy. Xe này không có biển số và ta thấy họa tiếc khắc chìm nổi ở giữa đầu xe.

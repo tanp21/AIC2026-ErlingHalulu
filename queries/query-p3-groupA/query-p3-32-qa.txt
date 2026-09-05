@@ -1,0 +1,1 @@
+Cảnh quay một món ăn được bày trên 1 vỉ nướng đặt trên bếp ga. Tuy nhiên món ăn này được nướng trong lò thay vì bếp ga. Sau đó là cảnh làm xốt chấm. Kết thúc bằng cảnh món ăn được bày ra trên dĩa. Trên dĩa trang trí có 2 quả cà chua. Đếm số lượng các "miếng" trên vỉ nướng.

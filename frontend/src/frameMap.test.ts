@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeFrameMap, resolveFrameId } from "./frameMap";
+import { decodeFrameMap, frameTime, resolveFrameId } from "./frameMap";
 
 describe("exact frame map", () => {
   const mapping = decodeFrameMap({
@@ -13,12 +13,17 @@ describe("exact frame map", () => {
   });
 
   it("resolves mediaTime to an exact source frame for VFR PTS", () => {
-    expect(resolveFrameId(mapping, 12003 / 90000)).toBe(1);
-    expect(resolveFrameId(mapping, 15000 / 90000)).toBe(2);
+    expect(resolveFrameId(mapping, 3003 / 90000)).toBe(1);
+    expect(resolveFrameId(mapping, 6000 / 90000)).toBe(2);
   });
 
   it("does not guess when mediaTime is not a frame PTS", () => {
-    expect(resolveFrameId(mapping, 12004 / 90000)).toBeNull();
+    expect(resolveFrameId(mapping, 3004 / 90000)).toBeNull();
+  });
+
+  it("converts a source frame id back to its exact presentation time", () => {
+    expect(frameTime(mapping, 0)).toBe(0);
+    expect(frameTime(mapping, 2)).toBe(6000 / 90000);
   });
 
   it("rejects malformed delta payloads", () => {
@@ -26,5 +31,12 @@ describe("exact frame map", () => {
       videoId: "V", timeBaseNumerator: 1, timeBaseDenominator: 1000,
       firstPts: 0, ptsDeltas: [10, 0], frameCount: 3,
     })).toThrow("strictly increasing");
+  });
+
+  it("rejects unsafe frame-map metadata", () => {
+    expect(() => decodeFrameMap({
+      videoId: "V", timeBaseNumerator: 1, timeBaseDenominator: 1000,
+      firstPts: Number.NaN, ptsDeltas: [], frameCount: 1,
+    })).toThrow("safe integers");
   });
 });

@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 import httpx
 
-import app as server
-from access_control import AccessConfig, LatestWinsCoordinator
+from backend import app as server
+from backend.access_control import AccessConfig, LatestWinsCoordinator
 
 
 class SecureRouteTests(unittest.IsolatedAsyncioTestCase):
@@ -20,16 +20,16 @@ class SecureRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.client.aclose()
 
-    async def test_session_reports_tailscale_identity_and_role(self):
+    async def test_session_reports_trusted_proxy_identity_and_role(self):
         response = await self.client.get(
-            "/session", headers={"Tailscale-User-Login": "mate@example.com"}
+            "/session", headers={"X-AIC-User": "mate@example.com"}
         )
         self.assertEqual(response.json(), {"login": "mate@example.com", "is_admin": False})
 
     async def test_compare_is_owner_only(self):
         response = await self.client.post(
             "/compare",
-            headers={"Tailscale-User-Login": "mate@example.com"},
+            headers={"X-AIC-User": "mate@example.com"},
             json={"text": "astronauts"},
         )
         self.assertEqual(response.status_code, 403)
@@ -37,12 +37,12 @@ class SecureRouteTests(unittest.IsolatedAsyncioTestCase):
         async def inline(function, *args):
             return function(*args)
 
-        with patch("app.compare", return_value={"results": []}) as compare, patch(
-            "app.run_in_threadpool", side_effect=inline
+        with patch("backend.app.compare", return_value={"results": []}) as compare, patch(
+            "backend.app.run_in_threadpool", side_effect=inline
         ):
             response = await self.client.post(
                 "/compare",
-                headers={"Tailscale-User-Login": "owner@example.com"},
+                headers={"X-AIC-User": "owner@example.com"},
                 json={"text": "astronauts"},
             )
         self.assertEqual(response.status_code, 200)

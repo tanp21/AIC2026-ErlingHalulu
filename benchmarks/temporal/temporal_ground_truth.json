@@ -1,0 +1,123 @@
+{
+  "tolerance_seconds": 10,
+  "queries": [
+    {
+      "id": "query-p1-4",
+      "events": [
+        "flour is first added to a bowl of asparagus",
+        "the first piece of asparagus vermicelli touches oil in a frying pan",
+        "the first piece of asparagus leaves the frying pan",
+        "the last piece of asparagus leaves the frying pan and rests completely on a plate"
+      ],
+      "max_gap_seconds": 120,
+      "ground_truth": [
+        {
+          "video_id": "L26_V194",
+          "frame_ids": [4724, 5122, 5435, 5871],
+          "event_times": [188.96, 204.88, 217.4, 234.84]
+        }
+      ]
+    },
+    {
+      "id": "query-p1-16",
+      "events": [
+        "a yellow black and white lion dance costume begins spinning on pillar number four using its front legs",
+        "all four feet of the lion dance costume first touch the ground",
+        "the two lion dance performers at the rear bow to the judges",
+        "the lion approaches a dragon and the dragon first moves its head"
+      ],
+      "max_gap_seconds": 120,
+      "ground_truth": [
+        {
+          "video_id": "L24_V033",
+          "frame_ids": [15946, 16006, 16368, 16903],
+          "event_times": [531.533333, 533.533333, 545.6, 563.433333]
+        }
+      ]
+    },
+    {
+      "id": "query-p1-18",
+      "events": [
+        "a cook first cuts mushrooms",
+        "a cook first cuts water chestnuts",
+        "a cook first cuts tofu",
+        "a frying pan is placed on a stove and a visible flame first appears"
+      ],
+      "audio_text": "sơ chế nấm củ năng đậu hũ đặt chảo lên bếp mở lửa",
+      "max_gap_seconds": 120,
+      "ground_truth": [
+        {
+          "video_id": "L26_V072",
+          "frame_ids": [2491, 3138, 3426, 3808],
+          "event_times": [99.64, 125.52, 137.04, 152.32]
+        }
+      ]
+    },
+    {
+      "id": "query-p2-10",
+      "events": [
+        "a robotic arm lowers a car frame until the frame touches a vehicle",
+        "a factory worker starts turning a hand crank on assembly equipment",
+        "a worker in black assembling a car door turns toward the camera and first folds a cloth"
+      ],
+      "max_gap_seconds": 120,
+      "ground_truth": [
+        {
+          "video_id": "K07_V025",
+          "frame_ids": [22223, 22281, 22348],
+          "event_times": [740.766667, 742.7, 744.933333]
+        }
+      ]
+    },
+    {
+      "id": "query-p2-22",
+      "events": [
+        "a police officer waves a suspect into a security screening room",
+        "the police officer first points to where the suspect should stand",
+        "the police officer is first completely bent down while scanning the suspect"
+      ],
+      "max_gap_seconds": 120,
+      "ground_truth": [
+        {
+          "video_id": "K02_V005",
+          "frame_ids": [9951, 10029, 10147],
+          "event_times": [398.04, 401.16, 405.88]
+        }
+      ]
+    },
+    {
+      "id": "query-p3-1",
+      "events": [
+        "a cook first touches a sauce mixture with a spoon while stirring it",
+        "a cook finishes pouring all of the sauce into a pot containing a fish steak topped with a chili"
+      ],
+      "audio_text": "khuấy hỗn hợp nước sốt rưới hết nước sốt vào nồi cá",
+      "max_gap_seconds": 120,
+      "ground_truth": [
+        {
+          "video_id": "L26_V176",
+          "frame_ids": [4740, 4887],
+          "event_times": [189.6, 195.48]
+        }
+      ]
+    },
+    {
+      "id": "query-p3-24",
+      "events": [
+        "Turtle Tower at Hoan Kiem Lake first appears in a travel news report",
+        "Saint Joseph Cathedral in Hanoi first appears in the report",
+        "the Hanoi Flag Tower first appears in the report",
+        "the Temple of Literature in Hanoi first appears in the report"
+      ],
+      "audio_text": "Tháp Rùa Hồ Hoàn Kiếm Nhà thờ Lớn Hà Nội Cột cờ Hà Nội Văn Miếu Quốc Tử Giám",
+      "max_gap_seconds": 120,
+      "ground_truth": [
+        {
+          "video_id": "K01_V012",
+          "frame_ids": [7746, 7996, 8112, 8233],
+          "event_times": [309.84, 319.84, 324.48, 329.32]
+        }
+      ]
+    }
+  ]
+}

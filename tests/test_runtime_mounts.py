@@ -7,9 +7,11 @@ from unittest.mock import patch
 
 import numpy as np
 
-import core
-import frame_maps
-import thumb
+from backend import core
+from backend import frame_maps
+from backend import thumb
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class RuntimeMountTests(unittest.TestCase):
@@ -26,13 +28,77 @@ class RuntimeMountTests(unittest.TestCase):
             Path("/indexes/frame_maps"),
         )
 
+    def test_collaboration_database_has_a_persistent_writable_mount(self):
+        compose = (ROOT / "compose.yaml").read_text()
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        self.assertIn("AIC_COLLAB_DB: /workspace/aic-collab.sqlite3", compose)
+        self.assertIn("collab-data:/workspace", compose)
+        self.assertIn("collab-data:", compose)
+        self.assertIn("backend/collaboration.py", dockerfile)
+        self.assertIn("mkdir /cache /workspace", dockerfile)
+        self.assertIn("chown app:app /cache /workspace", dockerfile)
+
+    def test_shot_labels_have_a_persistent_writable_mount(self):
+        compose = (ROOT / "compose.yaml").read_text()
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        self.assertIn("AIC_SHOT_LABEL_DIR: /labels", compose)
+        self.assertIn("source: ./artifacts/shot-labels", compose)
+        self.assertIn("target: /labels", compose)
+        self.assertIn("create_host_path: false", compose)
+        self.assertIn("backend/shot_labels.py", dockerfile)
+        self.assertIn("mkdir /cache /workspace /labels", dockerfile)
+
+    def test_public_ingress_uses_basic_auth_and_overwrites_identity(self):
+        compose = (ROOT / "compose.yaml").read_text()
+        haproxy = (ROOT / "haproxy.cfg").read_text()
+        gitignore = (ROOT / ".gitignore").read_text().splitlines()
+
+        self.assertIn('"0.0.0.0:8000:8000"', compose)
+        self.assertIn("./haproxy-users.cfg:/usr/local/etc/haproxy/users.cfg:ro", compose)
+        self.assertGreaterEqual(
+            compose.count('user: "${AIC_UID:-1000}:${AIC_GID:-1000}"'), 2
+        )
+        self.assertIn('"/usr/local/etc/haproxy/users.cfg"', compose)
+        self.assertIn("acl authenticated http_auth(aic_users)", haproxy)
+        self.assertIn("http-request del-header X-AIC-User", haproxy)
+        self.assertIn("http-request auth realm AIC if !health !authenticated", haproxy)
+        self.assertIn(
+            "http-request set-header X-AIC-User %[http_auth_user] if authenticated",
+            haproxy,
+        )
+        self.assertIn("/haproxy-users.cfg", gitignore)
+
+    def test_teammate_video_has_a_shared_wan_budget_but_admin_does_not(self):
+        compose = (ROOT / "compose.yaml").read_text()
+        haproxy = (ROOT / "haproxy.cfg").read_text()
+
+        ingress = compose.split("  ingress:\n", 1)[1].split("\nvolumes:\n", 1)[0]
+        self.assertIn("env_file:\n      - .env.secure", ingress)
+        self.assertIn('acl admin http_auth_user -i "${AIC_ADMIN_USER}"', haproxy)
+        self.assertIn("acl video path_beg /video/", haproxy)
+        self.assertIn("use_backend teammate_video if video !admin", haproxy)
+        self.assertIn("backend teammate_video", haproxy)
+        self.assertIn(
+            "filter bwlim-out teammate_video_limit limit 24m key int(1)",
+            haproxy,
+        )
+        self.assertIn(
+            "http-response set-bandwidth-limit teammate_video_limit", haproxy
+        )
+        self.assertNotIn("set-bandwidth-limit", haproxy.split("backend search_app", 1)[1].split("backend teammate_video", 1)[0])
+
+    def test_ingress_capacity_does_not_block_admin_behind_video_streams(self):
+        haproxy = (ROOT / "haproxy.cfg").read_text()
+
+        self.assertIn("maxconn 512", haproxy)
+        self.assertNotIn("maxconn 64", haproxy)
 
 class ThumbnailConcurrencyTests(unittest.TestCase):
     def test_concurrent_same_thumbnail_is_generated_once(self):
         mapping = frame_maps.FrameMap(np.array([0, 10]), 1, 10)
         with tempfile.TemporaryDirectory() as directory, patch.object(
             thumb, "CACHE_DIR", Path(directory)
-        ), patch("thumb.subprocess.run") as run:
+        ), patch("backend.thumb.subprocess.run") as run:
             def generate(command, **_):
                 time.sleep(0.02)
                 Path(command[-1]).write_bytes(b"jpeg")
@@ -55,7 +121,7 @@ class ThumbnailConcurrencyTests(unittest.TestCase):
         mapping = frame_maps.FrameMap(np.array([0, 10]), 1, 10)
         with tempfile.TemporaryDirectory() as directory, patch.object(
             thumb, "CACHE_DIR", Path(directory)
-        ), patch("thumb.subprocess.run") as run:
+        ), patch("backend.thumb.subprocess.run") as run:
             run.side_effect = lambda command, **_: Path(command[-1]).write_bytes(b"jpeg")
             thumb.extract("video.mp4", 1, mapping)
         self.assertEqual(run.call_args.kwargs["timeout"], 30)

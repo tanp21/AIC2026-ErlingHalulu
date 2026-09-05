@@ -1,0 +1,4 @@
+# Copy this file to haproxy-users.cfg, then add exactly five users whose
+# lowercase usernames match AIC_ALLOWED_USERS in .env.secure.
+userlist aic_users
+  # user owner@example.com password $5$replace-with-a-sha-256-crypt-hash

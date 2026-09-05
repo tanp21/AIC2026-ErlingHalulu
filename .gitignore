@@ -1,17 +1,23 @@
 /data
 /indexes/
 /result
+/dist/
 
 .env
 .env.*
 !.env.secure.example
+/haproxy-users.cfg
+/aic-initial-passwords.txt
+/wan-load-report*.json
 
 /.venv/
+/.venv-captioning/
 /.direnv/
 /.cache/
 /.thumb_cache/
 /.agents/
 /.codex/
+/.superpowers/
 
 __pycache__/
 *.py[cod]

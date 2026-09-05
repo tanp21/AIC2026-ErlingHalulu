@@ -27,8 +27,12 @@ services:
       - .env.secure
     environment:
       AIC_DATA_DIR: /data
+      AIC_TRANSCRIPT_PATH: /data/2026/audio/generated/step_data_clean.parquet
       AIC_INDEX_DIR: /indexes
+      AIC_AUDIO_FLAT_PATH: /indexes/audio_v1
       AIC_THUMB_CACHE_DIR: /cache
+      AIC_COLLAB_DB: /workspace/aic-collab.sqlite3
+      AIC_SHOT_LABEL_DIR: /labels
       ELASTICSEARCH_URL: http://elasticsearch:9200
       HF_HOME: /models
       HF_HUB_CACHE: /models/hub
@@ -44,6 +48,12 @@ services:
       - ./indexes:/indexes:ro
       - ${AIC_HF_HUB_DIR:?Set AIC_HF_HUB_DIR to the host Hugging Face hub directory}:/models/hub:ro
       - ./.thumb_cache:/cache
+      - collab-data:/workspace
+      - type: bind
+        source: ./artifacts/shot-labels
+        target: /labels
+        bind:
+          create_host_path: false
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=1g,mode=1777
     depends_on:
@@ -72,11 +82,21 @@ services:
 
   ingress:
     image: haproxy:3.2-alpine
-    command: ["haproxy", "-W", "-db", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+    env_file:
+      - .env.secure
+    command:
+      - haproxy
+      - -W
+      - -db
+      - -f
+      - /usr/local/etc/haproxy/haproxy.cfg
+      - -f
+      - /usr/local/etc/haproxy/users.cfg
     ports:
-      - "127.0.0.1:8000:8000"
+      - "0.0.0.0:8000:8000"
     volumes:
       - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./haproxy-users.cfg:/usr/local/etc/haproxy/users.cfg:ro
     depends_on:
       app:
         condition: service_healthy
@@ -89,9 +109,9 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 64
-    user: "99:99"
+    user: "${AIC_UID:-1000}:${AIC_GID:-1000}"
     healthcheck:
-      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg", "-f", "/usr/local/etc/haproxy/users.cfg"]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -100,6 +120,7 @@ services:
 
 volumes:
   elasticsearch-data:
+  collab-data:
 
 networks:
   aic-internal:

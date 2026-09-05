@@ -3,18 +3,18 @@ from unittest.mock import patch
 
 import numpy as np
 
-import core
-import frame_maps
-import thumb
-from app import get_frame_map
+from backend import core
+from backend import frame_maps
+from backend import thumb
+from backend.app import get_frame_map
 
 
 class PtsIntegrationTests(unittest.TestCase):
     def setUp(self):
         core._frames_by_video.clear()
 
-    @patch("core.frame_maps.load")
-    @patch("core.load_meta")
+    @patch("backend.core.frame_maps.load")
+    @patch("backend.core.load_meta")
     def test_audio_timestamp_chooses_indexed_frame_by_pts(self, load_meta, load_map):
         load_meta.return_value = (
             np.array([0, 0]),
@@ -26,7 +26,7 @@ class PtsIntegrationTests(unittest.TestCase):
 
         self.assertEqual(core.nearest_frame("V", 0.24), 2)
 
-    @patch("app.frame_maps.load")
+    @patch("backend.app.frame_maps.load")
     def test_frame_map_endpoint_returns_delta_payload(self, load_map):
         load_map.return_value = frame_maps.FrameMap(np.array([100, 104, 111]), 1, 1000)
 

@@ -5,7 +5,7 @@ import time
 
 import numpy as np
 
-import core
+from backend import core
 
 QUERIES = [
     "a red car driving on the street",

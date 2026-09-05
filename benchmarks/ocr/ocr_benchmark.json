@@ -1,0 +1,183 @@
+[
+  {
+    "config_id": "v6-medium-det",
+    "frames": 22,
+    "acceptance_passed": false,
+    "acceptance_required_recall": 0.7128,
+    "acceptance_phrase_recall": 0.5,
+    "acceptance_folded_recall": 0.811,
+    "required_recall": 0.6927,
+    "folded_recall": 0.78,
+    "phrase_recall": 0.5,
+    "folded_phrase_recall": 0.6061,
+    "cer": 0.4503,
+    "word_recall": 0.5623,
+    "frames_per_second": 0.23,
+    "failures": {
+      "pillar-couplet": {
+        "required": [
+          "TẢO",
+          "BẠT",
+          "KIÊN",
+          "QUỶ"
+        ],
+        "phrases": [
+          "HỎA HỒNG NHẬT TẢO OANH THIÊN ĐỊA",
+          "KIẾM BẠT KIÊN GIANG KHẤP QUỶ THẦN"
+        ]
+      },
+      "recipe-card": {
+        "required": [
+          "Nạc dăm xay",
+          "50 gr",
+          "cắt hạt lựu nhỏ",
+          "chảo nóng già"
+        ],
+        "phrases": []
+      },
+      "signboard-script": {
+        "required": [
+          "KHU DU LỊCH QUỐC GIA",
+          "Mộc Châu"
+        ],
+        "phrases": [
+          "KHU DU LỊCH QUỐC GIA Mộc Châu"
+        ]
+      },
+      "pillar-couplet-tight": {
+        "required": [
+          "TẢO"
+        ],
+        "phrases": [
+          "NHẬT TẢO OANH THIÊN ĐỊA"
+        ]
+      },
+      "pillar-couplet-wide": {
+        "required": [
+          "HỎA",
+          "TẢO",
+          "KIẾM",
+          "BẠT",
+          "QUỶ"
+        ],
+        "phrases": [
+          "HỎA HỒNG NHẬT TẢO OANH THIÊN ĐỊA",
+          "KIẾM BẠT KIÊN GIANG KHẤP QUỶ THẦN"
+        ]
+      },
+      "recipe-card-early": {
+        "required": [
+          "Nhân bánh cuốn",
+          "Nạc dăm xay",
+          "50 gr",
+          "cắt hạt lựu nhỏ",
+          "xào tái",
+          "tắt bếp"
+        ],
+        "phrases": [
+          "Nhân bánh cuốn"
+        ]
+      },
+      "recipe-card-late": {
+        "required": [
+          "50 gr",
+          "cắt hạt lựu nhỏ",
+          "chảo nóng già",
+          "tắt bếp"
+        ],
+        "phrases": []
+      },
+      "charity-banner-1": {
+        "required": [
+          "FANA",
+          "CLB NẮNG ẤM YÊU THƯƠNG",
+          "ĐẾN TRƯỜNG",
+          "04.08.2024"
+        ],
+        "phrases": [
+          "CLB NẮNG ẤM YÊU THƯƠNG",
+          "CÙNG EM ĐẾN TRƯỜNG",
+          "huyện Khánh Vĩnh, tỉnh Khánh Hoà"
+        ]
+      },
+      "charity-banner-2": {
+        "required": [
+          "FANA",
+          "CLB NẮNG ẤM YÊU THƯƠNG",
+          "CÙNG EM",
+          "ĐẾN TRƯỜNG",
+          "Khánh Hoà",
+          "04.08.2024"
+        ],
+        "phrases": [
+          "CLB NẮNG ẤM YÊU THƯƠNG",
+          "CÙNG EM ĐẾN TRƯỜNG",
+          "huyện Khánh Vĩnh, tỉnh Khánh Hoà"
+        ]
+      },
+      "charity-banner-3": {
+        "required": [
+          "CLB NẮNG ẤM YÊU THƯƠNG",
+          "CÙNG EM",
+          "ĐẾN TRƯỜNG",
+          "04.08.2024"
+        ],
+        "phrases": [
+          "CLB NẮNG ẤM YÊU THƯƠNG",
+          "CÙNG EM ĐẾN TRƯỜNG",
+          "huyện Khánh Vĩnh, tỉnh Khánh Hoà"
+        ]
+      },
+      "signboard-script-near1": {
+        "required": [
+          "Mộc Châu"
+        ],
+        "phrases": [
+          "KHU DU LỊCH QUỐC GIA Mộc Châu"
+        ]
+      },
+      "signboard-script-near2": {
+        "required": [
+          "Mộc Châu"
+        ],
+        "phrases": [
+          "KHU DU LỊCH QUỐC GIA Mộc Châu"
+        ]
+      },
+      "gauge-digits-headline": {
+        "required": [
+          "10"
+        ],
+        "phrases": []
+      },
+      "finish-arch-partial": {
+        "required": [
+          "ĐÍCH",
+          "TON DONG A"
+        ],
+        "phrases": []
+      },
+      "finish-arch-clear-1": {
+        "required": [
+          "ĐÍCH",
+          "Đà Nẵng"
+        ],
+        "phrases": [
+          "Chặng 13 - 88,5 km",
+          "Đà Nẵng - Tam Kỳ (Quảng Nam)"
+        ]
+      },
+      "finish-arch-clear-2": {
+        "required": [
+          "ĐÍCH",
+          "TON DONG A",
+          "Đà Nẵng"
+        ],
+        "phrases": [
+          "Chặng 13 - 88,5 km",
+          "Đà Nẵng - Tam Kỳ (Quảng Nam)"
+        ]
+      }
+    }
+  }
+]

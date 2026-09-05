@@ -1,0 +1,787 @@
+{
+  "schema_version": 1,
+  "notes": [
+    "Paths are relative to the data root (AIC_DATA_DIR, default ./data).",
+    "'required' strings are the pass/fail gate: every one must appear in the engine output.",
+    "'required_phrases' must survive reading-order reconstruction, not just line detection.",
+    "'full_text' is a best-effort reference transcription used for CER and word recall only.",
+    "'unreadable' lists text that is on the frame and in 'full_text' but has been demonstrated unreadable — not merely missed by the current engine. It is deleted from both reference and hypothesis before CER and word recall, so excluding it can neither reward nor punish an engine. Every entry must cite its evidence in 'comment'.",
+    "'ignore_regions' are normalised (x0,y0,x1,y1) boxes of burned-in station furniture — channel logos and on-screen clocks. Lines centred inside them are dropped before scoring, and are absent from 'full_text', because scripts.ocr.postprocess.suppress_static_overlays removes them before indexing: scoring them would measure text no query can ever reach.",
+    "Frames with acceptance=true are the user-specified acceptance criteria and are hand-labelled."
+  ],
+  "frames": [
+    {
+      "id": "gauge-digits",
+      "acceptance": true,
+      "path": "2025/keyframes/K19/K19_V016/014330.png",
+      "video_id": "K19_V016",
+      "frame_idx": 14330,
+      "tags": [
+        "small-text",
+        "digits",
+        "vertical",
+        "checkerboard"
+      ],
+      "required": [
+        "8",
+        "10",
+        "12",
+        "14",
+        "16",
+        "18",
+        "20"
+      ],
+      "required_phrases": [],
+      "ignore_regions": [
+        [
+          0.78,
+          0.02,
+          0.96,
+          0.2
+        ],
+        [
+          0.0,
+          0.9,
+          1.0,
+          1.0
+        ]
+      ],
+      "full_text": "20 18 16 14 12 10 8",
+      "comment": "Flood-depth gauge on a pillar. Digits alternate left/right in a checkerboard, ~15px tall in a narrow vertical strip, on a low-contrast pink/white pattern. Default 960px detection resize erases them entirely. Masked: the HTV9 bug and clock top-right, and the scrolling news crawl along the bottom. The crawl is excluded on instruction — queries ask about text belonging to the scene, not about unrelated headlines running under a broadcast — which leaves this frame testing exactly one thing, which is what it was chosen for. The crawl mask starts at 0.90 rather than 0.87: the lowest gauge digit's centre sits at 0.889 and a taller band swallows it."
+    },
+    {
+      "id": "pillar-couplet",
+      "acceptance": true,
+      "path": "2026/keyframes/L27/L27_V010/005576.png",
+      "video_id": "L27_V010",
+      "frame_idx": 5576,
+      "tags": [
+        "scene-text",
+        "two-column",
+        "reading-order",
+        "embossed",
+        "diacritics"
+      ],
+      "required": [
+        "HỎA",
+        "HỒNG",
+        "NHẬT",
+        "TẢO",
+        "OANH",
+        "THIÊN",
+        "ĐỊA",
+        "KIẾM",
+        "BẠT",
+        "KIÊN",
+        "GIANG",
+        "KHẤP",
+        "QUỶ",
+        "THẦN"
+      ],
+      "required_phrases": [
+        "HỎA HỒNG NHẬT TẢO OANH THIÊN ĐỊA",
+        "KIẾM BẠT KIÊN GIANG KHẤP QUỶ THẦN"
+      ],
+      "ignore_regions": [
+        [
+          0.0,
+          0.0,
+          0.15,
+          0.17
+        ]
+      ],
+      "full_text": "ANH HÙNG DÂN TỘC NGUYỄN TRUNG TRỰC HỎA HỒNG NHẬT TẢO OANH THIÊN ĐỊA KIẾM BẠT KIÊN GIANG KHẤP QUỶ THẦN",
+      "comment": "Gold embossed capitals on a white pillar, one word per line in two well-separated vertical columns. Naive top-to-bottom sorting interleaves them into 'HOA KIEM HONG BAT ...'. This frame is the reading-order regression test. Note the pillar reads KIEN GIANG (the province), not 'KIENG GIANG'."
+    },
+    {
+      "id": "recipe-card",
+      "acceptance": true,
+      "path": "2026/keyframes/L30/L30_V078/001817.png",
+      "video_id": "L30_V078",
+      "frame_idx": 1817,
+      "tags": [
+        "document",
+        "small-text",
+        "perspective",
+        "rotated",
+        "dense",
+        "diacritics"
+      ],
+      "required": [
+        "Nhân bánh cuốn",
+        "Nạc dăm xay",
+        "200 gr",
+        "ướp bột nêm",
+        "hành tây",
+        "50 gr",
+        "cắt hạt lựu nhỏ",
+        "nước mắm",
+        "Cách xào nhân",
+        "Đặt bếp",
+        "chảo nóng già",
+        "xào tái",
+        "tắt bếp",
+        "rất thơm"
+      ],
+      "required_phrases": [
+        "Nhân bánh cuốn",
+        "Cách xào nhân"
+      ],
+      "full_text": "Nhân bánh cuốn - Nạc dăm xay 200 gr (ướp bột nêm) - hành tây 1 củ hơn 50 gr( cắt hạt lựu nhỏ) - Bột nêm, tiêu, nước mắm Cách xào nhân • Đặt bếp, cho dầu ăn , đợi chảo nóng già, cho hành tây xào tái đổ ra chén, Vẫn dùng chảo này đổ thịt đã ướp vào xào hơi ráo nước nêm nếm vừa ăn, xào khi thấy nhân ráo khô thì tắt bếp,nhắc khỏi bếp đổ ngay chén hành tây đã xào tái vô cho tiêu vào đảo đều thì nhân sẽ rất thơm ** Các bạn lưu ý, hành các bạn xào kỹ quá làm mùi hành bị ải,làm món ăn của các bạn ko còn thơm ngon là vậy. Chỉ khác nhau có những thứ cần cho vào thời điểm nào thôi *** bỏ cho sau cùng khi vừa tắt bếp mùi tiêu sẽ thơm hơn tuoi tre TV",
+      "comment": "A4 recipe card held at an angle: perspective-warped, ~10px body text, slight motion blur, partially occluded by the reader's hand and thumb. Needs polygon detection plus per-crop rectification and upscaling. The last two paragraphs are the hardest and are excluded from 'required', but they are NOT excluded from scoring: with post-correction enabled the pipeline does read them, so an earlier assumption that the hand occludes them beyond recovery was wrong. Only the final line ('*** bỏ cho sau cùng...') is still missed, and the fast config reads even that, so nothing here qualifies as unreadable."
+    },
+    {
+      "id": "signboard-script",
+      "acceptance": false,
+      "path": "2025/keyframes/K17/K17_V003/011191.png",
+      "video_id": "K17_V003",
+      "frame_idx": 11191,
+      "tags": [
+        "scene-text",
+        "signboard",
+        "script-font",
+        "micro-text",
+        "diacritics"
+      ],
+      "required": [
+        "KHU DU LỊCH QUỐC GIA",
+        "Mộc Châu"
+      ],
+      "required_phrases": [
+        "KHU DU LỊCH QUỐC GIA Mộc Châu"
+      ],
+      "ignore_regions": [
+        [
+          0.78,
+          0.02,
+          0.96,
+          0.2
+        ],
+        [
+          0.0,
+          0.9,
+          1.0,
+          1.0
+        ]
+      ],
+      "unreadable": [
+        "HOÀNG SA",
+        "TRƯỜNG SA"
+      ],
+      "full_text": "HOÀNG SA TRƯỜNG SA KHU DU LỊCH QUỐC GIA Mộc Châu Điểm đến thiên nhiên khu vực hàng đầu thế giới",
+      "comment": "Requested as K17_V003 frame 11187, which has no keyframe; 11191 is the nearest, 4 frames away. A tourism signboard: red block caps followed by the place name in a green brush script, over a wall-mounted map. The scrolling crawl and the station bug are masked, so what remains is scene text of exactly the kind competition queries ask about. The signboard is the hard part: the detector merges the red caps and the script into one box, so VietOCR returns 'KHU DU LỊCH QUỐC GIAMMECCHING', and reading the script in isolation gives 'MACHY' at 0.44 confidence, below the floor. Only a vision-LLM shown the whole frame recovers 'Mộc Châu' -- and magnifying the script for it makes things worse, not better (4x drops the tone marks, 8x gives 'Mac Clean'), because the model is reading context as much as pixels. Lowering det_unclip_ratio to split the merged box was measured at 1.4/1.6/2.0 and never separates them while costing 0.964 -> 0.875 required recall on the other frames, so 1.8 stands. The map labels HOÀNG SA / TRƯỜNG SA carry the 'unreadable' exclusion: ~45x8px teal-on-white over a cluttered ball mosaic, undetectable at 4x, 6x, 8x and 12x magnification of their own ROI, so this is below the detector's floor rather than a tuning failure."
+    },
+    {
+      "id": "signboard-title",
+      "acceptance": false,
+      "path": "2025/keyframes/K05/K05_V009/006422.png",
+      "video_id": "K05_V009",
+      "frame_idx": 6422,
+      "tags": [
+        "scene-text",
+        "signboard",
+        "decorative-font",
+        "diacritics",
+        "two-line"
+      ],
+      "required": [
+        "PHÚ XUÂN",
+        "GIA ĐỊNH",
+        "NHỮNG DẤU ẤN LỊCH SỬ"
+      ],
+      "required_phrases": [
+        "PHÚ XUÂN - GIA ĐỊNH"
+      ],
+      "ignore_regions": [
+        [
+          0.78,
+          0.02,
+          0.96,
+          0.2
+        ],
+        [
+          0.0,
+          0.9,
+          1.0,
+          1.0
+        ]
+      ],
+      "full_text": "PHÚ XUÂN - GIA ĐỊNH NHỮNG DẤU ẤN LỊCH SỬ",
+      "comment": "Found by visual search while answering a competition-style temporal query, so it is genuinely held out: nothing about the engine was tuned on it. It earns its place because the two sources of the leading configuration each get exactly half of it right, which four frames of tuning had hidden. The Qwen2.5-VL corrector reads 'GIA ĐỊNH' correctly and 'DẤU ẤN' as 'ĐẦU ÂN'; the Qwen3-VL-8B spine does the reverse, 'GIA ĐÌNH' and 'DẤU ẤN'. A two-source merge must therefore guess, and guesses wrong half the time, while adding any third voter resolves both by majority. Verified at 3x magnification: the board reads PHÚ XUÂN - GIA ĐỊNH / NHỮNG DẤU ẤN LỊCH SỬ. The decorative face places a dot between letters (P·HÚ, N·H·H), which is what the models trip on. Masked: the HTV9 bug with its clock, and the bottom news crawl. Note this is a K video, and indexes/profiles/ covers only the L videos, so app.py would currently drop a hit here entirely."
+    },
+    {
+      "id": "pillar-couplet-tight",
+      "acceptance": false,
+      "path": "2026/keyframes/L27/L27_V010/005491.png",
+      "video_id": "L27_V010",
+      "frame_idx": 5491,
+      "tags": [
+        "scene-text",
+        "two-column",
+        "reading-order",
+        "embossed",
+        "diacritics",
+        "shot-audit-2026-09",
+        "partial-crop"
+      ],
+      "required": [
+        "NHẬT",
+        "TẢO",
+        "OANH",
+        "THIÊN",
+        "ĐỊA",
+        "KIÊN",
+        "GIANG",
+        "KHẤP",
+        "QUỶ",
+        "THẦN"
+      ],
+      "required_phrases": [
+        "NHẬT TẢO OANH THIÊN ĐỊA",
+        "KIÊN GIANG KHẤP QUỶ THẦN"
+      ],
+      "ignore_regions": [
+        [
+          0.0,
+          0.0,
+          0.15,
+          0.17
+        ]
+      ],
+      "full_text": "NHẬT TẢO OANH THIÊN ĐỊA KIÊN GIANG KHẤP QUỶ THẦN",
+      "comment": "Same static bust/plaque as 'pillar-couplet' (frame 5576, shot 83), an earlier, tighter zoom within the same shot. The top row of each column (HỎA HỒNG / KIẾM BẠT) is cropped off entirely above the frame's top edge; only rows 3-7 of the 7-word couplet are in view. HTV Online bug masked top-left. Requested as part of the 2026-09 shot audit as a same-shot regression check, not independently re-verified at magnification -- flag for review before trusting the exact word list."
+    },
+    {
+      "id": "pillar-couplet-wide",
+      "acceptance": false,
+      "path": "2026/keyframes/L27/L27_V010/005534.png",
+      "video_id": "L27_V010",
+      "frame_idx": 5534,
+      "tags": [
+        "scene-text",
+        "two-column",
+        "reading-order",
+        "embossed",
+        "diacritics",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "HỎA",
+        "HỒNG",
+        "NHẬT",
+        "TẢO",
+        "OANH",
+        "THIÊN",
+        "ĐỊA",
+        "KIẾM",
+        "BẠT",
+        "KIÊN",
+        "GIANG",
+        "KHẤP",
+        "QUỶ",
+        "THẦN"
+      ],
+      "required_phrases": [
+        "HỎA HỒNG NHẬT TẢO OANH THIÊN ĐỊA",
+        "KIẾM BẠT KIÊN GIANG KHẤP QUỶ THẦN"
+      ],
+      "ignore_regions": [
+        [
+          0.0,
+          0.0,
+          0.15,
+          0.17
+        ]
+      ],
+      "full_text": "HỎA HỒNG NHẬT TẢO OANH THIÊN ĐỊA KIẾM BẠT KIÊN GIANG KHẤP QUỶ THẦN",
+      "comment": "Same plaque as 'pillar-couplet', a wider zoom a couple seconds earlier in shot 83 with two out-of-focus foreground posts at the frame edges (they do not overlap the text columns). Full 7-word couplet is in view in both columns, but the top row (HỎA / KIẾM) sits right at the frame's top pixel edge -- not re-verified at magnification whether any stroke is clipped. Same HTV Online bug masked top-left. Included as a same-shot regression check."
+    },
+    {
+      "id": "recipe-card-early",
+      "acceptance": false,
+      "path": "2026/keyframes/L30/L30_V078/001796.png",
+      "video_id": "L30_V078",
+      "frame_idx": 1796,
+      "tags": [
+        "document",
+        "small-text",
+        "perspective",
+        "rotated",
+        "dense",
+        "diacritics",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "Nhân bánh cuốn",
+        "Nạc dăm xay",
+        "200 gr",
+        "ướp bột nêm",
+        "hành tây",
+        "50 gr",
+        "cắt hạt lựu nhỏ",
+        "nước mắm",
+        "Cách xào nhân",
+        "Đặt bếp",
+        "chảo nóng già",
+        "xào tái",
+        "tắt bếp",
+        "rất thơm"
+      ],
+      "required_phrases": [
+        "Nhân bánh cuốn",
+        "Cách xào nhân"
+      ],
+      "full_text": "Nhân bánh cuốn - Nạc dăm xay 200 gr (ướp bột nêm) - hành tây 1 củ hơn 50 gr( cắt hạt lựu nhỏ) - Bột nêm, tiêu, nước mắm Cách xào nhân • Đặt bếp, cho dầu ăn , đợi chảo nóng già, cho hành tây xào tái đổ ra chén, Vẫn dùng chảo này đổ thịt đã ướp vào xào hơi ráo nước nêm nếm vừa ăn, xào khi thấy nhân ráo khô thì tắt bếp,nhắc khỏi bếp đổ ngay chén hành tây đã xào tái vô cho tiêu vào đảo đều thì nhân sẽ rất thơm ** Các bạn lưu ý, hành các bạn xào kỹ quá làm mùi hành bị ải,làm món ăn của các bạn ko còn thơm ngon là vậy. Chỉ khác nhau có những thứ cần cho vào thời điểm nào thôi *** bỏ cho sau cùng khi vừa tắt bếp mùi tiêu sẽ thơm hơn tuoi tre TV",
+      "comment": "Same recipe card as 'recipe-card' (frame 1817, shot 20), a fraction of a second earlier in the same shot at essentially the same angle and sharpness. Included as a same-shot regression check; full_text carried over unchanged from the verified 'recipe-card' entry since the card and framing are effectively identical."
+    },
+    {
+      "id": "recipe-card-late",
+      "acceptance": false,
+      "path": "2026/keyframes/L30/L30_V078/001838.png",
+      "video_id": "L30_V078",
+      "frame_idx": 1838,
+      "tags": [
+        "document",
+        "small-text",
+        "perspective",
+        "rotated",
+        "dense",
+        "diacritics",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "Nhân bánh cuốn",
+        "Nạc dăm xay",
+        "200 gr",
+        "ướp bột nêm",
+        "hành tây",
+        "50 gr",
+        "cắt hạt lựu nhỏ",
+        "nước mắm",
+        "Cách xào nhân",
+        "Đặt bếp",
+        "chảo nóng già",
+        "xào tái",
+        "tắt bếp",
+        "rất thơm"
+      ],
+      "required_phrases": [
+        "Nhân bánh cuốn",
+        "Cách xào nhân"
+      ],
+      "full_text": "Nhân bánh cuốn - Nạc dăm xay 200 gr (ướp bột nêm) - hành tây 1 củ hơn 50 gr( cắt hạt lựu nhỏ) - Bột nêm, tiêu, nước mắm Cách xào nhân • Đặt bếp, cho dầu ăn , đợi chảo nóng già, cho hành tây xào tái đổ ra chén, Vẫn dùng chảo này đổ thịt đã ướp vào xào hơi ráo nước nêm nếm vừa ăn, xào khi thấy nhân ráo khô thì tắt bếp,nhắc khỏi bếp đổ ngay chén hành tây đã xào tái vô cho tiêu vào đảo đều thì nhân sẽ rất thơm ** Các bạn lưu ý, hành các bạn xào kỹ quá làm mùi hành bị ải,làm món ăn của các bạn ko còn thơm ngon là vậy. Chỉ khác nhau có những thứ cần cho vào thời điểm nào thôi *** bỏ cho sau cùng khi vừa tắt bếp mùi tiêu sẽ thơm hơn tuoi tre TV",
+      "comment": "Same recipe card as 'recipe-card' (frame 1817, shot 20), a fraction of a second later in the same shot, still sharp. Included as a same-shot regression check; full_text carried over unchanged from the verified 'recipe-card' entry."
+    },
+    {
+      "id": "recipe-card-blur-1",
+      "acceptance": true,
+      "path": "2026/keyframes/L30/L30_V078/001854.png",
+      "video_id": "L30_V078",
+      "frame_idx": 1854,
+      "tags": [
+        "document",
+        "motion-blur",
+        "degraded",
+        "diacritics",
+        "shot-audit-2026-09"
+      ],
+      "required": [],
+      "required_phrases": [],
+      "full_text": "Nhân bánh cuốn - Nạc dăm xay 200 gr (ướp bột nêm) - hành tây 1 củ hơn 50 gr( cắt hạt lựu nhỏ) - Bột nêm, tiêu, nước mắm Cách xào nhân • Đặt bếp, cho dầu ăn , đợi chảo nóng già, cho hành tây xào tái đổ ra chén, Vẫn dùng chảo này đổ thịt đã ướp vào xào hơi ráo nước nêm nếm vừa ăn, xào khi thấy nhân ráo khô thì tắt bếp,nhắc khỏi bếp đổ ngay chén hành tây đã xào tái vô cho tiêu vào đảo đều thì nhân sẽ rất thơm ** Các bạn lưu ý, hành các bạn xào kỹ quá làm mùi hành bị ải,làm món ăn của các bạn ko còn thơm ngon là vậy. Chỉ khác nhau có những thứ cần cho vào thời điểm nào thôi *** bỏ cho sau cùng khi vừa tắt bếp mùi tiêu sẽ thơm hơn tuoi tre TV",
+      "comment": "New shot (21) immediately following the 'recipe-card' shot (20): the same physical card, now under heavy motion blur/rack focus as it is lowered away from the camera -- text shape is visible but individual characters are not confidently legible by eye. 'required' is left empty on purpose (no string can be confirmed read at this blur level, so this frame cannot fail the string-presence gate); full_text is carried over from the known card for CER/word-recall only, to measure whether an engine's output degrades gracefully (low-confidence garbage) or hallucinates confidently. Worst of the three blur frames in this shot."
+    },
+    {
+      "id": "recipe-card-blur-2",
+      "acceptance": true,
+      "path": "2026/keyframes/L30/L30_V078/001869.png",
+      "video_id": "L30_V078",
+      "frame_idx": 1869,
+      "tags": [
+        "document",
+        "motion-blur",
+        "degraded",
+        "diacritics",
+        "shot-audit-2026-09"
+      ],
+      "required": [],
+      "required_phrases": [],
+      "full_text": "Nhân bánh cuốn - Nạc dăm xay 200 gr (ướp bột nêm) - hành tây 1 củ hơn 50 gr( cắt hạt lựu nhỏ) - Bột nêm, tiêu, nước mắm Cách xào nhân • Đặt bếp, cho dầu ăn , đợi chảo nóng già, cho hành tây xào tái đổ ra chén, Vẫn dùng chảo này đổ thịt đã ướp vào xào hơi ráo nước nêm nếm vừa ăn, xào khi thấy nhân ráo khô thì tắt bếp,nhắc khỏi bếp đổ ngay chén hành tây đã xào tái vô cho tiêu vào đảo đều thì nhân sẽ rất thơm ** Các bạn lưu ý, hành các bạn xào kỹ quá làm mùi hành bị ải,làm món ăn của các bạn ko còn thơm ngon là vậy. Chỉ khác nhau có những thứ cần cho vào thời điểm nào thôi *** bỏ cho sau cùng khi vừa tắt bếp mùi tiêu sẽ thơm hơn tuoi tre TV",
+      "comment": "Same shot-21 rack-focus sequence as 'recipe-card-blur-1', slightly later. Still not confidently legible by eye; 'required' left empty for the same reason. full_text carried over from the known card for CER/word-recall diagnostics only."
+    },
+    {
+      "id": "recipe-card-blur-3",
+      "acceptance": true,
+      "path": "2026/keyframes/L30/L30_V078/001884.png",
+      "video_id": "L30_V078",
+      "frame_idx": 1884,
+      "tags": [
+        "document",
+        "motion-blur",
+        "degraded",
+        "diacritics",
+        "shot-audit-2026-09"
+      ],
+      "required": [],
+      "required_phrases": [],
+      "full_text": "Nhân bánh cuốn - Nạc dăm xay 200 gr (ướp bột nêm) - hành tây 1 củ hơn 50 gr( cắt hạt lựu nhỏ) - Bột nêm, tiêu, nước mắm Cách xào nhân • Đặt bếp, cho dầu ăn , đợi chảo nóng già, cho hành tây xào tái đổ ra chén, Vẫn dùng chảo này đổ thịt đã ướp vào xào hơi ráo nước nêm nếm vừa ăn, xào khi thấy nhân ráo khô thì tắt bếp,nhắc khỏi bếp đổ ngay chén hành tây đã xào tái vô cho tiêu vào đảo đều thì nhân sẽ rất thơm ** Các bạn lưu ý, hành các bạn xào kỹ quá làm mùi hành bị ải,làm món ăn của các bạn ko còn thơm ngon là vậy. Chỉ khác nhau có những thứ cần cho vào thời điểm nào thôi *** bỏ cho sau cùng khi vừa tắt bếp mùi tiêu sẽ thơm hơn tuoi tre TV",
+      "comment": "Last of the shot-21 rack-focus sequence; blur has eased slightly compared to '-blur-1'/'-blur-2' and the bold header shape is arguably readable as 'Nhan banh cuon', but this was not confirmed with a magnified crop, so 'required' is left empty rather than guessed -- flag for reviewer to confirm/add a required string if it holds up under zoom. full_text carried over from the known card for CER/word-recall diagnostics."
+    },
+    {
+      "id": "charity-banner-1",
+      "acceptance": true,
+      "path": "2026/keyframes/L30/L30_V072/001750.png",
+      "video_id": "L30_V072",
+      "frame_idx": 1750,
+      "tags": [
+        "scene-text",
+        "banner",
+        "poster",
+        "address",
+        "date",
+        "diacritics",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "FANA",
+        "CLB NẮNG ẤM YÊU THƯƠNG",
+        "CÙNG EM",
+        "ĐẾN TRƯỜNG",
+        "Giang Ly",
+        "Khánh Vĩnh",
+        "Khánh Hoà",
+        "04.08.2024"
+      ],
+      "required_phrases": [
+        "CLB NẮNG ẤM YÊU THƯƠNG",
+        "CÙNG EM ĐẾN TRƯỜNG",
+        "huyện Khánh Vĩnh, tỉnh Khánh Hoà"
+      ],
+      "full_text": "FANA CLB NẮNG ẤM YÊU THƯƠNG CÙNG EM ĐẾN TRƯỜNG Xã Giang Ly, huyện Khánh Vĩnh, tỉnh Khánh Hoà 04.08.2024",
+      "comment": "New shot: a charity event banner behind a group of children receiving gift bags, static wide shot, banner unobstructed and in sharp focus in all 3 keyframes of this shot. A decorative cursive brand wordmark ('Jana'-like signature logo) sits between the small header line and the bold headline; excluded from full_text/required as an ambiguous decorative script, not scored either way. No burned-in station bug or crawl observed on this shot, so no ignore_regions. Read in one pass from the rendered keyframe, not re-verified at magnification -- flag for reviewer before trusting the address/date transcription exactly."
+    },
+    {
+      "id": "charity-banner-2",
+      "acceptance": true,
+      "path": "2026/keyframes/L30/L30_V072/001767.png",
+      "video_id": "L30_V072",
+      "frame_idx": 1767,
+      "tags": [
+        "scene-text",
+        "banner",
+        "poster",
+        "address",
+        "date",
+        "diacritics",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "FANA",
+        "CLB NẮNG ẤM YÊU THƯƠNG",
+        "CÙNG EM",
+        "ĐẾN TRƯỜNG",
+        "Giang Ly",
+        "Khánh Vĩnh",
+        "Khánh Hoà",
+        "04.08.2024"
+      ],
+      "required_phrases": [
+        "CLB NẮNG ẤM YÊU THƯƠNG",
+        "CÙNG EM ĐẾN TRƯỜNG",
+        "huyện Khánh Vĩnh, tỉnh Khánh Hoà"
+      ],
+      "full_text": "FANA CLB NẮNG ẤM YÊU THƯƠNG CÙNG EM ĐẾN TRƯỜNG Xã Giang Ly, huyện Khánh Vĩnh, tỉnh Khánh Hoà 04.08.2024",
+      "comment": "Same banner and shot as 'charity-banner-1', a moment later; framing and legibility unchanged. Included to check consistency across the shot rather than as an independent hard case."
+    },
+    {
+      "id": "charity-banner-3",
+      "acceptance": true,
+      "path": "2026/keyframes/L30/L30_V072/001783.png",
+      "video_id": "L30_V072",
+      "frame_idx": 1783,
+      "tags": [
+        "scene-text",
+        "banner",
+        "poster",
+        "address",
+        "date",
+        "diacritics",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "FANA",
+        "CLB NẮNG ẤM YÊU THƯƠNG",
+        "CÙNG EM",
+        "ĐẾN TRƯỜNG",
+        "Giang Ly",
+        "Khánh Vĩnh",
+        "Khánh Hoà",
+        "04.08.2024"
+      ],
+      "required_phrases": [
+        "CLB NẮNG ẤM YÊU THƯƠNG",
+        "CÙNG EM ĐẾN TRƯỜNG",
+        "huyện Khánh Vĩnh, tỉnh Khánh Hoà"
+      ],
+      "full_text": "FANA CLB NẮNG ẤM YÊU THƯƠNG CÙNG EM ĐẾN TRƯỜNG Xã Giang Ly, huyện Khánh Vĩnh, tỉnh Khánh Hoà 04.08.2024",
+      "comment": "Same banner and shot as 'charity-banner-1', later still; a photographer and volunteer have moved but remain below the banner and do not occlude the text. Included to check consistency across the shot rather than as an independent hard case."
+    },
+    {
+      "id": "signboard-script-near1",
+      "acceptance": false,
+      "path": "2025/keyframes/K17/K17_V003/011224.png",
+      "video_id": "K17_V003",
+      "frame_idx": 11224,
+      "tags": [
+        "scene-text",
+        "signboard",
+        "script-font",
+        "micro-text",
+        "diacritics",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "KHU DU LỊCH QUỐC GIA",
+        "Mộc Châu"
+      ],
+      "required_phrases": [
+        "KHU DU LỊCH QUỐC GIA Mộc Châu"
+      ],
+      "ignore_regions": [
+        [
+          0.78,
+          0.02,
+          0.96,
+          0.2
+        ],
+        [
+          0.0,
+          0.9,
+          1.0,
+          1.0
+        ]
+      ],
+      "unreadable": [
+        "HOÀNG SA",
+        "TRƯỜNG SA"
+      ],
+      "full_text": "HOÀNG SA TRƯỜNG SA KHU DU LỊCH QUỐC GIA Mộc Châu Điểm đến thiên nhiên khu vực hàng đầu thế giới",
+      "comment": "Same fruit-mosaic Mộc Châu display as 'signboard-script' (frame 11191, shot 102), ~1s later in the same shot, wider framing showing more of the room. Sign text and subtitle are legible at about the same size as the reference frame. 'unreadable' carried over from 'signboard-script' (tiny HOÀNG SA/TRƯỜNG SA map labels) rather than independently re-verified at this frame's zoom level -- flag for review if this framing turns out to make them legible. HTV9 bug+clock and bottom crawl masked as in the reference frame; crawl text itself differs second to second but is inside the masked region either way."
+    },
+    {
+      "id": "signboard-script-near2",
+      "acceptance": false,
+      "path": "2025/keyframes/K17/K17_V003/011257.png",
+      "video_id": "K17_V003",
+      "frame_idx": 11257,
+      "tags": [
+        "scene-text",
+        "signboard",
+        "script-font",
+        "micro-text",
+        "diacritics",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "KHU DU LỊCH QUỐC GIA",
+        "Mộc Châu"
+      ],
+      "required_phrases": [
+        "KHU DU LỊCH QUỐC GIA Mộc Châu"
+      ],
+      "ignore_regions": [
+        [
+          0.78,
+          0.02,
+          0.96,
+          0.2
+        ],
+        [
+          0.0,
+          0.9,
+          1.0,
+          1.0
+        ]
+      ],
+      "unreadable": [
+        "HOÀNG SA",
+        "TRƯỜNG SA"
+      ],
+      "full_text": "HOÀNG SA TRƯỜNG SA KHU DU LỊCH QUỐC GIA Mộc Châu Điểm đến thiên nhiên khu vực hàng đầu thế giới",
+      "comment": "Same fruit-mosaic Mộc Châu display as 'signboard-script', ~2s after 11191, same framing as 'signboard-script-near1'. Included as a same-shot regression check, not an independent hard case."
+    },
+    {
+      "id": "gauge-digits-occluded",
+      "acceptance": false,
+      "path": "2025/keyframes/K19/K19_V016/014309.png",
+      "video_id": "K19_V016",
+      "frame_idx": 14309,
+      "tags": [
+        "small-text",
+        "digits",
+        "vertical",
+        "checkerboard",
+        "occluded",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "8",
+        "12",
+        "16",
+        "20"
+      ],
+      "required_phrases": [],
+      "ignore_regions": [
+        [
+          0.78,
+          0.02,
+          0.96,
+          0.2
+        ],
+        [
+          0.0,
+          0.9,
+          1.0,
+          1.0
+        ]
+      ],
+      "unreadable": [
+        "18",
+        "14",
+        "10"
+      ],
+      "full_text": "20 16 12 8",
+      "comment": "Same flood-gauge pillar as 'gauge-digits' (frame 14330, shot 158), ~0.7s earlier in the same shot. A conical hat brim in the foreground covers the gauge's right-hand checkerboard column; confirmed via a 3x crop that only the left-hand digits (20, 16, 12, 8) remain visible, while 18/14/10 are fully hidden behind the hat (a sliver of the pink/white checker pattern peeks out but no digit shape). 'full_text' therefore only contains the visible left column, not the full 7-digit reference used by 'gauge-digits' -- this frame measures occlusion robustness, not the full gauge. HTV9 bug+clock and bottom crawl masked as in 'gauge-digits'."
+    },
+    {
+      "id": "gauge-digits-headline",
+      "acceptance": false,
+      "path": "2025/keyframes/K19/K19_V016/014351.png",
+      "video_id": "K19_V016",
+      "frame_idx": 14351,
+      "tags": [
+        "small-text",
+        "digits",
+        "vertical",
+        "checkerboard",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "8",
+        "10",
+        "12",
+        "14",
+        "16",
+        "18",
+        "20"
+      ],
+      "required_phrases": [],
+      "ignore_regions": [
+        [
+          0.78,
+          0.02,
+          0.96,
+          0.2
+        ],
+        [
+          0.0,
+          0.9,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          0.78,
+          1.0,
+          0.9
+        ]
+      ],
+      "full_text": "20 18 16 14 12 10 8",
+      "comment": "Same flood-gauge pillar as 'gauge-digits', ~0.7s after 14330 in the same shot; the gauge itself is unoccluded here (matches the reference 7-digit full_text). A large breaking-news headline bar ('DANG CHO VIT AN, NGUOI PHU NU BI LU CUON MAT TICH') has appeared above the scrolling crawl at the bottom of the frame -- masked via an extra ignore_region on the same instruction as the crawl itself: queries ask about text belonging to the scene, not broadcast headlines running under it. HTV9 bug+clock masked as in 'gauge-digits'."
+    },
+    {
+      "id": "finish-arch-partial",
+      "acceptance": true,
+      "path": "2026/keyframes/L23/L23_V013/007712.png",
+      "video_id": "L23_V013",
+      "frame_idx": 7712,
+      "tags": [
+        "scene-text",
+        "signage",
+        "led-display",
+        "occluded",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "HTV",
+        "ĐÍCH",
+        "TON DONG A",
+        "Chặng 13"
+      ],
+      "required_phrases": [],
+      "unreadable": [
+        "88,5 km",
+        "Đà Nẵng - Tam Kỳ (Quảng Nam)"
+      ],
+      "full_text": "HTV ĐÍCH TON DONG A Chặng 13 - 88,5 km Đà Nẵng - Tam Kỳ (Quảng Nam)",
+      "comment": "New shot: an inflatable finish-line arch ('DICH' = finish) at a cycling race, with an LED signboard mounted beside it. Confirmed via a 3x crop that the LED panel's right edge (a physical bezel/support strip) clips the last few characters of both lines -- 'Chặng 13 - 8[...]' and 'Đà Nẵng - Tam Kỳ ([...]' -- so '88,5 km' and 'Đà Nẵng - Tam Kỳ (Quảng Nam)' are genuinely not fully in frame here (not merely missed), while the reference full text is known from the next two keyframes of the same shot ('finish-arch-clear-1/2') where the same panel is fully visible. No burned-in station bug on this shot."
+    },
+    {
+      "id": "finish-arch-clear-1",
+      "acceptance": true,
+      "path": "2026/keyframes/L23/L23_V013/007843.png",
+      "video_id": "L23_V013",
+      "frame_idx": 7843,
+      "tags": [
+        "scene-text",
+        "signage",
+        "led-display",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "HTV",
+        "ĐÍCH",
+        "TON DONG A",
+        "Chặng 13",
+        "88,5 km",
+        "Đà Nẵng",
+        "Tam Kỳ",
+        "Quảng Nam"
+      ],
+      "required_phrases": [
+        "Chặng 13 - 88,5 km",
+        "Đà Nẵng - Tam Kỳ (Quảng Nam)"
+      ],
+      "full_text": "HTV ĐÍCH TON DONG A Chặng 13 - 88,5 km Đà Nẵng - Tam Kỳ (Quảng Nam) REPLAY",
+      "comment": "Same finish-arch shot as 'finish-arch-partial', later in the shot with the peloton now visible approaching; the LED panel now shows the full line, unclipped. A red 'REPLAY' bug appears bottom-left -- kept in full_text since it is plainly legible and not masked (no ignore_regions defined for this shot), but not added to 'required' since it is a production overlay rather than scene text a competition query would ask about."
+    },
+    {
+      "id": "finish-arch-clear-2",
+      "acceptance": true,
+      "path": "2026/keyframes/L23/L23_V013/007973.png",
+      "video_id": "L23_V013",
+      "frame_idx": 7973,
+      "tags": [
+        "scene-text",
+        "signage",
+        "led-display",
+        "shot-audit-2026-09"
+      ],
+      "required": [
+        "HTV",
+        "ĐÍCH",
+        "TON DONG A",
+        "Chặng 13",
+        "88,5 km",
+        "Đà Nẵng",
+        "Tam Kỳ",
+        "Quảng Nam"
+      ],
+      "required_phrases": [
+        "Chặng 13 - 88,5 km",
+        "Đà Nẵng - Tam Kỳ (Quảng Nam)"
+      ],
+      "full_text": "HTV ĐÍCH TON DONG A Chặng 13 - 88,5 km Đà Nẵng - Tam Kỳ (Quảng Nam) REPLAY",
+      "comment": "Same finish-arch shot, cyclists now close to the line; LED panel and arch text unchanged from 'finish-arch-clear-1'. Included to check consistency across the shot rather than as an independent hard case."
+    }
+  ]
+}

@@ -8,8 +8,9 @@ Use this guide to monitor the competition server, diagnose common failures, and 
 - PE-Core, Qwen, CUDA, and the Flat index are warmed during startup.
 - Up to five searches may run globally, with one active search per user.
 - A newer queued query supersedes an older query from the same user.
-- Each user may submit ten searches per ten seconds; excess requests receive `429` and `Retry-After`.
-- Request bodies are limited to 16 KiB, queries to 2,000 characters, and `k` to 200.
+- Each user may submit ten new searches per ten seconds; cached result-page requests do not count toward this limit.
+- Normal request bodies are limited to 16 KiB and queries to 2,000 characters. Image-search multipart bodies are limited to 8 MiB, with at most 6 MiB of image data.
+- A successful search caches up to 1,000 ranked results for the user and returns them in pages of 100 as the result view scrolls. Each user keeps only their newest snapshot, and an idle snapshot expires after ten minutes.
 - Thumbnail and frame extraction allows four global FFmpeg tasks and two per user.
 - IVF, HNSW, and index comparison are owner-only and execute exclusively.
 - Audit logs contain identity, method, path, status, and latency—not query text.
@@ -72,19 +73,27 @@ Set `AIC_HF_HUB_DIR` to the host Hugging Face `hub` directory containing both re
 
 ### Port 8000 is already in use
 
-Stop the old Uvicorn or container process. Compose binds only `127.0.0.1:8000`.
+Stop the old Uvicorn or container process. Compose publishes HAProxy on `0.0.0.0:8000`.
 
-### Tailscale URL returns `401`
+### Direct-IP URL returns `401`
 
-Confirm the URL is served by Tailscale Serve—not Funnel or a raw TCP proxy—and inspect `tailscale serve status` in an elevated PowerShell window.
+Confirm the username exists in `haproxy-users.cfg`, then validate both HAProxy configuration files and recreate the ingress container. A stale or incorrect password also returns `401`.
 
-### Tailscale URL returns `403`
+### Direct-IP URL returns `403`
 
-Compare the login returned by Tailscale with the exact lowercase identity in `.env.secure`, then recreate the app container after any change.
+Compare the lowercase username in `haproxy-users.cfg` with `AIC_ALLOWED_USERS` in `.env.secure`, then recreate the app and ingress containers after any change.
 
 ### Audio mode returns `503`
 
 Check Elasticsearch health and the `aic_audio_v1` document count. Hybrid search continues with visual results and reports an `audio_unavailable` warning when Elasticsearch fails.
+
+### Image search returns `413` or `422`
+
+`413` means the file or multipart request exceeds its limit. Resize or recompress the image below 6 MiB. `422` means the upload is empty, malformed, animated, over 20 megapixels, or not a JPEG, PNG, or WebP. The server decodes uploads in memory and never stores them.
+
+### More results returns `410`
+
+The cached search snapshot expired or was replaced by a newer successful query. Run the original search again to create a fresh snapshot.
 
 ### CUDA memory pressure
 
@@ -92,19 +101,19 @@ Set `AUDIO_EMBED_DEVICE=cpu` if PE-Core and Qwen cannot fit simultaneously. This
 
 ## Emergency access shutdown
 
-Run this in elevated Windows PowerShell to immediately remove external access while leaving the local containers running:
+Run this in elevated Windows PowerShell to immediately block ingress while leaving the local containers running:
 
 ```powershell
-tailscale serve off
+Disable-NetFirewallRule -DisplayName "AIC HTTP ingress"
 ```
 
-Then revoke all four device shares in the Tailscale Admin Console and inspect the audit log:
+Then delete the `AIC_HTTP` port-forward rule from the F6601P and inspect the audit log:
 
 ```bash
 docker compose logs app
 ```
 
-If credentials may have been exposed, revoke or rotate them before cleaning files or Git history. Do not restore access until the allowlist, device shares, Tailscale policy, and logs have been reviewed.
+If credentials may have been exposed, replace their hashes before restoring access. Do not restore access until the allowlist, password file, port-forward rule, and logs have been reviewed.
 
 ## Secret hygiene
 

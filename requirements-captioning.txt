@@ -1,0 +1,6 @@
+# Install into a dedicated environment; vLLM must not alter the server environment.
+decord==0.6.0
+pyarrow==25.0.1
+qwen-vl-utils==0.0.14
+transformers==5.15.1
+vllm==0.28.0

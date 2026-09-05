@@ -28,14 +28,17 @@ RUN uv export --frozen --only-group server --no-emit-project --no-hashes --outpu
     && uv pip install --system --no-cache --requirement requirements.txt \
     && rm requirements.txt
 
-COPY app.py access_control.py audio_search.py core.py thumb.py frame_maps.py ./
+COPY backend/__init__.py backend/app.py backend/access_control.py backend/audio_search.py backend/ocr_search.py backend/collaboration.py backend/core.py backend/thumb.py backend/shots.py backend/shot_labels.py backend/frame_maps.py backend/temporal_search.py ./backend/
+COPY scripts/indexing/build_audio_index.py ./scripts/indexing/build_audio_index.py
+COPY scripts/indexing/build_ocr_index.py ./scripts/indexing/build_ocr_index.py
+COPY benchmarks/temporal/temporal_config.json ./benchmarks/temporal/temporal_config.json
 COPY --from=frontend-build /build/static/dist ./static/dist
 
-RUN groupadd --gid 10001 app \
-    && useradd --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app \
-    && mkdir /cache \
-    && chown app:app /cache
+RUN groupadd --gid 1000 app \
+    && useradd --uid 1000 --gid app --no-create-home --shell /usr/sbin/nologin app \
+    && mkdir /cache /workspace /labels \
+    && chown app:app /cache /workspace /labels
 
-USER 10001:10001
+USER 1000:1000
 EXPOSE 8000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "64"]
+CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "64"]

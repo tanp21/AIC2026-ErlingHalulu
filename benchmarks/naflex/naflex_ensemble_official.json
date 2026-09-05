@@ -1,0 +1,1569 @@
+{
+  "source": "artifacts/official_benchmark_answers.json: P1, SOTUYEN1, SOTUYEN2",
+  "metric": "same video and within temporal tolerance",
+  "tolerance_seconds": 10,
+  "k": 1000,
+  "cases": [
+    {
+      "id": "Test/query-p1-1-kis:1",
+      "text": "\u0110\u00e2y l\u00e0 ph\u1ea7n gi\u1edbi thi\u1ec7u vi\u1ec7c ph\u00f3ng t\u00e0u v\u0169 tr\u1ee5 t\u01b0 nh\u00e2n. \u0110o\u1ea1n clip b\u1eaft \u0111\u1ea7u v\u1edbi h\u00ecnh \u1ea3nh 4 phi h\u00e0nh gia m\u1eb7c \u00e1o \u0111en. M\u1ed9t trong nh\u1eefng nhi\u1ec7m v\u1ee5 d\u1ef1 ki\u1ebfn c\u1ee7a t\u00e0u v\u0169 tr\u1ee5 l\u00e0 nghi\u00ean c\u1ee9u \u00e1nh s\u00e1ng c\u1ef1c quang \u1edf v\u00f9ng c\u1ef1c",
+      "targets": [
+        [
+          "L21_V015",
+          25627
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-10-kis:1",
+      "text": "T\u00ecm ch\u00ednh x\u00e1c \u0111o\u1ea1n clip ng\u1eafn c\u00f3 ba ng\u01b0\u1eddi (hai ph\u1ee5 n\u1eef v\u00e0 m\u1ed9t nam gi\u1edbi) \u0111ang ng\u1ed3i c\u1ea1nh nhau, t\u1eadp trung ch\u01a1i nh\u1ea1c c\u1ee5 kim lo\u1ea1i c\u00f3 d\u1ea1ng tr\u00f2n, r\u1ed7ng, v\u1edbi c\u00e1c v\u1ebft l\u00f5m \u0111\u1ec3 t\u1ea1o ra \u00e2m thanh khi g\u00f5 tay. C\u00f3 1 ng\u01b0\u1eddi m\u1eb7c \u00e1o tr\u1eafng ng\u1ed3i gi\u1eefa 2 ng\u01b0\u1eddi m\u1eb7c \u00e1o \u0111en. B\u1ed1i c\u1ea3nh ph\u00eda sau l\u00e0 m\u1ed9t k\u1ec7 s\u00e1ch nhi\u1ec1u ng\u0103n, x\u1ebfp \u0111\u1ea7y s\u00e1ch v\u1edbi nhi\u1ec1u m\u00e0u s\u1eafc",
+      "targets": [
+        [
+          "L30_V017",
+          3048
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-11-kis:1",
+      "text": "Trong \u0111o\u1ea1n clip c\u00f3 l\u00e0 m\u1ed9t ch\u00e0ng trai \u0111\u1ed9i m\u0169 l\u01b0\u1ee1i trai \u0111en, m\u1eb7c \u00e1o thun tr\u1eafng c\u00f3 d\u00f2ng ch\u1eef ti\u1ebfng Anh, \u0111ang ng\u1ed3i c\u1ea1nh m\u1ed9t chi\u1ebfc h\u1ed9p. Tr\u00ean h\u1ed9p, anh s\u1eafp x\u1ebfp nhi\u1ec1u m\u1ea3nh b\u00eca c\u1eaft r\u1eddi v\u1edbi h\u00ecnh th\u00f9 ng\u1eabu nhi\u00ean.\nNh\u1edd \u00e1nh s\u00e1ng chi\u1ebfu t\u1eeb m\u1ed9t ph\u00eda, c\u00e1c m\u1ea3nh b\u00eca \u0111\u00f3 \u0111\u1ed5 b\u00f3ng l\u00ean t\u01b0\u1eddng, t\u1ea1o th\u00e0nh h\u00ecnh ch\u00e2n dung m\u1ed9t ng\u01b0\u1eddi \u0111\u00e0n \u00f4ng v\u1edbi khu\u00f4n m\u1eb7t r\u00f5 n\u00e9t, t\u00f3c vu\u1ed1t g\u1ecdn v\u00e0 m\u1eb7c vest.",
+      "targets": [
+        [
+          "L30_V057",
+          3079
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-12-kis:1",
+      "text": "\u0110o\u1ea1n video m\u00f4 t\u1ea3 c\u1ea3nh trang tr\u00ed b\u00e1nh r\u00e1n. Ph\u00e2n c\u1ea3nh b\u1eaft \u0111\u1ea7u l\u00e0 m\u1ed9t chi\u1ebfc \u0111\u0129a s\u1ee9 m\u00e0u tr\u1eafng n\u1eb1m tr\u00ean m\u1ed9t khay g\u1ed7 h\u00ecnh ch\u1eef nh\u1eadt. B\u00ean c\u1ea1nh chi\u1ebfc \u0111\u0129a s\u1ee9 l\u00e0 m\u1ed9t ch\u00e9n \u0111\u1ef1ng m\u1ed9t v\u00e0i tr\u00e1i d\u00e2u, nh\u01b0ng c\u00f3 2 tr\u00e1i b\u1ecb r\u01a1i ra ngo\u00e0i. Ngo\u00e0i ra, b\u00ean c\u1ea1nh \u0111\u0129a s\u1ee9 c\u00f2n c\u00f3 m\u1ed9t ch\u00e9n s\u1ee9 nh\u1ecf m\u00e0u tr\u1eafng \u0111\u1ef1ng chu\u1ed1i \u0111\u00e3 \u0111\u01b0\u1ee3c c\u1eaft s\u1eb5n v\u00e0 m\u1ed9t c\u00e1i th\u00eca nh\u1ecf m\u00e0u n\u00e2u. Ph\u00e2n c\u1ea3nh ti\u1ebfp theo cho th\u1ea5y \u0111\u1ea7u b\u1ebfp \u0111\u1eb7t 2 chi\u1ebfc b\u00e1nh r\u00e1n l\u00ean \u0111\u0129a s\u1ee9 v\u00e0 b\u1eaft \u0111\u1ea7u trang tr\u00ed. B\u01b0\u1edbc \u0111\u1ea7u ti\u00ean l\u00e0 vi\u1ec7c r\u01b0\u1edbi chocolate l\u00ean tr\u00ean m\u1eb7t b\u00e1nh. Sau \u0111\u00f3, \u0111\u1ea7u b\u1ebfp \u0111\u1eb7t c\u00e1c l\u00e1t chu\u1ed1i l\u00ean tr\u00ean m\u1ed9t chi\u1ebfc b\u00e1nh r\u00e1n, chi\u1ebfc c\u00f2n l\u1ea1i \u0111\u01b0\u1ee3c \u0111\u1eb7t c\u00e1c l\u00e1t d\u00e2u t\u00e2y l\u00ean.",
+      "targets": [
+        [
+          "L26_V200",
+          4522
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-13-kis:1",
+      "text": "\u0110o\u1ea1n video m\u00f4 t\u1ea3 m\u1ed9t ng\u01b0\u1eddi ng\u1ed3i v\u1ec7 sinh m\u00e1y \u1ea3nh. C\u00f4ng \u0111o\u1ea1n n\u00e0y b\u1eaft \u0111\u1ea7u b\u1eb1ng vi\u1ec7c th\u00e1o r\u1eddi m\u00e1y \u1ea3nh. Ti\u1ebfp theo, chi\u1ebfc \u1ed1ng k\u00ednh \u0111\u00e3 \u0111\u01b0\u1ee3c th\u00e1o r\u1eddi v\u00e0 \u0111\u01b0\u1ee3c \u0111\u1eb7t ngay ng\u1eafn tr\u00ean m\u1ed9t chi\u1ebfc kh\u0103n m\u00e0u t\u00edm h\u1ed3ng. Ph\u00e2n c\u1ea3nh cu\u1ed1i c\u00f9ng l\u00e0 v\u1ec7 sinh \u1ed1ng k\u00ednh (lens) b\u1eb1ng m\u1ed9t chi\u1ebfc t\u0103m b\u00f4ng.",
+      "targets": [
+        [
+          "L30_V095",
+          2749
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-14-kis:1",
+      "text": "\u0110o\u1ea1n clip b\u1eaft \u0111\u1ea7u v\u1edbi c\u1ea3nh m\u1ed9t t\u00e1c ph\u1ea9m \u0111i\u00eau kh\u1eafc c\u00e1t ho\u00e0nh tr\u00e1ng t\u1ea1i L\u1ec5 h\u1ed9i \u0111i\u00eau kh\u1eafc tr\u00ean c\u00e1t. T\u00e1c ph\u1ea9m m\u00f4 t\u1ea3 c\u1ea3nh nh\u1eefng thanh ni\u00ean ch\u01a1i th\u1ec3 thao \u0111\u01b0\u1eddng ph\u1ed1: m\u1ed9t ng\u01b0\u1eddi tr\u01b0\u1ee3t patin, hai ng\u01b0\u1eddi tr\u01b0\u1ee3t v\u00e1n\nN\u1ec1n ph\u00eda sau l\u00e0 h\u1ecda ti\u1ebft v\u00f2m cong l\u1edbn v\u00e0 c\u00f3 kh\u1eafc ch\u1eef.\nTi\u1ebfp theo c\u00f3 c\u1ea3nh nhi\u1ec1u t\u00e1c ph\u1ea9m kh\u00e1c b\u1eb1ng c\u00e1t, v\u00e0 c\u00f3 2 c\u1ed9t kh\u00f3i m\u00e0u h\u1ed3ng",
+      "targets": [
+        [
+          "L21_V027",
+          26914
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-15-qa:1",
+      "text": "\u0110o\u1ea1n video v\u1ec1 m\u1ed9t ch\u01b0\u01a1ng tr\u00ecnh t\u1eeb thi\u1ec7n c\u1ee7a m\u1ed9t c\u00e2u l\u1ea1c b\u1ed9 t\u00ean l\u00e0 FANA. Trong \u0111o\u1ea1n video c\u00f3 th\u1ec3 th\u1ea5y c\u00e2u l\u1ea1c b\u1ed9 n\u00e0y \u0111ang \u0111i trao qu\u00e0 t\u1ea1i m\u1ed9t x\u00e3 thu\u1ed9c t\u1ec9nh Kh\u00e1nh H\u00f2a. H\u1ecfi x\u00e3 n\u00e0y c\u00f3 t\u00ean l\u00e0 g\u00ec? (t\u1ea1i th\u1eddi \u0111i\u1ec3m \u0111\u00f3)",
+      "targets": [
+        [
+          "L30_V072",
+          1776
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-16-trake:1",
+      "text": "L\u00e2n quay v\u00f2ng tr\u00ean c\u1ed9t s\u1ed1 4 b\u1eb1ng 2 ch\u00e2n tr\u01b0\u1edbc r\u1ed3i ti\u1ebfp \u0111\u1ea5t. Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean m\u00e0 l\u00e2n b\u1eaft \u0111\u1ea7u xoay v\u00f2ng.",
+      "targets": [
+        [
+          "L24_V033",
+          15946
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-16-trake:2",
+      "text": "Kho\u1ea3nh kh\u1eafc 4 ch\u00e2n ho\u00e0n to\u00e0n ch\u1ea1m \u0111\u1ea5t \u0111\u1ea7u ti\u00ean.",
+      "targets": [
+        [
+          "L24_V033",
+          16006
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-16-trake:3",
+      "text": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean 2 ng\u01b0\u1eddi bi\u1ec3u di\u1ec5n l\u00e2n cu\u1ed1i ch\u00e0o ban gi\u00e1m kh\u1ea3o.",
+      "targets": [
+        [
+          "L24_V033",
+          16368
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-16-trake:4",
+      "text": "Sau \u0111\u00f3 l\u00e2n ti\u1ebfn l\u1ea1i ch\u00e0o m\u1ed9t con r\u1ed3ng. Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean con r\u1ed3ng c\u1eed \u0111\u1ed9ng \u0111\u1ea7u.",
+      "targets": [
+        [
+          "L24_V033",
+          16903
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-17-kis:1",
+      "text": "\u0110o\u1ea1n video trong bu\u1ed5i trao qu\u00e0 t\u1eeb thi\u1ec7n di\u1ec5n ra t\u1ea1i 1 b\u1ec7nh vi\u1ec7n trong d\u1ecbp Xu\u00e2n 2024. Trong c\u1ea3nh c\u00f3 hai ng\u01b0\u1eddi \u0111\u00e0n \u00f4ng (m\u1eb7c \u00e1o s\u01a1 mi h\u1ed3ng v\u00e0 s\u01a1 mi tr\u1eafng) \u0111\u1ee9ng hai b\u00ean, \u0111\u1ea1i di\u1ec7n ban t\u1ed5 ch\u1ee9c. \u1ede gi\u1eefa l\u00e0 b\u1ed1n em nh\u1ecf v\u00e0 thi\u1ebfu ni\u00ean, trong \u0111\u00f3 c\u00f3 em m\u1eb7c \u00e1o \u0111\u1ecf, em m\u1eb7c \u00e1o tr\u1eafng, em m\u1eb7c v\u00e1y h\u1ed3ng v\u00e0 em m\u1eb7c \u00e1o xanh. C\u00e1c em \u0111\u01b0\u1ee3c trao b\u1ea3ng t\u01b0\u1ee3ng tr\u01b0ng v\u1edbi n\u1ed9i dung \u201cCh\u01b0\u01a1ng tr\u00ecnh: Trao kinh ph\u00ed h\u1ed7 tr\u1ee3 cho tr\u1ebb em m\u1ed3 c\u00f4i do d\u1ecbch COVID-19\u201d. Tr\u01b0\u1edbc m\u1eb7t m\u1ed7i em l\u00e0 t\u00fai qu\u00e0 l\u1edbn mang logo y t\u1ebf. Ph\u00eda sau l\u00e0 ph\u00f4ng n\u1ec1n m\u00e0u \u0111\u1ecf v\u1edbi kh\u1ea9u hi\u1ec7u \u0111\u00f3n xu\u00e2n v\u00e0 th\u00f4ng tin s\u1ef1 ki\u1ec7n.",
+      "targets": [
+        [
+          "L30_V092",
+          2508
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-18-trake:1",
+      "text": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean th\u1ea5y c\u1eaft n\u1ea5m.",
+      "targets": [
+        [
+          "L26_V072",
+          2487
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-18-trake:2",
+      "text": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean c\u1eaft c\u1ee7 n\u0103ng.",
+      "targets": [
+        [
+          "L26_V072",
+          3138
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-18-trake:3",
+      "text": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean c\u1eaft \u0111\u1eadu h\u1ee7.",
+      "targets": [
+        [
+          "L26_V072",
+          3428
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-18-trake:4",
+      "text": "Kho\u1ea3nh kh\u1eafc ch\u1ea3o \u0111\u1eb7t l\u00ean b\u1ebfp, \u0111\u1ea7u b\u1ebfp m\u1edf l\u1eeda v\u00e0 th\u1ea5y l\u1eeda b\u1eaft \u0111\u1ea7u xu\u1ea5t hi\u1ec7n",
+      "targets": [
+        [
+          "L26_V072",
+          3803
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-19-qa:1",
+      "text": "Trong \u0111o\u1ea1n video c\u00f3 2 c\u00e2u th\u01a1 c\u1ee7a m\u1ed9t nh\u00e0 th\u01a1 ca ng\u1ee3i anh h\u00f9ng Nguy\u1ec5n Trung Tr\u1ef1c trong \u0111\u00ecnh th\u1ea7n Nguy\u1ec5n Trung Tr\u1ef1c t\u1ea1i Ki\u00ean Giang. Hai c\u00e2u th\u01a1 \u0111\u00f3 l\u00e0 g\u00ec?",
+      "targets": [
+        [
+          "L27_V010",
+          5592
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-2-kis:1",
+      "text": "M\u1ea9u tin gi\u1edbi thi\u1ec7u v\u1ec1 \u0111\u00e0n h\u1ed5 t\u1ea1i m\u1ed9t \u0111\u1ecba ph\u01b0\u01a1ng \u1edf mi\u1ec1n Nam v\u1eeba c\u00f3 th\u00eam kho\u1ea3ng 3-6 con h\u1ed5 con. \u0110\u00e2y l\u00e0 m\u1ed9t gi\u1ed1ng h\u1ed5 qu\u00fd hi\u1ebfm",
+      "targets": [
+        [
+          "L21_V029",
+          11721
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-20-kis:1",
+      "text": "Tr\u00ean \u0111\u0129a tr\u00f2n m\u00e0u tr\u1eafng c\u00f3 1 ly panna cotta. C\u00f3 m\u1ed9t b\u00e0n tay l\u1ea7n l\u01b0\u1ee3t \u0111\u1eb7t th\u00eam 2 ly panna cotta n\u1eefa v\u00e0o \u0111\u0129a.\nM\u1ed7i ly panna cotta c\u00f3 l\u1edbp kem m\u1ecbn m\u00e0u tr\u1eafng ng\u00e0, b\u00ean tr\u00ean trang tr\u00ed v\u00e0i l\u00e1t nho \u0111\u1ecf, th\u00eam l\u00e1 b\u1ea1c h\u00e0 xanh t\u1ea1o \u0111i\u1ec3m nh\u1ea5n t\u01b0\u01a1i m\u00e1t.\nB\u00ean c\u1ea1nh tr\u00ean \u0111\u0129a c\u00f2n c\u00f3 hai b\u00f4ng hoa \u0103n \u0111\u01b0\u1ee3c (m\u00e0u \u0111\u1ecf v\u00e0 v\u00e0ng) \u0111\u1ec3 t\u0103ng ph\u1ea7n \u0111\u1eb9p m\u1eaft.",
+      "targets": [
+        [
+          "L26_V004",
+          5418
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-22-qa:1",
+      "text": "\u0110o\u1ea1n video v\u1ec1 m\u1ed9t ng\u01b0\u1eddi ph\u1ee5 n\u1eef d\u1ea1y n\u1ea5u \u0103n cho nh\u1eefng ng\u01b0\u1eddi kh\u00e1c. Trong \u0111o\u1ea1n video c\u00f3 th\u1ec3 th\u1ea5y m\u1ed9t ng\u01b0\u1eddi \u0111ang c\u1ea7m c\u00f4ng th\u1ee9c m\u00f3n \u0103n v\u1edbi nguy\u00ean li\u1ec7u ch\u00ednh l\u00e0 200g th\u1ecbt n\u1ea1c xay. H\u1ecfi ti\u00eau \u0111\u1ec1 c\u1ee7a c\u00f4ng th\u1ee9c n\u1ea5u \u0103n (t\u00ean m\u00f3n \u0103n) n\u00e0y l\u00e0 g\u00ec?",
+      "targets": [
+        [
+          "L30_V078",
+          1855
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-23-kis:1",
+      "text": "\u0110o\u1ea1n clip v\u1ec1 1 th\u1ecb tr\u1ea5n ven bi\u1ec3n thu h\u00fat du kh\u00e1ch hi\u1ebfu k\u1ef3 nh\u1edd 1 lo\u00e0i \u0111\u1ed9ng v\u1eadt bi\u1ec3n nguy hi\u1ec3m. Lo\u00e0i \u0111\u1ed9ng v\u1eadt n\u00e0y n\u1ed5i ti\u1ebfng trong 1 b\u1ed9 phim c\u1ee7a \u0111\u1ea1o di\u1ec5n Steven Spielberg \u0111\u01b0\u1ee3c s\u1ea3n xu\u1ea5t v\u00e0o n\u0103m 1975",
+      "targets": [
+        [
+          "L22_V022",
+          16774
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-24-kis:1",
+      "text": "\u0110o\u1ea1n video v\u1ec1 t\u01b0\u1eddng thu\u1eadt m\u1ed9t cu\u1ed9c \u0111ua xe \u0111\u1ea1p. T\u00ecm ph\u00e2n c\u1ea3nh v\u1edbi g\u00f3c quay tr\u1ef1c di\u1ec7n t\u1eeb tr\u00ean cao xu\u1ed1ng d\u00f5i theo c\u00e1c tay \u0111ua. Trong khung h\u00ecnh g\u1ed3m c\u00f3 3 tay \u0111ua \u0111ang \u0111\u1ea1p th\u00e0nh m\u1ed9t \u0111\u01b0\u1eddng th\u1eb3ng. C\u1ea3 3 tay \u0111ua \u0111\u1ec1u \u0111\u1ebfn t\u1eeb c\u00f9ng m\u1ed9t \u0111\u1ed9i, v\u1edbi \u0111\u1ed3ng ph\u1ee5c \u00e1o tr\u1eafng qu\u1ea7n v\u00e0ng xanh. Tay \u0111ua \u0111\u1ea7u ti\u00ean \u0111\u1ed9i n\u00f3n tr\u1eafng, tay \u0111ua th\u1ee9 hai \u0111\u1ed9i n\u00f3n \u0111\u1ecf v\u00e0 tay \u0111ua cu\u1ed1i c\u00f9ng \u0111\u1ed9i n\u00f3n \u0111en.",
+      "targets": [
+        [
+          "L23_V007",
+          3552
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-25-kis:1",
+      "text": "T\u00ecm m\u1ed9t \u0111o\u1ea1n video \u0111ua xe \u0111\u1ea1p, g\u00f3c quay t\u1eeb flycam tr\u00ean cao, m\u1ed9t v\u1eadn \u0111\u1ed9ng vi\u00ean m\u1eb7c \u00e1o xanh d\u01b0\u01a1ng, tr\u1eafng \u0111ang v\u01b0\u1ee3t ba v\u1eadn \u0111\u1ed9ng vi\u00ean kh\u00e1c v\u00e0 l\u00ean v\u1ecb tr\u00ed d\u1eabn \u0111\u1ea7u. Bi\u1ebft sau \u0111\u00f3 v\u1eadn \u0111\u1ed9ng vi\u00ean n\u00e0y d\u1eabn \u0111\u1ea7u su\u1ed1t \u0111o\u1ea1n \u0111\u01b0\u1eddng c\u00f2n l\u1ea1i \u0111\u1ebfn \u0111\u00edch.",
+      "targets": [
+        [
+          "L23_V017",
+          1367
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-4-trake:1",
+      "text": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean b\u1ed9t \u0111\u01b0\u1ee3c b\u1ecf v\u00e0o t\u00f4 m\u0103ng t\u00e2y.",
+      "targets": [
+        [
+          "L26_V194",
+          4709
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-4-trake:2",
+      "text": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean th\u1ea5y mi\u1ebfn m\u0103ng t\u00e2y \u0111\u1ea7u ti\u00ean ti\u1ebfp x\u00fac v\u1edbi d\u1ea7u trong ch\u1ea3o.",
+      "targets": [
+        [
+          "L26_V194",
+          5146
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-4-trake:3",
+      "text": "Kho\u1ea3nh kh\u1eafc mi\u1ebfng m\u0103ng t\u00e2y \u0111\u1ea7u ti\u00ean r\u1eddi kh\u1ecfi ch\u1ea3o d\u1ea7u.",
+      "targets": [
+        [
+          "L26_V194",
+          5435
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-4-trake:4",
+      "text": "Kho\u1ea3ng kh\u1eafc mi\u1ebfng m\u0103ng t\u00e2y cu\u1ed1i c\u00f9ng r\u1eddi ch\u1ea3o d\u1ea7u v\u00e0 n\u1eb1m ho\u00e0n to\u00e0n tr\u00ean d\u0129a.",
+      "targets": [
+        [
+          "L26_V194",
+          5869
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-5-kis:1",
+      "text": "\u0110o\u1ea1n clip c\u1ea7n t\u00ecm l\u00e0 c\u1ea3nh hai ng\u01b0\u1eddi ph\u1ee5 n\u1eef \u0111ang cho d\u00ea \u0103n: m\u1ed9t ng\u01b0\u1eddi m\u1eb7c \u00e1o thun tr\u1eafng qu\u00e0ng \u00e1o \u0111\u1ecf tr\u00ean vai, ng\u01b0\u1eddi kia m\u1eb7c \u00e1o d\u00e0i tay k\u1ebb s\u1ecdc t\u00edm truy\u1ec1n th\u1ed1ng. C\u1ea3 hai \u0111\u1ec1u m\u1ec9m c\u01b0\u1eddi, t\u1ecf v\u1ebb th\u00edch th\u00fa.\nKh\u00f4ng gian tr\u1ea1i r\u1ed9ng r\u00e3i, c\u00f3 m\u00e1i che b\u1eb1ng t\u00f4n v\u00e0 h\u00e0ng r\u00e0o g\u1ed7 chia th\u00e0nh nhi\u1ec1u d\u00e3y chu\u1ed3ng, trong \u0111\u00f3 c\u00f3 h\u00e0ng d\u00e0i d\u00ea \u0111\u01b0\u1ee3c nu\u00f4i nh\u1ed1t.",
+      "targets": [
+        [
+          "L27_V014",
+          7330
+        ],
+        [
+          "L27_V014",
+          5940
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-6-kis:1",
+      "text": "\u0110o\u1ea1n clip c\u1ea7n t\u00ecm b\u1eaft \u0111\u1ea7u b\u1eb1ng c\u1ea3nh 1 ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp \u0111\u1eb7t \u0111ang \u0111\u1eb7t m\u00f3n g\u1ecfi cu\u1ed1n chay b\u00e0y tr\u00ean \u0111\u0129a, nh\u00e2n g\u1ed3m rau xanh cu\u1ed9n tr\u00f2n v\u00e0 \u0111\u1eadu h\u0169, g\u00f3i trong b\u00e1nh tr\u00e1ng m\u00e0u v\u00e0ng v\u00e0 t\u00edm. \u0110\u0129a \u0111\u01b0\u1ee3c trang tr\u00ed th\u00eam l\u00e1 xanh v\u00e0 hoa pansy t\u00edm-v\u00e0ng, t\u1ea1o c\u1ea3m gi\u00e1c thanh m\u00e1t v\u00e0 tinh t\u1ebf.",
+      "targets": [
+        [
+          "L26_V056",
+          6402
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-7-kis:1",
+      "text": "\u0110o\u1ea1n clip c\u1ea7n t\u00ecm l\u00e0 c\u1ea3nh quay trong m\u1ed9t khu r\u1eebng, d\u01b0\u1edbi g\u1ed1c c\u00e2y to v\u1edbi nhi\u1ec1u l\u00e1 kh\u00f4 ph\u1ee7 \u0111\u1ea7y m\u1eb7t \u0111\u1ea5t. N\u1ed5i b\u1eadt \u1edf c\u1eadn c\u1ea3nh l\u00e0 m\u1ed9t ch\u00fa chim c\u00f3 b\u1ed9 l\u00f4ng \u0111en \u00e1nh xanh \u1edf \u0111\u1ea7u v\u00e0 th\u00e2n tr\u00ean, c\u00f2n c\u00e1nh v\u00e0 l\u01b0ng m\u00e0u n\u00e2u \u0111\u1ecf. \u0110\u00f4i m\u1eaft chim \u0111\u1ecf r\u1ef1c, t\u1ea1o \u0111i\u1ec3m nh\u1ea5n r\u00f5 r\u00e0ng. \u0110\u00e2y l\u00e0 lo\u00e0i chim th\u01b0\u1eddng th\u1ea5y \u1edf v\u00f9ng Nam B\u1ed9 Vi\u1ec7t Nam.",
+      "targets": [
+        [
+          "L29_V023",
+          10941
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-8-kis:1",
+      "text": "\u0110o\u1ea1n video v\u1ec1 m\u1ed9t l\u1ec5 h\u1ed9i \u1ea9m th\u1ef1c Nh\u1eadt B\u1ea3n l\u1edbn nh\u1ea5t th\u1ebf gi\u1edbi. H\u00e3y t\u00ecm ch\u00ednh x\u00e1c ph\u00e2n c\u1ea3nh m\u1ed9t c\u00f4 b\u00e9 \u0111eo m\u1ed9t con b\u1ea1ch tu\u1ed9c / con m\u1ef1c m\u00e0u \u0111\u1ecf ph\u00eda tr\u01b0\u1edbc ng\u1ef1c. Tr\u00ean tay c\u00f4 b\u00e9 c\u00f3 c\u1ea7m m\u1ed9t chi\u1ebfc t\u00fai gi\u1ea5y.",
+      "targets": [
+        [
+          "L22_V030",
+          18382
+        ]
+      ]
+    },
+    {
+      "id": "Test/query-p1-9-kis:1",
+      "text": "\u0110o\u1ea1n clip l\u00e0 c\u1ea3nh thu ho\u1ea1ch d\u1ee9a \u1edf mi\u1ec1n T\u00e2y: m\u1ed9t b\u00e0 c\u1ee5 ng\u1ed3i b\u00ean gi\u1ecf d\u1ee9a tr\u00f2 chuy\u1ec7n v\u1edbi c\u00f4 g\u00e1i m\u1eb7c \u00e1o h\u1ed3ng qu\u00e0ng kh\u0103n r\u1eb1n; xung quanh ch\u1ea5t \u0111\u1ea7y d\u1ee9a, ph\u00eda sau c\u00f3 ng\u01b0\u1eddi ph\u1ee5 n\u1eef \u0111\u1ed9i n\u00f3n l\u00e1 c\u1ea7m tr\u00e1i d\u1ee9a v\u00e0 m\u1ed9t chi\u1ebfc ghe xanh \u0111\u1eadu c\u1ea1nh b\u1edd, t\u1ea1o kh\u00f4ng kh\u00ed n\u00f4ng th\u00f4n m\u1ed9c m\u1ea1c, y\u00ean b\u00ecnh.",
+      "targets": [
+        [
+          "L27_V013",
+          5068
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-1-kis:1",
+      "text": "C\u1ea3nh quay m\u1ed9t nh\u00f3m h\u01a1n 5 ng\u01b0\u1eddi x\u1ebfp th\u00e0nh h\u00e0ng t\u1eadp th\u1ec3 d\u1ee5c, c\u00f9ng th\u1ef1c hi\u1ec7n \u0111\u1ed9ng t\u00e1c hai tay ch\u1ea1m m\u0169i ch\u00e2n. Trong nh\u00f3m ch\u1ec9 c\u00f3 m\u1ed9t ng\u01b0\u1eddi \u0111eo k\u00ednh v\u00e0 ba ng\u01b0\u1eddi \u0111\u1ed9i n\u00f3n c\u00f3 m\u00e0u \u0111\u1ecf.",
+      "targets": [
+        [
+          "L30_V046",
+          6663
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-10-kis:1",
+      "text": "H\u00e0nh \u0111\u1ed9ng c\u1eaft ch\u00f9m nho b\u1eb1ng k\u00e9o t\u1eeb gi\u00e0n nho b\u1eb1ng m\u1ed9t chi\u1ebfc k\u00e9o m\u00e0u \u0111en. C\u00f3 th\u1ec3 th\u1ea5y c\u00f3 m\u1ed9t s\u1ee3i d\u00e2y m\u00e0u xanh d\u01b0\u01a1ng \u0111\u01b0\u1ee3c bu\u1ed9c v\u00e0o cu\u1ed1ng c\u1ee7a ch\u00f9m nho n\u00e0y tr\u01b0\u1edbc khi n\u00f3 \u0111\u01b0\u1ee3c c\u1eaft.",
+      "targets": [
+        [
+          "L29_V013",
+          11345
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-11-kis:1",
+      "text": "C\u1ea3nh quay ch\u1eadm t\u1ea1i v\u1ecb tr\u00ed v\u1ea1ch \u0111\u00edch c\u1ee7a cu\u1ed9c \u0111ua xe \u0111\u1ea1p. G\u00f3c m\u00e1y s\u00e1t m\u1eb7t \u0111\u01b0\u1eddng b\u1eaft tr\u1ecdn kho\u1ea3nh kh\u1eafc v\u1ec1 \u0111\u00edch theo th\u1ee9 t\u1ef1 nh\u1ea5t, nh\u00ec, ba l\u1ea7n l\u01b0\u1ee3t l\u00e0 1 tay \u0111ua \u00e1o v\u00e0ng qu\u1ea7n \u0111en, 1 tay \u0111ua \u00e1o xanh d\u01b0\u01a1ng qu\u1ea7n \u0111en v\u00e0 1 tay \u0111ua \u00e1o xanh d\u01b0\u01a1ng qu\u1ea7n \u0111\u1ecf",
+      "targets": [
+        [
+          "L23_V021",
+          6363
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-12-kis:1",
+      "text": "C\u00f3 th\u1ec3 th\u1ea5y trong c\u1ea3nh quay c\u00f3 4 t\u00e0i x\u1ebf xe \u00f4m c\u00f4ng ngh\u1ec7 trong tr\u1ea1m x\u0103ng, trong \u0111\u00f3 3 ng\u01b0\u1eddi \u0111\u1ee9ng \u0111\u1ee3i c\u00f2n 1 ng\u01b0\u1eddi l\u00e1i xe t\u1eeb tr\u00e1i sang ph\u1ea3i khung h\u00ecnh. Tr\u01b0\u1edbc \u0111\u00f3 l\u00e0 c\u1ea3nh m\u1ed9t ng\u01b0\u1eddi \u0111\u1eady n\u1eafp b\u00ecnh x\u0103ng xe m\u00e1y c\u1ee7a h\u1ecd. C\u00f3 th\u00f4ng tin v\u1ec1 gi\u00e1 d\u1ea7u mazut \u0111\u01b0\u1ee3c hi\u1ec3n th\u1ecb trong khung h\u00ecnh.",
+      "targets": [
+        [
+          "L22_V029",
+          6272
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-13-kis:1",
+      "text": "M\u1ed9t ng\u01b0\u1eddi \u0111\u1ee9ng d\u01b0\u1edbi n\u01b0\u1edbc v\u00e0 r\u1ecdi \u0111\u00e8n. Ti\u1ebfp theo l\u00e0 c\u1ea3nh ng\u01b0\u1eddi n\u00e0y k\u00e9o l\u01b0\u1edbi c\u00e1 l\u00fac b\u00ecnh minh, sau \u0111\u00f3 \u0111\u01b0\u1ee3c m\u1ed9t nh\u00f3m ng\u01b0\u1eddi kh\u00e1c ti\u1ebfn \u0111\u1ebfn d\u00f9ng m\u00e1y quay ghi h\u00ecnh.",
+      "targets": [
+        [
+          "L29_V021",
+          6280
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-14-kis:1",
+      "text": "Ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp l\u1ea7n l\u01b0\u1ee3t \u0111\u1eb7t c\u00e1c mi\u1ebfng nguy\u00ean li\u1ec7u d\u1ea1ng thanh v\u00e0 nh\u1eefng l\u00e1t c\u1eaft h\u00ecnh hoa v\u00e0o m\u1ed9t \u0111\u0129a \u0111ang \u0111\u01b0\u1ee3c h\u1ea5p trong n\u1ed3i.\r\nC\u00e1c nguy\u00ean li\u1ec7u \u0111\u01b0\u1ee3c d\u00f9ng \u0111\u0169a s\u1eafp x\u1ebfp xen k\u1ebd xung quanh ph\u1ea7n th\u1ee9c \u0103n \u0111\u00e3 c\u00f3 s\u1eb5n tr\u00ean \u0111\u0129a.\r\nSau \u0111\u00f3, \u0111\u1ea7u b\u1ebfp d\u00f9ng mu\u1ed7ng l\u1ea5y th\u00eam m\u1ed9t lo\u1ea1i nguy\u00ean li\u1ec7u m\u1ec1m t\u1eeb t\u00f4 th\u1ee7y tinh.\r\nPh\u1ea7n nguy\u00ean li\u1ec7u n\u00e0y \u0111\u01b0\u1ee3c \u0111\u1eb7t v\u00e0o gi\u1eefa \u0111\u0129a, xung quanh l\u00e0 c\u00e1c mi\u1ebfng d\u1ea1ng thanh v\u00e0 h\u00ecnh hoa \u0111\u00e3 \u0111\u01b0\u1ee3c s\u1eafp x\u1ebfp tr\u01b0\u1edbc \u0111\u00f3.",
+      "targets": [
+        [
+          "L26_V171",
+          5522
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-15-qa:1",
+      "text": "B\u1ea3n \u0111\u1ed3 ph\u00e2n b\u1ed1 \u0111\u1ed9ng \u0111\u1ea5t t\u1ea1i m\u1ed9t v\u00f9ng tr\u00ean th\u1ebf gi\u1edbi, v\u1edbi m\u1ed9t b\u1ea3ng ch\u00fa gi\u1ea3i ph\u00eda b\u00ean tr\u00e1i g\u1ed3m c\u00e1c k\u00ed hi\u1ec7u nhi\u1ec1u m\u00e0u s\u1eafc t\u01b0\u01a1ng \u1ee9ng v\u1edbi c\u00e1c v\u1ecb tr\u00ed t\u00e2m ch\u1ea5n c\u00f3 c\u1ea5p \u0111\u1ed9 \u0111\u1ed9ng \u0111\u1ea5t kh\u00e1c nhau. Kh\u00f4ng t\u00ednh b\u1ea3ng ch\u00fa gi\u1ea3i, c\u00f3 bao nhi\u00eau v\u1ecb tr\u00ed ghi nh\u1eadn \u0111\u1ed9ng \u0111\u1ea5t c\u1ea5p \u0111\u1ed9 4?",
+      "targets": [
+        [
+          "L21_V010",
+          19548
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-16-trake:1",
+      "text": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean xu\u1ea5t hi\u1ec7n \u0111\u1ea7y \u0111\u1ee7 hai con r\u1ed3ng v\u00e0ng \u0111ang xoay v\u00f2ng.",
+      "targets": [
+        [
+          "L24_V024",
+          9784
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-16-trake:2",
+      "text": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean con l\u00e2n ho\u00e0n t\u1ea5t c\u00fa xoay ng\u01b0\u1eddi tr\u00ean c\u00e1c thanh tr\u1ee5 (th\u1eddi \u0111i\u1ec3m \u0111\u00e2u ti\u00ean c\u00e1c ch\u00e2n c\u1ee7a l\u00e2n \u0111\u1eb7t tr\u00ean tr\u1ee5 sau khi xoay).",
+      "targets": [
+        [
+          "L24_V024",
+          10132
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-16-trake:3",
+      "text": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean d\u00f9i ch\u1ea1m v\u00e0o k\u1ebbng \u0111\u1ed3ng m\u00faa l\u00e2n.",
+      "targets": [
+        [
+          "L24_V024",
+          10191
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-17-qa:1",
+      "text": "\u0110o\u1ea1n clip m\u00f4 t\u1ea3 h\u1eadu qu\u1ea3 c\u1ee7a hi\u1ec7n t\u01b0\u1ee3ng s\u1ea1t l\u1edf \u0111\u1ea5t nghi\u00eam tr\u1ecdng, \u0111\u1ea5t \u0111\u00e1 tr\u00e0n xu\u1ed1ng g\u00e2y t\u1eafc ngh\u1ebdn ho\u00e0n to\u00e0n m\u1ed9t \u0111o\u1ea1n \u0111\u01b0\u1eddng \u0111\u00e8o. Trong m\u1ed9t c\u1ea3nh quay c\u1eadn, c\u00f3 th\u1ec3 th\u1ea5y m\u1ed9t c\u1ed9t m\u1ed1c \u0111\u01b0\u1eddng b\u1ed9 v\u1edbi ph\u1ea7n \u0111\u1ec9nh m\u00e0u \u0111\u1ecf ch\u1ec9 c\u00f2n l\u1ed9 ra ph\u1ea7n tr\u00ean, ph\u1ea7n l\u1edbn \u0111\u00e3 b\u1ecb \u0111\u1ea5t \u0111\u00e1 v\u00f9i l\u1ea5p. \u1ede c\u1ea3nh quay cu\u1ed1i, m\u1ed9t ng\u01b0\u1eddi \u0111i xe m\u00e1y \u0111ang v\u1eadt l\u1ed9n \u0111\u1ec3 \u0111i\u1ec1u khi\u1ec3n ph\u01b0\u01a1ng ti\u1ec7n v\u01b0\u1ee3t qua khu v\u1ef1c b\u00f9n l\u1ea7y, tr\u00ean chi\u1ebfc xe m\u00e1y c\u00f3 treo m\u1ed9t v\u1eadt m\u00e0u xanh l\u00e1. T\u00ean c\u1ee7a con \u0111\u00e8o l\u00e0 g\u00ec?",
+      "targets": [
+        [
+          "L22_V008",
+          5612
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-18-kis:1",
+      "text": "C\u1ea3nh quay cho th\u1ea5y h\u00e0nh \u0111\u1ed9ng tr\u00ecnh b\u00e0y m\u00f3n \u0103n sau khi ho\u00e0n th\u00e0nh giai \u0111o\u1ea1n ch\u1ebf bi\u1ebfn. B\u00fan \u0111\u01b0\u1ee3c cho \u0111\u1ea7u ti\u00ean v\u00e0o m\u1ed9t ch\u00e9n r\u1ed7ng, sau \u0111\u00f3 \u0111\u1ea7u b\u1ebfp l\u1ea7n l\u01b0\u1ee3t cho t\u1eebng v\u00e1 n\u01b0\u1edbc d\u00f9ng c\u00f9ng c\u00e1c nguy\u00ean li\u1ec7u nh\u01b0 th\u1ecbt g\u00e0, c\u00e0 r\u1ed1t, s\u1ea3, n\u1ea5m m\u00e8o v\u00e0o ch\u00e9n b\u00fan, v\u00e0 k\u1ebft th\u00fac b\u1eb1ng vi\u1ec7c th\u1ea3 m\u1ed9t c\u1ecdng ng\u00f2 l\u00ean tr\u00ean c\u00f9ng. C\u1ea3nh quay ti\u1ebfp theo l\u00e0 c\u1ea3nh zoom xa d\u1ea7n ch\u00e9n b\u00fan, ta th\u1ea5y b\u00ean c\u1ea1nh ch\u00e9n b\u00fan c\u00f2n c\u00f3 1 ch\u00e9n n\u01b0\u1edbc ch\u1ea5m nh\u1ecf v\u1edbi 2 mi\u1ebfng \u1edbt.",
+      "targets": [
+        [
+          "L26_V389",
+          5932
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-19-kis:1",
+      "text": "Con l\u00e2n do hai ng\u01b0\u1eddi \u0111i\u1ec1u khi\u1ec3n \u0111ang \u0111\u1ee9ng th\u1eb3ng v\u00e0 xoay v\u00f2ng tr\u00ean \u0111\u1ec9nh c\u1ed9t. Sau v\u00e0i gi\u00e2y ngh\u1ec9, con l\u00e2n b\u1ea5t ng\u1edd nh\u1ea3y qua hai chi\u1ebfc c\u1ed9t k\u1ebf b\u00ean, ch\u00fai \u0111\u1ea7u xu\u1ed1ng ngo\u1ea1m l\u1ea5y qu\u1ea3 b\u00ed \u0111\u1ecf k\u00e8m b\u00f4ng hoa m\u00e0u v\u00e0ng. C\u1ea3nh quay k\u1ebft th\u00fac khi con l\u00e2n ti\u1ebfp t\u1ee5c nh\u1ea3y sang c\u00e1c c\u1ed9t ti\u1ebfp theo.",
+      "targets": [
+        [
+          "L24_V035",
+          14657
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-2-kis:1",
+      "text": "\u0110o\u1ea1n phim b\u1eaft \u0111\u1ea7u b\u1eb1ng m\u1ed9t b\u1ea3n \u0111\u1ed3, tr\u00ean \u0111\u00f3 m\u1ed9t lo\u1ea1i c\u00f4ng tr\u00ecnh th\u1ee7y l\u1ee3i l\u1ea7n l\u01b0\u1ee3t xu\u1ea5t hi\u1ec7n b\u1ed1n l\u1ea7n. Sau \u0111\u00f3 chuy\u1ec3n sang c\u1ea3nh m\u1ed9t con \u0111\u1eadp \u0111\u01b0\u1ee3c quay t\u1eeb tr\u00ean cao, ti\u1ebfp \u0111\u1ebfn l\u00e0 c\u1ea3nh c\u1eadn con \u0111\u1eadp d\u01b0\u1edbi tr\u1eddi m\u01b0a.",
+      "targets": [
+        [
+          "L28_V018",
+          3123
+        ],
+        [
+          "L28_V018",
+          3225
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-20-kis:1",
+      "text": "Ba ng\u01b0\u1eddi \u0111ang \u0111i b\u1ed9 xu\u1ed1ng m\u1ed9t con d\u1ed1c trong c\u01a1n m\u01b0a, c\u00f3 2 ng\u01b0\u1eddi c\u1ea7m d\u00f9, trong \u0111\u00f3 ng\u01b0\u1eddi c\u1ea7m d\u00f9 \u0111i sau l\u1ea1i m\u1eb7c m\u1ed9t chi\u1ebfc \u00e1o m\u01b0a c\u00f3 in h\u00ecnh con g\u1ea5u \u1edf sau l\u01b0ng. Sau \u0111\u00f3 ta th\u1ea5y nhi\u1ec1u ng\u01b0\u1eddi \u0111ang c\u00f9ng nhau b\u01b0\u1edbc v\u1ec1 h\u01b0\u1edbng m\u1ed9t c\u0103n nh\u00e0 th\u00f4ng qua m\u1ed9t con \u0111\u01b0\u1eddng \u0111\u1ea5t, b\u00ean c\u1ea1nh l\u00e0 m\u1ed9t c\u00e1i ao.",
+      "targets": [
+        [
+          "L21_V026",
+          7526
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-21-kis:1",
+      "text": "C\u1ea3nh quay b\u1eaft \u0111\u1ea7u b\u1eb1ng c\u1ea3nh nh\u1eefng con t\u00f4m \u0111\u00e3 \u0111\u01b0\u1ee3c l\u1ed9t v\u1ecf v\u00e0 n\u1ea5u ch\u00edn \u0111ang n\u1eb1m tr\u00ean d\u0129a, ph\u00eda sau l\u00e0 ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp \u0111ang \u0111\u1eb7t 3 \u1ed5 b\u00e1nh m\u00ec l\u00ean b\u00e0n. Sau \u0111\u00f3 l\u00e0 c\u1ea3nh quay c\u00e1c \u0111\u1ea7u b\u1ebfp, c\u00f3 ng\u01b0\u1eddi th\u00ec trang tr\u00ed m\u00f3n \u0103n, c\u00f3 ng\u01b0\u1eddi th\u00ec ch\u1ebf bi\u1ebfn m\u00f3n \u0103n. Nh\u1eefng con t\u00f4m \u0111\u01b0\u1ee3c c\u1eaft l\u00e0m \u0111\u00f4i v\u00e0 \u0111\u01b0\u1ee3c n\u01b0\u1edbng tr\u00ean b\u1ebfp.",
+      "targets": [
+        [
+          "L22_V011",
+          15243
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-22-kis:1",
+      "text": "Ng\u01b0\u1eddi ph\u1ee5 n\u1eef m\u1eb7c \u00e1o d\u00e0i m\u00e0u h\u1ed3ng, \u0111eo k\u00ednh \u0111ang gi\u1ea3ng gi\u1ea3i v\u1ec1 c\u00e1c tr\u01b0\u1eddng h\u1ee3p s\u1eed d\u1ee5ng kh\u00e1c nhau c\u1ee7a \u0111\u1ed9ng t\u1eeb 'remember' d\u1ef1a tr\u00ean m\u1ed1c th\u1eddi gian c\u1ee7a h\u00e0nh \u0111\u1ed9ng \u0111\u01b0\u1ee3c nh\u1eafc t\u1edbi.",
+      "targets": [
+        [
+          "L25_V041",
+          16972
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-23-kis:1",
+      "text": "H\u00ecnh \u1ea3nh gi\u00e1o vi\u00ean nam m\u1eb7c s\u01a1 mi tr\u1eafng, th\u1eaft c\u00e0 v\u1ea1t t\u1ed1i m\u00e0u, n\u1ed5i b\u1eadt tr\u00ean ph\u00f4ng n\u1ec1n xanh d\u01b0\u01a1ng \u0111\u1eadm c\u00f3 hoa v\u0103n m\u1edd.\r\n\r\nSlide b\u00e0i gi\u1ea3ng N\u1ec1n tr\u1eafng v\u1edbi khung vi\u1ec1n m\u00e0u h\u1ed3ng t\u00edm, ph\u00eda tr\u00ean c\u00f3 thanh ti\u00eau \u0111\u1ec1 xanh d\u01b0\u01a1ng ch\u1ee9a h\u1ecda ti\u1ebft \u0111\u1ecba c\u1ea7u v\u00e0 m\u0169i t\u00ean v\u00e0ng/xanh ng\u1ecdc. B\u00ean d\u01b0\u1edbi l\u00e0 s\u01a1 \u0111\u1ed3 3 t\u1ea7ng \u0111\u01b0\u1ee3c li\u00ean k\u1ebft b\u1edfi c\u00e1c m\u0169i t\u00ean xanh ng\u1ecdc tr\u1ecf xu\u1ed1ng:\r\n\r\nT\u1ea7ng 1: 2 kh\u1ed1i h\u1ed9p \u0111\u01b0\u1ee3c bao b\u1edfi 1 kh\u1ed1i h\u1ed9p cam.\r\n\r\nT\u1ea7ng 2: 1 kh\u1ed1i h\u1ed9p l\u1edbn m\u00e0u xanh d\u01b0\u01a1ng \u0111\u1eadm \u1edf ch\u00ednh gi\u1eefa.\r\n\r\nT\u1ea7ng 3: 2 kh\u1ed1i h\u1ed9p \u0111\u01b0\u1ee3c bao b\u1edfi 1 kh\u1ed1i h\u1ed9p xanh l\u00e1 c\u00e2y.",
+      "targets": [
+        [
+          "L25_V060",
+          28279
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-24-kis:1",
+      "text": "\u0110o\u1ea1n clip \u0111\u01b0\u1ee3c c\u1eaft t\u1eeb m\u1ed9t ph\u00f3ng s\u1ef1 v\u1ec1 m\u1ed9t nh\u00f3m c\u00e1c ngh\u1ec7 nh\u00e2n l\u00e0m ngh\u1ec1 \u0111an l\u00e1t c\u00e1c s\u1ea3n ph\u1ea9m th\u1ee7 c\u00f4ng t\u1eeb c\u00e2y l\u1ee5c b\u00ecnh. \u0110\u1ea7u ti\u00ean l\u00e0 m\u1ed9t c\u1ea3nh lia cam duy nh\u1ea5t t\u1eeb tr\u00e1i sang ph\u1ea3i, theo th\u1ee9 t\u1ef1 ta th\u1ea5y 4 s\u1ea3n ph\u1ea9m: t\u00fai x\u00e1ch, ch\u1eadu hoa, b\u1ed9 \u1ea5m t\u00e1ch tr\u00e0 v\u00e0 t\u00fai x\u00e1ch. Ngay sau c\u1ea3nh n\u00e0y, ng\u01b0\u1eddi ph\u1ee5 n\u1eef b\u00ean tr\u00e1i l\u1ea5y m\u1ed9t t\u00e1ch tr\u00e0 trong b\u1ed9 \u1ea5m t\u00e1ch v\u00e0 n\u00e2ng niu trong khi nghe ng\u01b0\u1eddi ph\u1ee5 n\u1eef b\u00ean ph\u1ea3i tr\u00f2 chuy\u1ec7n.",
+      "targets": [
+        [
+          "L29_V001",
+          8844
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-25-kis:1",
+      "text": "Hai b\u1ea1n h\u1ecdc sinh m\u1eb7c \u0111\u1ed3ng ph\u1ee5c \u00e1o tr\u1eafng, qu\u1ea7n xanh, qu\u00e0ng kh\u0103n \u0111\u1ecf \u0111ang l\u00e0m MC tr\u00ean m\u1ed9t s\u00e2n kh\u1ea5u t\u1ea1i tr\u01b0\u1eddng h\u1ecdc, ph\u00eda sau l\u00e0 m\u1ed9t b\u1ed9 tr\u1ed1ng c\u01a1 m\u00e0u \u0111\u1ecf v\u00e0 m\u1ed9t c\u00e2y \u0111\u00e0n piano.",
+      "targets": [
+        [
+          "L30_V003",
+          6577
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-3-qa:1",
+      "text": "H\u00ecnh \u1ea3nh m\u1ed9t con c\u00e1 \u0111\u01b0\u1ee3c \u0111\u1eb7t l\u00ean c\u00e2n, sau \u0111\u00f3 c\u00f3 c\u1ea3nh m\u1ed9t con c\u00e1 kh\u00e1c c\u00f9ng lo\u1ea1i b\u1ecb m\u1ed9t ng\u01b0\u1eddi c\u1ea7m \u0111u\u00f4i. Con s\u1ed1 hi\u1ec3n th\u1ecb cu\u1ed1i c\u00f9ng tr\u00ean c\u00e2n l\u00e0 bao nhi\u00eau?",
+      "targets": [
+        [
+          "L21_V023",
+          26043
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-4-kis:1",
+      "text": "M\u1ed9t \u0111\u00e0n s\u01b0 t\u1eed \u0111ang ngh\u1ec9 ng\u01a1i v\u00e0 leo tr\u00e8o tr\u00ean c\u00e1c b\u1ee5c g\u1ed7 trong khu nu\u00f4i d\u01b0\u1ee1ng, ph\u00eda tr\u01b0\u1edbc c\u00f3 b\u1ea3ng th\u00f4ng tin c\u1ee7a London Zoo ph\u1ee5c v\u1ee5 c\u00f4ng t\u00e1c theo d\u00f5i v\u00e0 b\u1ea3o t\u1ed3n \u0111\u1ed9ng v\u1eadt.. Sau \u0111\u00f3 c\u00f3 c\u1ea3nh hai nh\u00e2n vi\u00ean m\u1eb7c \u00e1o xanh l\u00e1 \u0111ang c\u00e2n v\u00e0 ghi nh\u1eadn s\u1ed1 li\u1ec7u c\u1ee7a m\u1ed9t con v\u1eadt trong khu\u00f4n vi\u00ean s\u1edf th\u00fa.",
+      "targets": [
+        [
+          "L22_V021",
+          19936
+        ],
+        [
+          "L22_V021",
+          19850
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-5-kis:1",
+      "text": "\u0110o\u1ea1n clip b\u1eaft \u0111\u1ea7u b\u1eb1ng vi\u1ec7c \u0111\u1eadu h\u00e0 lan \u0111\u01b0\u1ee3c b\u1ecf v\u00e0o v\u1edbi m\u1ef1c \u0111ang \u0111\u01b0\u1ee3c x\u00e0o tr\u00ean ch\u1ea3o, b\u00ean c\u1ea1nh l\u00e0 \u0111\u0129a h\u00e0nh t\u00e2y v\u00e0 \u1edbt \u0111\u1ecf th\u00e1i l\u00e1t chu\u1ea9n b\u1ecb cho v\u00e0o m\u00f3n \u0103n. \u0110o\u1ea1n clip k\u1ebft th\u00fac v\u1edbi khung quay ch\u1eadm (slow motion) c\u1ea3nh l\u1eafc ch\u1ea3o tr\u00ean b\u1ebfp l\u1eeda.",
+      "targets": [
+        [
+          "L26_V035",
+          5081
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-6-kis:1",
+      "text": "M\u1ea9u tin b\u1eaft \u0111\u1ea7u v\u1edbi h\u00ecnh \u1ea3nh n\u1ed9t ng\u01b0\u1eddi \u0111\u00e0n \u00f4ng m\u1eb7c vest xanh \u0111\u1eadm, s\u01a1 mi tr\u1eafng v\u00e0 c\u00e0 v\u1ea1t, \u0111ang ng\u1ed3i tr\u00ean m\u1ed9t chi\u1ebfc gh\u1ebf l\u1edbn. \u00d4ng c\u1ea7m b\u1eb1ng hai tay m\u1ed9t kh\u1ed1i \u0111\u00e1 qu\u00fd th\u00f4 kh\u00e1 l\u1edbn, \u0111\u01b0a l\u00ean g\u1ea7n m\u1eb7t \u0111\u1ec3 quan s\u00e1t.\r\nB\u00ean ph\u1ea3i l\u00e0 m\u1ed9t ph\u1ee5 n\u1eef m\u1eb7c trang ph\u1ee5c c\u00f4ng s\u1edf m\u00e0u \u0111en v\u00e0 kh\u0103n tr\u00f9m \u0111\u1ea7u m\u00e0u h\u1ed3ng t\u00edm, \u0111ang \u0111\u1ee9ng c\u1ea1nh v\u00e0 m\u1ec9m c\u01b0\u1eddi. Ti\u1ebfp theo c\u00f3 h\u00ecnh \u1ea3nh to\u00e0n c\u1ea3nh t\u1eeb tr\u00ean cao c\u1ee7a m\u1ed9t m\u1ecf \u0111\u00e1 qu\u00fd l\u1ed9 thi\u00ean quy m\u00f4 l\u1edbn v\u1edbi h\u1ed1 khai th\u00e1c s\u00e2u nhi\u1ec1u t\u1ea7ng v\u00e0 h\u1ec7 th\u1ed1ng \u0111\u01b0\u1eddng v\u1eadn chuy\u1ec3n bao quanh.",
+      "targets": [
+        [
+          "L22_V023",
+          18234
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-7-kis:1",
+      "text": "\u0110o\u1ea1n clip b\u1eaft \u0111\u1ea7u b\u1eb1ng c\u1ea3nh c\u00e0 r\u1ed1t c\u1eaft h\u00ecnh ng\u00f4i sao \u0111ang \u0111\u01b0\u1ee3c lu\u1ed9c trong n\u1ed3i n\u01b0\u1edbc s\u00f4i, \u0111\u1eb7t trong r\u1ed5 l\u01b0\u1edbi kim lo\u1ea1i v\u00e0 \u0111\u01b0\u1ee3c \u0111\u1ea3o b\u1eb1ng \u0111\u00f4i \u0111\u0169a g\u1ed7. \r\n\u0110o\u1ea1n clip k\u1ebft th\u00fac b\u1eb1ng h\u00ecnh \u1ea3nh \u0111\u0129a rau c\u1ee7 lu\u1ed9c v\u00e0 \u0111\u1ed3 chi\u00ean \u0111\u01b0\u1ee3c tr\u00ecnh b\u00e0y \u0111\u1eb9p m\u1eaft, g\u1ed3m \u0111\u1eadu b\u1eafp, s\u00fap l\u01a1, c\u00e0 r\u1ed1t h\u00ecnh ng\u00f4i sao, b\u00ed xanh, ch\u00e9n n\u01b0\u1edbc ch\u1ea5m m\u00e0u h\u1ed3ng \u1edf gi\u1eefa v\u00e0 \u0111\u00f4i \u0111\u0169a m\u00e0u h\u1ed3ng nh\u1ea1t \u0111\u1eb7t b\u00ean ph\u1ea3i",
+      "targets": [
+        [
+          "L26_V041",
+          3644
+        ],
+        [
+          "L26_V041",
+          6800
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-8-kis:1",
+      "text": "Ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp l\u1ea7n l\u01b0\u1ee3t \u0111\u1eb7t c\u00e1c mi\u1ebfng nguy\u00ean li\u1ec7u d\u1ea1ng thanh v\u00e0 nh\u1eefng l\u00e1t c\u1eaft h\u00ecnh hoa v\u00e0o m\u1ed9t \u0111\u0129a \u0111ang \u0111\u01b0\u1ee3c h\u1ea5p trong n\u1ed3i.\r\nC\u00e1c nguy\u00ean li\u1ec7u \u0111\u01b0\u1ee3c d\u00f9ng \u0111\u0169a s\u1eafp x\u1ebfp xen k\u1ebd xung quanh ph\u1ea7n th\u1ee9c \u0103n \u0111\u00e3 c\u00f3 s\u1eb5n tr\u00ean \u0111\u0129a.\r\nSau \u0111\u00f3, \u0111\u1ea7u b\u1ebfp d\u00f9ng mu\u1ed7ng l\u1ea5y th\u00eam m\u1ed9t lo\u1ea1i nguy\u00ean li\u1ec7u m\u1ec1m t\u1eeb t\u00f4 th\u1ee7y tinh.\r\nPh\u1ea7n nguy\u00ean li\u1ec7u n\u00e0y \u0111\u01b0\u1ee3c \u0111\u1eb7t v\u00e0o gi\u1eefa \u0111\u0129a, xung quanh l\u00e0 c\u00e1c mi\u1ebfng d\u1ea1ng thanh v\u00e0 h\u00ecnh hoa \u0111\u00e3 \u0111\u01b0\u1ee3c s\u1eafp x\u1ebfp tr\u01b0\u1edbc \u0111\u00f3.",
+      "targets": [
+        [
+          "L26_V171",
+          5522
+        ]
+      ]
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-9-qa:1",
+      "text": "\u0110o\u1ea1n phim ghi l\u1ea1i c\u1ea3nh nh\u1eefng chi\u1ebfc xe \u00f4 t\u00f4 l\u1ed9i n\u01b0\u1edbc, chi\u1ebfc xe m\u00e0u v\u00e0ng, m\u00e0u \u0111\u1ecf v\u00e0 m\u00e0u \u0111en l\u1ea7n l\u01b0\u1ee3t chu\u1ea9n b\u1ecb \u0111i qua c\u1ea7u. Con s\u1ed1 \u0111\u01b0\u1ee3c ghi tr\u00ean bi\u1ec3n b\u00e1o b\u00ean tr\u00e1i c\u1ee7a c\u00e2y c\u1ea7u l\u00e0 bao nhi\u00eau?",
+      "targets": [
+        [
+          "L21_V003",
+          26248
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-1-kis:1",
+      "text": "Nh\u00f3m 5 ng\u01b0\u1eddi \u0111ang ch\u01a1i \u0111\u00f9a b\u00ean c\u1ea1nh m\u1ed9t con v\u1eadt m\u00e0u v\u00e0ng. M\u1ed9t trong s\u1ed1 \u0111\u00f3 \u0111\u00e3 mang m\u1ed9t v\u1eadt tr\u00f4ng nh\u01b0 tr\u00e1i b\u00ed \u0111\u1ecf \u0111i gi\u1ea5u. Ng\u01b0\u1eddi \u0111\u00e0n \u00f4ng th\u1ee9c d\u1eady kh\u00f4ng th\u1ea5y qu\u1ea3 b\u00ed \u0111\u1ecf \u0111\u00e2u n\u00ean \u0111\u00e1nh th\u1ee9c con v\u1eadt d\u1eady.",
+      "targets": [
+        [
+          "L24_V035",
+          640
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-10-kis:1",
+      "text": "M\u1ed9t \u0111\u1ea7u b\u1ebfp ch\u1ebf bi\u1ebfn m\u00f3n \u0103n trong ch\u1ea3o, v\u1edbi c\u00e1c mi\u1ebfng d\u1ed3i tr\u01b0\u1eddng m\u00e0u tr\u1eafng v\u00e0 rau xanh.\r\n\u0110\u1ea7u b\u1ebfp cho b\u00f4ng h\u1eb9 v\u00e0o ch\u1ea3o \u0111ang c\u00f3 d\u1ed3i tr\u01b0\u1eddng r\u1ed3i d\u00f9ng d\u1ee5ng c\u1ee5 \u0111\u1ea3o c\u00e1c nguy\u00ean li\u1ec7u.\r\nC\u00e1c \u0111o\u1ea1n b\u00f4ng h\u1eb9 d\u00e0i m\u00e0u xanh \u0111\u01b0\u1ee3c tr\u1ed9n c\u00f9ng nh\u1eefng mi\u1ebfng d\u1ed3i tr\u01b0\u1eddng tr\u1eafng trong ch\u1ea3o.\r\nM\u00e1y quay chuy\u1ec3n sang c\u1eadn c\u1ea3nh ch\u1ea3o khi \u0111\u1ea7u b\u1ebfp ti\u1ebfp t\u1ee5c x\u00e0o v\u00e0 tr\u1ed9n hai nguy\u00ean li\u1ec7u.",
+      "targets": [
+        [
+          "L26_V120",
+          5332
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-11-kis:1",
+      "text": "Trong video, ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp c\u1ea7m m\u1ed9t nguy\u00ean li\u1ec7u d\u00e0i \u0111\u00e3 \u0111\u01b0\u1ee3c xi\u00ean que v\u00e0 l\u0103n qua h\u1ed7n h\u1ee3p m\u00e0u xanh l\u00e1 c\u00e2y v\u00e0 m\u00e0u \u0111\u1ecf \u0111\u00e3 b\u0103m nh\u1ecf.\r\nNguy\u00ean li\u1ec7u sau \u0111\u00f3 \u0111\u01b0\u1ee3c chuy\u1ec3n sang m\u1ed9t \u0111\u0129a ch\u1ee9a b\u1ed9t tr\u1eafng \u0111\u1ec3 ph\u1ee7 b\u00ean ngo\u00e0i.\r\nNg\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp c\u1ea7m que xi\u00ean v\u00e0 xoay nguy\u00ean li\u1ec7u qua l\u1ea1i nhi\u1ec1u l\u1ea7n tr\u00ean l\u1edbp b\u1ed9t.\r\nCu\u1ed1i c\u00f9ng, nguy\u00ean li\u1ec7u \u0111\u00e3 \u0111\u01b0\u1ee3c ph\u1ee7 k\u00edn m\u1ed9t l\u1edbp b\u1ed9t tr\u1eafng v\u00e0 \u0111\u1eb7t ri\u00eang sang m\u1ed9t chi\u1ebfc \u0111\u0129a.",
+      "targets": [
+        [
+          "L26_V392",
+          3692
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-12-qa:1",
+      "text": "\u0110o\u1ea1n video m\u00f4 t\u1ea3 qu\u00e1 tr\u00ecnh l\u00e0m b\u00e1nh, b\u00e1nh \u0111\u01b0\u1ee3c t\u1ea1o ra c\u00f3 m\u00e0u t\u00edm, nguy\u00ean li\u1ec7u b\u00ean trong c\u00f3 gi\u00e1, c\u00e0 r\u1ed1t, v\u00e0 b\u00ean trong m\u1ed7i b\u00e1nh \u0111\u1ec1u c\u00f3 1 h\u1ea1t sen. M\u1ed7i l\u1ea7n khu\u00f4n n\u00e0y l\u00e0m \u0111\u01b0\u1ee3c bao nhi\u00eau c\u00e1i b\u00e1nh?",
+      "targets": [
+        [
+          "L26_V192",
+          5736
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-13-kis:1",
+      "text": "Ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp \u0111\u1ea3o \u0111\u1ec1u m\u1ed9t h\u1ed7n h\u1ee3p c\u00e1c nguy\u00ean li\u1ec7u trong ch\u1ea3o, nh\u00ecn b\u1eb1ng m\u1eaft th\u01b0\u1eddng c\u00f3 th\u1ec3 th\u1ea5y m\u1ed9t s\u1ed1 nguy\u00ean li\u1ec7u nh\u01b0 th\u1ecbt g\u00e0, \u1edbt \u0111\u1ecf, \u1edbt xanh, \u0111\u1eadu ph\u1ed9ng v\u00e0 h\u00e0nh t\u00edm. Sau \u0111\u00f3 c\u00f4 \u1ea5y t\u1eaft l\u1eeda, cho th\u00eam v\u1ecf chanh v\u00e0 n\u01b0\u1edbc c\u1ed1t chanh v\u00e0o ch\u1ea3o tr\u01b0\u1edbc khi tr\u00fat h\u1ed7n h\u1ee3p th\u1ee9c \u0103n n\u00e0y ra \u0111\u0129a.",
+      "targets": [
+        [
+          "L26_V422",
+          4499
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-14-kis:1",
+      "text": "C\u1eadn c\u1ea3nh m\u1ed9t nh\u00f3m 3 v\u1eadn \u0111\u1ed9ng vi\u00ean \u0111ua xe \u0111\u1ea1p \u0111ang di chuy\u1ec3n s\u00e1t nhau, hai tay \u0111ua m\u1eb7c \u00e1o xanh bi\u1ec3n \u0111\u1ed9i m\u0169 b\u1ea3o hi\u1ec3m \u0111\u1ecf v\u00e0 tr\u1eafng, b\u00ean c\u1ea1nh c\u00f3 m\u1ed9t tay \u0111ua m\u1eb7c \u00e1o v\u00e0ng \u0111ang \u0111ua c\u00f9ng. B\u00ean d\u01b0\u1edbi quai m\u0169 c\u1ee7a tay \u0111ua n\u00f3n \u0111\u1ecf c\u00f3 m\u1ed9t s\u1ee3i d\u00e2y m\u00e0u tr\u1eafng treo l\u1ee7ng xu\u1ed1ng g\u1ea7n c\u1ed5.",
+      "targets": [
+        [
+          "L23_V010",
+          609
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-15-kis:1",
+      "text": "C\u1ea3nh phim l\u1ea7n l\u01b0\u1ee3t gi\u1edbi thi\u1ec7u c\u00e1c nguy\u00ean li\u1ec7u c\u1ee7a m\u00f3n \u0103n qua 3 chuy\u1ec3n c\u1ea3nh: m\u00e1y quay ch\u00e9o l\u00ean v\u00e0 k\u1ebft th\u00fac \u1edf nguy\u00ean li\u1ec7u h\u1ea3i s\u1ea3n \u0111\u1ea7u ti\u00ean; quay t\u1eeb tr\u00ean xu\u1ed1ng c\u1eadn c\u1ea3nh nguy\u00ean li\u1ec7u h\u1ea3i s\u1ea3n th\u1ee9 hai r\u1ed3i chuy\u1ec3n sang c\u00e1c nguy\u00ean li\u1ec7u nhi\u1ec1u m\u00e0u s\u1eafc; cu\u1ed1i c\u00f9ng l\u00e0 c\u00fa m\u00e1y t\u0129nh to\u00e0n c\u1ea3nh to\u00e0n b\u1ed9 nguy\u00ean li\u1ec7u.",
+      "targets": [
+        [
+          "L26_V074",
+          745
+        ],
+        [
+          "L26_V074",
+          679
+        ],
+        [
+          "L26_V074",
+          619
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-16-kis:1",
+      "text": "Trong m\u1ed9t ng\u00f4i nh\u00e0 n\u00f4ng th\u00f4n c\u00f3 c\u1eeda s\u1ed5 l\u1edbn, hai ng\u01b0\u1eddi ph\u1ee5 n\u1eef \u0111ang l\u00e0m th\u1ee7 c\u00f4ng tr\u00ean m\u1ed9t b\u1ed9 v\u00e1n ng\u1ef1a, ph\u00eda sau l\u00e0 m\u1ed9t d\u00e3y kho\u1ea3ng 10 th\u1edbt g\u1ed7 \u0111\u01b0\u1ee3c treo th\u00e0nh m\u1ed9t h\u00e0ng ngang.",
+      "targets": [
+        [
+          "L29_V014",
+          10715
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-17-kis:1",
+      "text": "S\u00e2n kh\u1ea5u v\u1edbi d\u00f2ng ch\u1eef n\u1ed5i 3D to, \u00e1nh kim ph\u1ee7 kim tuy\u1ebfn c\u00f3 n\u1ed9i dung: \u201cS\u1eaeC C\u1ed4 ...\u201d \u0111\u1eb7t \u1edf m\u00e9p tr\u01b0\u1edbc s\u00e2n kh\u1ea5u.",
+      "targets": [
+        [
+          "L30_V026",
+          2028
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-18-kis:1",
+      "text": "\u0110o\u1ea1n phim quay t\u1eeb ph\u00eda sau nh\u00f3m d\u1eabn \u0111\u1ea7u, g\u1ed3m 1 tay \u0111ua d\u1eabn tr\u01b0\u1edbc v\u00e0 3 tay \u0111ua b\u00e1m ph\u00eda sau, khi c\u1ea3 nh\u00f3m r\u1ebd ph\u1ea3i v\u00e0o \u0111\u01b0\u1eddng H\u1ed3 T\u00f9ng M\u1eadu t\u1ea1i giao l\u1ed9 c\u00f3 \u0111\u00e8n xanh \u0111ang \u0111\u1ebfm ng\u01b0\u1ee3c \u0111\u1ebfn 13 gi\u00e2y.",
+      "targets": [
+        [
+          "L23_V017",
+          2566
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-19-qa:1",
+      "text": "\u0110o\u1ea1n phim ghi l\u1ea1i c\u1ea3nh m\u1ea1nh th\u01b0\u1eddng qu\u00e2n h\u1ed7 tr\u1ee3 m\u1ed9t qu\u00e1n tr\u1ecd d\u00e0nh cho ng\u01b0\u1eddi cao tu\u1ed5i, sau \u0111\u00f3 chuy\u1ec3n sang c\u1ea3nh m\u1ed9t c\u1ee5 \u00f4ng tr\u00f2 chuy\u1ec7n v\u1edbi nh\u00f3m ng\u01b0\u1eddi n\u01b0\u1edbc ngo\u00e0i. H\u1ecfi qu\u00e1n tr\u1ecd \u0111\u01b0\u1ee3c nh\u1eafc \u0111\u1ebfn trong \u0111o\u1ea1n phim n\u1eb1m tr\u00ean \u0111\u01b0\u1eddng n\u00e0o?",
+      "targets": [
+        [
+          "L30_V043",
+          3746
+        ],
+        [
+          "L30_V043",
+          2955
+        ],
+        [
+          "L30_V043",
+          2012
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-2-kis:1",
+      "text": "\u0110o\u1ea1n clip b\u1eaft \u0111\u1ea7u v\u1edbi c\u1ea3nh m\u1ed9t ng\u01b0\u1eddi \u0111ang d\u00f9ng \u0111i\u1ec7n tho\u1ea1i ch\u1ee5p \u1ea3nh b\u1ee9c tranh h\u00ecnh t\u00ea gi\u00e1c tr\u00ean t\u01b0\u1eddng. \u0110o\u1ea1n clip k\u1ebft th\u00fac v\u1edbi c\u1ea3nh m\u1ed9t ng\u01b0\u1eddi ch\u1ee5p \u1ea3nh c\u00e1c h\u00ecnh graffiti 3 ch\u00fa kh\u1ec9 tr\u00ean m\u1ed9t c\u00e2y c\u1ea7u",
+      "targets": [
+        [
+          "L21_V013",
+          22596
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-20-kis:1",
+      "text": "Clip b\u00e0i gi\u1ea3ng m\u00f4n \u0110\u1ecba l\u00ed, c\u00f3 1 b\u1ea3ng s\u1ed1 li\u1ec7u v\u1ec1 m\u1ea1ng l\u01b0\u1edbi \u0111\u00f4 th\u1ecb \u1edf Vi\u1ec7t Nam. B\u1ea3ng n\u00e0y th\u1ec3 hi\u1ec7n s\u1ef1 kh\u00e1c nhau v\u1ec1 ph\u00e2n b\u1ed1 \u0111\u00f4 th\u1ecb gi\u1eefa c\u00e1c v\u00f9ng b\u1eb1ng m\u00e0u s\u1eafc: 3 v\u00f9ng c\u00f3 nhi\u1ec1u \u0111\u00f4 th\u1ecb nh\u1ea5t th\u00ec con s\u1ed1 th\u1ec3 hi\u1ec7n s\u1ed1 l\u01b0\u1ee3ng \u0111\u00f4 th\u1ecb \u0111\u01b0\u1ee3c in m\u00e0u \u0111\u1ecf, c\u00f2n 2 v\u00f9ng c\u00f3 \u00edt \u0111\u00f4 th\u1ecb nh\u1ea5t th\u00ec con s\u1ed1 n\u00e0y \u0111\u01b0\u1ee3c in m\u00e0u xanh. T\u1eeb b\u1ea3ng s\u1ed1 li\u1ec7u ta c\u00f2n c\u00f3 th\u1ec3 th\u1ea5y r\u1eb1ng v\u00f9ng c\u00f3 \u00edt \u0111\u00f4 th\u1ecb nh\u1ea5t l\u1ea1i l\u00e0 v\u00f9ng c\u00f3 d\u00e2n s\u1ed1 \u0111\u00f4 thi cao nh\u1ea5t.",
+      "targets": [
+        [
+          "L25_V060",
+          33602
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-21-trake:1",
+      "text": "Hai ng\u01b0\u1eddi ph\u1ee5 n\u1eef c\u00f9ng nhau d\u00e1n ni\u00eam phong m\u1ed9t th\u00f9ng carton.",
+      "targets": [
+        [
+          "L30_V031",
+          2105
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-21-trake:2",
+      "text": "C\u00e1c th\u00f9ng m\u00ec t\u00f4m v\u00e0 b\u1ecdc b\u00e1nh m\u00ec \u0111\u01b0\u1ee3c s\u1eafp x\u1ebfp ngay ng\u1eafn.",
+      "targets": [
+        [
+          "L30_V031",
+          2146
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-21-trake:3",
+      "text": "M\u1ed9t ng\u01b0\u1eddi \u0111\u00e0n \u00f4ng nh\u1ea5c th\u00f9ng m\u00ec t\u00f4m l\u00ean v\u00e0 x\u1ebfp l\u00ean tr\u00ean ch\u1ed3ng th\u00f9ng m\u00ec.",
+      "targets": [
+        [
+          "L30_V031",
+          2220
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-21-trake:4",
+      "text": "C\u1ea3nh quay c\u1eadn c\u1ea3nh c\u00e1c th\u00f9ng m\u00ec \u0111\u01b0\u1ee3c x\u1ebfp ch\u1ed3ng tr\u00ean xe t\u1ea3i.",
+      "targets": [
+        [
+          "L30_V031",
+          2263
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-22-kis:1",
+      "text": "Trong video n\u1ea5u \u0103n, m\u1ed9t lo\u1ea1i nguy\u00ean li\u1ec7u h\u1ea3i s\u1ea3n m\u00e0u tr\u1eafng \u0111\u01b0\u1ee3c kh\u1ee9a theo nh\u1eefng \u0111\u01b0\u1eddng th\u1eb3ng vu\u00f4ng g\u00f3c nhau, tr\u00ean c\u1ea3 2 b\u1ec1 m\u1eb7t c\u1ee7a nguy\u00ean li\u1ec7u n\u00e0y. Nguy\u00ean li\u1ec7u sau \u0111\u00f3 \u0111\u01b0\u1ee3c c\u1eaft th\u00e0nh t\u1eebng que v\u00e0 cho v\u00e0o t\u00f4, tr\u01b0\u1edbc khi \u0111\u01b0\u1ee3c tr\u1ed9n \u0111\u1ec1u v\u1edbi c\u00e1c gia v\u1ecb g\u1ed3m r\u01b0\u1ee3u, ti\u00eau v\u00e0 h\u1ea1t n\u00eam.",
+      "targets": [
+        [
+          "L26_V470",
+          2100
+        ],
+        [
+          "L26_V470",
+          2541
+        ],
+        [
+          "L26_V470",
+          3157
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-23-qa:1",
+      "text": "C\u00e2u h\u1ecfi m\u00f4n Sinh h\u1ecdc n\u1eb1m \u1edf s\u1ed1 th\u1ee9 t\u1ef1 11 trong \u0111\u1ec1 thi THPTQG 2022. Trong c\u00e2u h\u1ecfi c\u00f3 m\u1ed9t bi\u1ec3u \u0111\u1ed3 \u0111\u01b0a ra s\u1ef1 so s\u00e1nh t\u1ed1c \u0111\u1ed9 sinh tr\u01b0\u1edfng c\u1ee7a c\u00e1c lo\u00e0i th\u1ef1c v\u1eadt trong c\u00e1c h\u1ec7 sinh th\u00e1i ven bi\u1ec3n. H\u00e3y cho bi\u1ebft lo\u00e0i c\u00e2y (II) \u0111\u1ea1t \u0111\u01b0\u1ee3c t\u1ed1c \u0111\u1ed9 sinh tr\u01b0\u1edfng t\u1ed1t nh\u1ea5t khi m\u00f4i tr\u01b0\u1eddng s\u1ed1ng c\u00f3 \u0111\u1ed9 m\u1eb7n l\u00e0 bao nhi\u00eau ph\u1ea7n ngh\u00ecn?",
+      "targets": [
+        [
+          "L25_V012",
+          22140
+        ],
+        [
+          "L25_V012",
+          14830
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-24-kis:1",
+      "text": "\u0110o\u1ea1n clip ghi l\u1ea1i kho\u1ea3nh kh\u1eafc v\u1ec1 \u0111\u00edch c\u1ee7a m\u1ed9t ch\u1eb7ng \u0111ua xe \u0111\u1ea1p di\u1ec5n ra t\u1ea1i th\u00e0nh ph\u1ed1 thu\u1ed9c t\u1ec9nh Qu\u1ea3ng Nam (c\u0169, tr\u01b0\u1edbc ng\u00e0y 01/7/2025). V\u1eadn \u0111\u1ed9ng vi\u00ean ng\u01b0\u1eddi Estonia m\u1eb7c \u00e1o xanh n\u01b0\u1edbc bi\u1ec3n d\u1eabn \u0111\u1ea7u \u0111o\u00e0n. Khi ch\u1ec9 c\u00f2n c\u00e1ch \u0111\u00edch m\u1ed9t \u0111o\u1ea1n ng\u1eafn, anh bu\u00f4ng c\u1ea3 hai tay kh\u1ecfi ghi-\u0111\u00f4ng, giang hai tay l\u00ean cao \u0103n m\u1eebng chi\u1ebfn th\u1eafng trong khi xe v\u1eabn ti\u1ebfn v\u1ec1 ph\u00eda tr\u01b0\u1edbc. Ngay ph\u00eda sau anh l\u00e0 m\u1ed9t v\u1eadn \u0111\u1ed9ng vi\u00ean m\u1eb7c \u00e1o v\u00e0ng v\u00e0 m\u1ed9t v\u1eadn \u0111\u1ed9ng vi\u00ean m\u1eb7c \u00e1o cam \u0111ang l\u1ea7n l\u01b0\u1ee3t lao v\u1ec1 \u0111\u00edch.",
+      "targets": [
+        [
+          "L23_V013",
+          4938
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-25-kis:1",
+      "text": "C\u1ea3nh gi\u00e1o vi\u00ean nam \u0111eo k\u00ednh, m\u1eb7c \u00e1o s\u01a1 mi k\u1ebb s\u1ecdc ng\u1eafn tay, xu\u1ea5t hi\u1ec7n \u1edf g\u00f3c d\u01b0\u1edbi b\u00ean tr\u00e1i v\u00e0 d\u00f9ng hai tay l\u00e0m c\u1eed ch\u1ec9 minh h\u1ecda khi \u0111ang gi\u1ea3ng b\u00e0i.\r\n\r\nKhung h\u00ecnh ch\u1ee9a m\u1ed9t b\u1ee9c \u1ea3nh minh h\u1ecda c\u00f4 g\u00e1i tr\u1ebb \u0111eo k\u00ednh, m\u1eb7c \u00e1o s\u01a1 mi tr\u1eafng, ng\u1ed3i khoanh ch\u00e2n tr\u00ean gh\u1ebf sofa m\u00e0u x\u00e1m v\u1eeba c\u1ea7m c\u1ed1c n\u01b0\u1edbc v\u1eeba nh\u00ecn v\u00e0o laptop m\u1edf tr\u00ean \u0111\u00f9i.",
+      "targets": [
+        [
+          "L25_V045",
+          16264
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-26-kis:1",
+      "text": "\u0110\u00e2y l\u00e0 m\u1ed9t \u0111o\u1ea1n trong b\u00e0i gi\u1ea3ng. Tr\u00ean slide bao g\u1ed3m:\r\n- M\u1ed9t nh\u00f3m nh\u00e2n v\u1eadt ng\u01b0\u1eddi 3D m\u00e0u tr\u1eafng v\u00e2y quanh m\u1ed9t nh\u00e2n v\u1eadt m\u00e0u \u0111\u1ecf \u1edf ch\u00ednh gi\u1eefa.\r\n\r\n- Hai nh\u00e2n v\u1eadt ho\u1ea1t h\u00ecnh nam \u0111ang trong t\u01b0 th\u1ebf thi \u0111\u1ea5u k\u00e9o co, \u0111\u1ed1i \u0111\u1ea7u nhau v\u1edbi s\u1ee3i d\u00e2y th\u1eebng.",
+      "targets": [
+        [
+          "L25_V062",
+          13788
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-27-qa:1",
+      "text": "C\u1ea3nh quay m\u1ed9t ch\u00fa l\u00e2n \u0111ang bi\u1ec3u di\u1ec5n t\u1eeb \u0111\u1ea7u video, c\u00e1c c\u1ed9t \u0111\u1ec3 ch\u00fa l\u00e2n bi\u1ec3u di\u1ec5n \u0111\u01b0\u1ee3c d\u00e1n nh\u1eefng con s\u1ed1. Ph\u00eda sau c\u00f3 1 m\u00f4 h\u00ecnh con r\u1ed3ng u\u1ed1n l\u01b0\u1ee3n h\u00ecnh xo\u1eafn \u1ed1c. Trong c\u00e1c s\u1ed1 t\u1eeb 16 gi\u00e2y \u0111\u1ea7u ti\u00ean c\u1ee7a video, s\u1ed1 n\u00e0o kh\u00f4ng \u0111\u01b0\u1ee3c nh\u00ecn th\u1ea5y t\u1eeb g\u00f3c nh\u00ecn c\u1ee7a camera trong c\u00e1c s\u1ed1 t\u1eeb 1-8.",
+      "targets": [
+        [
+          "L24_V033",
+          42
+        ],
+        [
+          "L24_V026",
+          141
+        ],
+        [
+          "L24_V018",
+          45
+        ],
+        [
+          "L24_V023",
+          319
+        ],
+        [
+          "L24_V024",
+          319
+        ],
+        [
+          "L24_V033",
+          384
+        ],
+        [
+          "L24_V029",
+          467
+        ],
+        [
+          "L24_V042",
+          356
+        ],
+        [
+          "L24_V019",
+          50
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-28-qa:1",
+      "text": "C\u1ea3nh quay m\u1ed9t t\u00f4 ch\u00e1o \u0111\u00e3 \u0111\u01b0\u1ee3c n\u1ea5u v\u00e0 trang tr\u00ed ho\u00e0n ch\u1ec9nh (\u0111\u00e3 xong c\u00e1c giai \u0111o\u1ea1n trang tr\u00ed). K\u1ebf b\u00ean t\u00f4 ch\u00e1o c\u00f3 1 ch\u00e9n nh\u1ecf m\u00e0u \u0111en, \u0111\u1ec3 ch\u1ee9a 1 lo\u1ea1i topping m\u00e0u cam k\u1ebft c\u1ea5u h\u01a1i gi\u1ed1ng nh\u1eefng s\u1ee3i nh\u1ecf. Lo\u1ea1i topping n\u00e0y tr\u01b0\u1edbc \u0111\u00f3 \u0111\u00e3 \u0111\u01b0\u1ee3c r\u1eafc l\u00ean t\u00f4 ch\u00e1o. Xung quanh topping l\u00e0 c\u00e1c lo\u1ea1i rau, h\u00e0nh,... H\u1ecfi topping trong video l\u00e0 th\u1ecbt c\u1ee7a con g\u00ec?",
+      "targets": [
+        [
+          "L26_V450",
+          6640
+        ],
+        [
+          "L26_V450",
+          1034
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-29-qa:1",
+      "text": "C\u1ea3nh quay li\u1ec7t k\u00ea c\u00e1c nguy\u00ean li\u1ec7u \u0111\u1ec3 n\u1ea5u m\u1ed9t m\u00f3n \u0103n. \u1ea2nh n\u1ec1n bao g\u1ed3m d\u0129a th\u1ecbt, b\u00f3 l\u00e1 t\u01b0\u01a1i xanh \u0111\u1eb7t \u1edf g\u00f3c b\u00ean tr\u00e1i, m\u1ed9t g\u00f3i h\u1ea1t n\u00eam, h\u0169 th\u1ee7y tinh nh\u1ecf \u0111\u1ef1ng n\u01b0\u1edbc c\u1ed1t d\u1eeba, b\u1ed9t c\u00e0 ri, n\u1ea5m m\u00e8o (m\u1ed9c nh\u0129) kh\u00f4 \u0111\u1eb7t ph\u00eda d\u01b0\u1edbi ch\u00e9n gia v\u1ecb, s\u1ea3 c\u00e2y v\u00e0 \u1edbt hi\u1ec3m \u0111\u1ecf \u0111\u1eb7t \u1edf g\u00f3c tr\u00e1i ph\u00eda d\u01b0\u1edbi. B\u1ea3ng nguy\u00ean li\u1ec7u hi\u1ec7n l\u00ean g\u1ed3m 9 th\u00e0nh ph\u1ea7n c\u1ee5 th\u1ec3. H\u1ecfi ph\u1ea7n th\u1ecbt c\u00f3 tr\u1ecdng l\u01b0\u1ee3ng bao nhi\u00eau trong b\u1ea3ng nguy\u00ean li\u1ec7u (s\u1ed1 v\u00e0 \u0111\u01a1n v\u1ecb \u0111\u01b0\u1ee3c ghi trong b\u1ea3ng)?",
+      "targets": [
+        [
+          "L26_V439",
+          1485
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-3-kis:1",
+      "text": "M\u1ed9t ch\u00fa l\u00e2n (hay r\u1ed3ng/s\u01b0 t\u1eed?) m\u00e0u v\u00e0ng nh\u1ea3y hay r\u01a1i t\u1eeb tr\u00ean cao xu\u1ed1ng, g\u1ea7n v\u1edbi m\u00f4 h\u00ecnh chi\u1ebfc t\u00e0u th\u1ee7y nh\u1ecf m\u00e0u xanh d\u01b0\u01a1ng.",
+      "targets": [
+        [
+          "L24_V044",
+          256
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-30-qa:1",
+      "text": "M\u1ed9t c\u00f4 g\u00e1i \u0111eo t\u1ea1p d\u1ec1 m\u00e0u tr\u1eafng, b\u00ean c\u1ea1nh l\u00e0 m\u1ed9t l\u1ecd hoa ri\u1ec1ng t\u00eda. Sau \u0111\u00f3 c\u00f4 g\u00e1i n\u00e0y \u0111\u1eb7t l\u00ean 1 d\u0129a tr\u1eafng 4 con X, \u0111\u01b0\u1ee3c bi\u1ebft X l\u00e0 nguy\u00ean li\u1ec7u cho m\u00f3n \u0103n trong t\u1eadp n\u00e0y. Sau \u0111\u00f3 ng\u01b0\u1eddi n\u00e0y l\u1ea1i c\u1ea7m l\u00ean 2 con X. Sau \u0111\u00f3 ng\u01b0\u1eddi n\u00e0y \u0111\u1ed1i tho\u1ea1i v\u1edbi m\u1ed9t ng\u01b0\u1eddi \u0111\u1ed1i di\u1ec7n \u0111\u1ec3 xem h\u00f4m nay n\u1ea5u m\u00f3n g\u00ec. H\u1ecfi X l\u00e0 con g\u00ec?",
+      "targets": [
+        [
+          "L26_V254",
+          529
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-4-kis:1",
+      "text": "Hai b\u1ea1n tr\u1ebb \u0111ang treo b\u0103ng-r\u00f4n l\u1edbn c\u00f3 t\u00f4ng m\u00e0u xanh d\u01b0\u01a1ng, \u0111\u01b0\u1ee3c trang tr\u00ed b\u1eb1ng h\u00ecnh \u1ea3nh n\u00fai, m\u00e2y v\u00e0 m\u1ed9t con \u0111\u01b0\u1eddng d\u1eabn t\u1edbi tr\u01b0\u1eddng h\u1ecdc. Tr\u00ean b\u0103ng r\u00f4n c\u00f2n c\u00f3 h\u00ecnh \u1ea3nh 02 em b\u00e9 v\u00f9ng kh\u00f3 kh\u0103n \u0111ang m\u1eb7c \u00e1o m\u00e0u v\u00e0ng.",
+      "targets": [
+        [
+          "L30_V072",
+          748
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-5-kis:1",
+      "text": "M\u1ed9t ng\u01b0\u1eddi \u00e1o \u0111\u1ecf, \u0111\u1ed9i n\u00f3n m\u00e0u tr\u1eafng, \u0111ang l\u1ea5y n\u01b0\u1edbc r\u01b0\u1edbi v\u00e0o m\u1eb7t c\u1ee7a m\u00ecnh. Khung h\u00ecnh c\u00f3 hai ng\u01b0\u1eddi \u0111i xe \u0111\u1ea1p, ng\u01b0\u1eddi m\u1eb7c \u00e1o xanh \u0111\u1eadm \u0111ang \u0111u\u1ed5i theo ng\u01b0\u1eddi m\u1eb7c \u00e1o \u0111en ph\u1ed1i cam.",
+      "targets": [
+        [
+          "L21_V022",
+          26107
+        ],
+        [
+          "L21_V022",
+          26258
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-6-kis:1",
+      "text": "\u0110o\u1ea1n video do ng\u01b0\u1eddi \u0111i \u0111\u01b0\u1eddng ph\u00eda sau ghi l\u1ea1i cho th\u1ea5y 2 thanh ni\u00ean \u0111i\u1ec1u khi\u1ec3n xe m\u00e1y b\u1ea5t ng\u1edd n\u1eb1m d\u00e0i tr\u00ean y\u00ean v\u00e0 ph\u00f3ng v\u1edbi t\u1ed1c \u0111\u1ed9 cao. Xu\u1ea5t hi\u1ec7n trong khung h\u00ecnh c\u00f2n c\u00f3 m\u1ed9t chi\u1ebfc \u00f4 t\u00f4 m\u00e0u xanh c\u00f9ng m\u1ed9t ng\u01b0\u1eddi \u0111i xe m\u00e1y m\u1eb7c \u00e1o xanh kh\u00e1c. C\u00f3 2 v\u00f2ng tr\u00f2n m\u00e0u \u0111\u1ecf xu\u1ea5t hi\u1ec7n \u0111\u1ec3 khoanh v\u00f9ng v\u1ecb tr\u00ed 2 thanh ni\u00ean n\u00e0y.",
+      "targets": [
+        [
+          "L22_V024",
+          20783
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-7-qa:1",
+      "text": "\u0110o\u1ea1n clip \u0111\u01b0\u1ee3c quay t\u1eeb b\u00ean trong m\u1ed9t chi\u1ebfc xe \u00f4 t\u00f4 t\u1ef1 l\u00e1i, c\u00f3 th\u1ec3 th\u1ea5y r\u00f5 v\u00f4 l\u0103ng \u0111\u01b0\u1ee3c xoay \u0111\u1ec3 chi\u1ebfc xe r\u1ebd sang ph\u1ea3i. Sau \u0111\u00f3, g\u00f3c quay chuy\u1ec3n ra ngo\u00e0i, b\u1eaft tr\u1ecdn c\u1ea3nh chi\u1ebfc xe m\u00e0u tr\u1eafng r\u1ebd tr\u00e1i, v\u00e0 \u1edf g\u00f3c tr\u00ean khung h\u00ecnh c\u00f3 m\u1ed9t d\u01b0\u1edbi m\u1ed9t bi\u1ec3n hi\u1ec7u \u0111\u1ecf g\u1ed3m 6 k\u00fd t\u1ef1 ch\u1eef H\u00e1n. Con s\u1ed1 \u0111\u01b0\u1ee3c vi\u1ebft tr\u00ean ph\u1ea7n h\u00f4ng xe m\u00e0u tr\u1eafng l\u00e0 s\u1ed1 m\u1ea5y?",
+      "targets": [
+        [
+          "L21_V009",
+          21172
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-8-trake:1",
+      "text": "C\u1ea3nh \u0111\u1ea7u ti\u00ean c\u00f3 tr\u00e1i s\u1ea7u ri\u00eang.",
+      "targets": [
+        [
+          "L27_V011",
+          3791
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-8-trake:2",
+      "text": "C\u1ea3nh \u0111\u1ea7u ti\u00ean c\u00f3 tr\u00e1i m\u0103ng c\u1ee5t.",
+      "targets": [
+        [
+          "L27_V011",
+          3870
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-8-trake:3",
+      "text": "C\u1ea3nh \u0111\u1ea7u ti\u00ean c\u00f3 tr\u00e1i b\u01b0\u1edfi.",
+      "targets": [
+        [
+          "L27_V011",
+          4014
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-8-trake:4",
+      "text": "C\u1ea3nh \u0111\u1ea7u ti\u00ean c\u00f3 tr\u00e1i d\u00e2u b\u00f2n bon.",
+      "targets": [
+        [
+          "L27_V011",
+          4098
+        ]
+      ]
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-9-qa:1",
+      "text": "Trong video h\u01b0\u1edbng d\u1eabn n\u1ea5u \u0103n, ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp l\u1ea7n l\u01b0\u1ee3t cho c\u00e1c lo\u1ea1i h\u01b0\u01a1ng li\u1ec7u g\u1ed3m ti\u00eau xanh, l\u00e1 chanh v\u00e0 s\u1ea3 v\u00e0o b\u00ean trong b\u1ee5ng c\u1ee7a t\u1ed5ng c\u1ed9ng 4 con c\u00e1. \u0110\u00e2y l\u00e0 lo\u00e0i c\u00e1 g\u00ec?",
+      "targets": [
+        [
+          "L26_V161",
+          2869
+        ]
+      ]
+    }
+  ],
+  "methods": {
+    "pe_core": {
+      "mrr": 0.0069872615400929615,
+      "recall_at_1": 0.0,
+      "recall_at_10": 0.010526315789473684,
+      "recall_at_100": 0.05263157894736842,
+      "hits": 20,
+      "cases": 95,
+      "ranks": [
+        null,
+        null,
+        605,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        935,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        16,
+        null,
+        null,
+        72,
+        361,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        431,
+        null,
+        null,
+        847,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        997,
+        null,
+        null,
+        2,
+        98,
+        null,
+        null,
+        null,
+        336,
+        853,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        144,
+        null,
+        435,
+        null,
+        null,
+        null,
+        null,
+        null,
+        103,
+        null,
+        null,
+        null,
+        32,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        155,
+        448,
+        534,
+        null,
+        436,
+        null,
+        null
+      ]
+    },
+    "naflex": {
+      "mrr": 0.1870133180962873,
+      "recall_at_1": 0.11578947368421053,
+      "recall_at_10": 0.3473684210526316,
+      "recall_at_100": 0.5789473684210527,
+      "hits": 80,
+      "cases": 95,
+      "ranks": [
+        1,
+        8,
+        2,
+        31,
+        1,
+        1,
+        2,
+        null,
+        861,
+        47,
+        452,
+        6,
+        3,
+        149,
+        39,
+        null,
+        214,
+        3,
+        4,
+        null,
+        209,
+        520,
+        450,
+        1,
+        926,
+        34,
+        7,
+        null,
+        27,
+        3,
+        1,
+        4,
+        9,
+        11,
+        34,
+        null,
+        17,
+        12,
+        78,
+        null,
+        69,
+        699,
+        19,
+        9,
+        30,
+        327,
+        53,
+        151,
+        null,
+        null,
+        35,
+        1,
+        5,
+        122,
+        95,
+        620,
+        null,
+        12,
+        2,
+        179,
+        null,
+        null,
+        264,
+        324,
+        267,
+        842,
+        444,
+        10,
+        63,
+        143,
+        41,
+        null,
+        10,
+        2,
+        4,
+        1,
+        59,
+        null,
+        644,
+        641,
+        null,
+        163,
+        274,
+        null,
+        1,
+        441,
+        3,
+        5,
+        3,
+        54,
+        4,
+        1,
+        1,
+        59,
+        1
+      ]
+    },
+    "rrf_pe0.25": {
+      "mrr": 0.17913888361524974,
+      "recall_at_1": 0.11578947368421053,
+      "recall_at_10": 0.3263157894736842,
+      "recall_at_100": 0.5789473684210527,
+      "hits": 77,
+      "cases": 95,
+      "ranks": [
+        1,
+        8,
+        2,
+        31,
+        1,
+        1,
+        3,
+        null,
+        null,
+        48,
+        562,
+        6,
+        3,
+        158,
+        39,
+        null,
+        245,
+        3,
+        5,
+        null,
+        238,
+        271,
+        453,
+        1,
+        null,
+        34,
+        7,
+        null,
+        27,
+        3,
+        1,
+        4,
+        9,
+        11,
+        35,
+        null,
+        18,
+        12,
+        78,
+        null,
+        69,
+        892,
+        19,
+        11,
+        30,
+        397,
+        13,
+        172,
+        null,
+        null,
+        35,
+        1,
+        6,
+        145,
+        95,
+        789,
+        null,
+        12,
+        4,
+        201,
+        null,
+        null,
+        349,
+        393,
+        371,
+        null,
+        559,
+        10,
+        63,
+        156,
+        41,
+        null,
+        11,
+        2,
+        4,
+        1,
+        60,
+        null,
+        846,
+        794,
+        null,
+        177,
+        325,
+        null,
+        1,
+        547,
+        3,
+        6,
+        4,
+        65,
+        9,
+        1,
+        1,
+        59,
+        1
+      ]
+    },
+    "rrf_pe0.50": {
+      "mrr": 0.085553788548805,
+      "recall_at_1": 0.0,
+      "recall_at_10": 0.24210526315789474,
+      "recall_at_100": 0.5157894736842106,
+      "hits": 73,
+      "cases": 95,
+      "ranks": [
+        2,
+        16,
+        4,
+        68,
+        4,
+        2,
+        10,
+        null,
+        null,
+        94,
+        904,
+        11,
+        6,
+        298,
+        78,
+        null,
+        429,
+        6,
+        6,
+        null,
+        419,
+        134,
+        448,
+        7,
+        null,
+        69,
+        14,
+        null,
+        54,
+        6,
+        2,
+        8,
+        18,
+        22,
+        74,
+        null,
+        38,
+        24,
+        160,
+        null,
+        138,
+        null,
+        38,
+        23,
+        60,
+        655,
+        2,
+        210,
+        null,
+        null,
+        73,
+        2,
+        22,
+        253,
+        190,
+        null,
+        null,
+        24,
+        13,
+        371,
+        null,
+        null,
+        537,
+        651,
+        343,
+        null,
+        866,
+        20,
+        126,
+        285,
+        82,
+        null,
+        13,
+        4,
+        8,
+        2,
+        66,
+        null,
+        null,
+        null,
+        null,
+        326,
+        548,
+        null,
+        2,
+        881,
+        6,
+        13,
+        5,
+        127,
+        28,
+        2,
+        4,
+        119,
+        2
+      ]
+    },
+    "rrf_pe0.75": {
+      "mrr": 0.016206165311121883,
+      "recall_at_1": 0.010526315789473684,
+      "recall_at_10": 0.021052631578947368,
+      "recall_at_100": 0.07368421052631578,
+      "hits": 67,
+      "cases": 95,
+      "ranks": [
+        126,
+        152,
+        134,
+        249,
+        127,
+        124,
+        132,
+        null,
+        null,
+        308,
+        null,
+        115,
+        133,
+        716,
+        276,
+        null,
+        976,
+        132,
+        8,
+        null,
+        957,
+        77,
+        394,
+        130,
+        null,
+        257,
+        148,
+        null,
+        228,
+        137,
+        129,
+        138,
+        156,
+        164,
+        245,
+        null,
+        198,
+        168,
+        435,
+        null,
+        396,
+        null,
+        196,
+        161,
+        240,
+        null,
+        1,
+        99,
+        null,
+        null,
+        263,
+        124,
+        153,
+        613,
+        500,
+        null,
+        null,
+        168,
+        138,
+        857,
+        null,
+        null,
+        null,
+        null,
+        177,
+        null,
+        545,
+        160,
+        372,
+        695,
+        285,
+        null,
+        45,
+        128,
+        136,
+        132,
+        33,
+        null,
+        null,
+        null,
+        null,
+        772,
+        null,
+        null,
+        124,
+        null,
+        136,
+        146,
+        53,
+        237,
+        167,
+        126,
+        126,
+        358,
+        124
+      ]
+    }
+  }
+}

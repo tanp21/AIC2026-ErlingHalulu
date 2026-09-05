@@ -2,7 +2,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from app import CompareReq, SearchReq
+from backend.app import CompareReq, SearchReq
 
 
 class RequestValidationTests(unittest.TestCase):
@@ -10,10 +10,13 @@ class RequestValidationTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             SearchReq(visual_text="x" * 2001)
 
-    def test_search_result_count_is_bounded(self):
-        for invalid in (0, 201):
-            with self.subTest(invalid=invalid), self.assertRaises(ValidationError):
-                SearchReq(text="query", k=invalid)
+    def test_search_request_no_longer_exposes_a_result_count(self):
+        self.assertNotIn("k", SearchReq.model_fields)
+
+    def test_search_request_only_accepts_the_2026_profile(self):
+        self.assertEqual(SearchReq(profile="l2026").profile, "l2026")
+        with self.assertRaises(ValidationError):
+            SearchReq(profile="l2025")
 
     def test_compare_uses_the_same_query_and_result_limits(self):
         with self.assertRaises(ValidationError):

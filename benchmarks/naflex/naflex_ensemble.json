@@ -1,0 +1,213 @@
+{
+  "metric": "same video and within temporal tolerance",
+  "tolerance_seconds": 10,
+  "k": 1000,
+  "cases": [
+    {
+      "id": "query-p1-4:1",
+      "text": "flour is first added to a bowl of asparagus",
+      "video_id": "L26_V194",
+      "frame_idx": 4724
+    },
+    {
+      "id": "query-p1-4:2",
+      "text": "the first piece of asparagus vermicelli touches oil in a frying pan",
+      "video_id": "L26_V194",
+      "frame_idx": 5122
+    },
+    {
+      "id": "query-p1-4:3",
+      "text": "the first piece of asparagus leaves the frying pan",
+      "video_id": "L26_V194",
+      "frame_idx": 5435
+    },
+    {
+      "id": "query-p1-4:4",
+      "text": "the last piece of asparagus leaves the frying pan and rests completely on a plate",
+      "video_id": "L26_V194",
+      "frame_idx": 5871
+    },
+    {
+      "id": "query-p1-16:1",
+      "text": "a yellow black and white lion dance costume begins spinning on pillar number four using its front legs",
+      "video_id": "L24_V033",
+      "frame_idx": 15946
+    },
+    {
+      "id": "query-p1-16:2",
+      "text": "all four feet of the lion dance costume first touch the ground",
+      "video_id": "L24_V033",
+      "frame_idx": 16006
+    },
+    {
+      "id": "query-p1-16:3",
+      "text": "the two lion dance performers at the rear bow to the judges",
+      "video_id": "L24_V033",
+      "frame_idx": 16368
+    },
+    {
+      "id": "query-p1-16:4",
+      "text": "the lion approaches a dragon and the dragon first moves its head",
+      "video_id": "L24_V033",
+      "frame_idx": 16903
+    },
+    {
+      "id": "query-p1-18:1",
+      "text": "a cook first cuts mushrooms",
+      "video_id": "L26_V072",
+      "frame_idx": 2491
+    },
+    {
+      "id": "query-p1-18:2",
+      "text": "a cook first cuts water chestnuts",
+      "video_id": "L26_V072",
+      "frame_idx": 3138
+    },
+    {
+      "id": "query-p1-18:3",
+      "text": "a cook first cuts tofu",
+      "video_id": "L26_V072",
+      "frame_idx": 3426
+    },
+    {
+      "id": "query-p1-18:4",
+      "text": "a frying pan is placed on a stove and a visible flame first appears",
+      "video_id": "L26_V072",
+      "frame_idx": 3808
+    },
+    {
+      "id": "query-p3-1:1",
+      "text": "a cook first touches a sauce mixture with a spoon while stirring it",
+      "video_id": "L26_V176",
+      "frame_idx": 4740
+    },
+    {
+      "id": "query-p3-1:2",
+      "text": "a cook finishes pouring all of the sauce into a pot containing a fish steak topped with a chili",
+      "video_id": "L26_V176",
+      "frame_idx": 4887
+    }
+  ],
+  "methods": {
+    "pe_core": {
+      "mrr": 0.20112553991878376,
+      "recall_at_1": 0.14285714285714285,
+      "recall_at_10": 0.35714285714285715,
+      "recall_at_100": 0.7142857142857143,
+      "hits": 13,
+      "cases": 14,
+      "ranks": [
+        1,
+        97,
+        63,
+        5,
+        248,
+        null,
+        25,
+        4,
+        33,
+        94,
+        4,
+        290,
+        867,
+        1
+      ]
+    },
+    "naflex": {
+      "mrr": 0.1584148201320079,
+      "recall_at_1": 0.14285714285714285,
+      "recall_at_10": 0.14285714285714285,
+      "recall_at_100": 0.5,
+      "hits": 12,
+      "cases": 14,
+      "ranks": [
+        1,
+        null,
+        null,
+        56,
+        991,
+        816,
+        21,
+        31,
+        22,
+        357,
+        16,
+        788,
+        172,
+        1
+      ]
+    },
+    "rrf_pe0.25": {
+      "mrr": 0.18027100694957848,
+      "recall_at_1": 0.14285714285714285,
+      "recall_at_10": 0.2857142857142857,
+      "recall_at_100": 0.5,
+      "hits": 14,
+      "cases": 14,
+      "ranks": [
+        1,
+        553,
+        355,
+        37,
+        859,
+        922,
+        10,
+        11,
+        26,
+        232,
+        4,
+        724,
+        207,
+        1
+      ]
+    },
+    "rrf_pe0.50": {
+      "mrr": 0.19968026307339581,
+      "recall_at_1": 0.14285714285714285,
+      "recall_at_10": 0.35714285714285715,
+      "recall_at_100": 0.5,
+      "hits": 13,
+      "cases": 14,
+      "ranks": [
+        1,
+        234,
+        138,
+        15,
+        544,
+        null,
+        7,
+        5,
+        37,
+        140,
+        3,
+        609,
+        286,
+        1
+      ]
+    },
+    "rrf_pe0.75": {
+      "mrr": 0.1971681714179468,
+      "recall_at_1": 0.14285714285714285,
+      "recall_at_10": 0.35714285714285715,
+      "recall_at_100": 0.5714285714285714,
+      "hits": 13,
+      "cases": 14,
+      "ranks": [
+        1,
+        126,
+        81,
+        9,
+        325,
+        null,
+        12,
+        4,
+        35,
+        106,
+        4,
+        420,
+        462,
+        1
+      ]
+    }
+  }
+}

@@ -30,7 +30,7 @@ AIC Search is a GPU-accelerated retrieval system built for time-critical video s
 - **Purpose-built multimodal search** with separate visual and transcript query fields.
 - **Low-latency warm runtime** for competition use, with models and the default FAISS index loaded at startup.
 - **Precise navigation** from a result to its thumbnail, source frame, timestamp, or original video.
-- **Secure five-person deployment** through Tailscale identity, an explicit user allowlist, and owner-only administrative operations.
+- **Five-person direct-IP deployment** through HAProxy Basic Auth, an explicit user allowlist, and owner-only administrative operations.
 - **Resource-aware concurrency** with per-user rate limits, latest-request-wins scheduling, and bounded FFmpeg work.
 - **Offline-ready containers** with read-only data, indexes, and model mounts.
 
@@ -40,7 +40,7 @@ AIC Search is a GPU-accelerated retrieval system built for time-critical video s
 Browser
    │
    ▼
-Tailscale Serve (HTTPS + identity)
+Viettel port forward (public IPv4 TCP :80)
    │
    ▼
 HAProxy ──► FastAPI + React
@@ -57,14 +57,26 @@ The production path uses Docker Desktop with WSL2 integration, an NVIDIA GPU, pr
 
 ```bash
 cp .env.secure.example .env.secure
-# Replace every placeholder with the five real Tailscale identities.
+# Replace every placeholder with the five HAProxy Basic Auth usernames.
 
 export AIC_UID=$(id -u) AIC_GID=$(id -g)
 export AIC_HF_HUB_DIR="${HOME}/.cache/huggingface/hub"
 docker compose up -d --build --wait
 ```
 
-Open `http://127.0.0.1:8000/healthz` to verify the service. The protected UI must be accessed through Tailscale Serve; direct requests intentionally have no user identity and receive `401`.
+Open `http://127.0.0.1:8000/healthz` to verify the service. Create `haproxy-users.cfg` as described in the deployment guide before opening the protected UI.
+
+### Local development server (no Docker)
+
+Requires `data/` and `indexes/` already prepared and the Hugging Face model cache populated locally.
+
+```bash
+export AIC_ALLOWED_USERS=owner@example.com,u2@example.com,u3@example.com,u4@example.com,u5@example.com
+export AIC_ADMIN_USER=owner@example.com
+uv run uvicorn backend.app:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+Open `http://127.0.0.1:8000/healthz`; the first search request loads PE-Core on demand, so it is slower than the rest.
 
 See [Getting Started](docs/getting-started.md) for prerequisites, data preparation, index creation, local development, and complete startup instructions.
 
@@ -72,7 +84,7 @@ See [Getting Started](docs/getting-started.md) for prerequisites, data preparati
 
 ```text
 .
-├── app.py, core.py, ...   FastAPI runtime and retrieval logic
+├── backend/               FastAPI runtime and retrieval logic (app.py, core.py, ...)
 ├── frontend/              React and Vite web interface
 ├── scripts/               Indexing, embedding, extraction, and benchmarks
 ├── notebooks/             Experimental and data-preparation workflows
@@ -88,15 +100,17 @@ See [Getting Started](docs/getting-started.md) for prerequisites, data preparati
 
 - [Getting Started](docs/getting-started.md) — prerequisites, setup, indexing, and development
 - [Audio Transcript Search](docs/audio-search.md) — transcript preparation, retrieval behavior, and performance
-- [Secure Team Deployment](docs/team-deployment.md) — Tailscale access for a five-person team
+- [Shot Clip Export](docs/clip-export.md) — cutting per-shot clips for video-captioning experiments
+- [Direct-IP Team Deployment](docs/team-deployment.md) — Viettel port forwarding for a five-person team
 - [Operations](docs/operations.md) — monitoring, fair-use controls, troubleshooting, and incident response
 - [Keyframe Downscale Report](docs/reports/keyframe_hd_downscale_report.md) — retrieval and image-quality evaluation
+- [Shot Exclusions](docs/shot-exclusions.md) — review intro/preview/MC shots and rebuild filtered profiles
 
 ## Development
 
 ```bash
 # Backend
-.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -t . -v
 
 # Frontend
 cd frontend

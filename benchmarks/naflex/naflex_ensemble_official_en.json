@@ -1,0 +1,1664 @@
+{
+  "source": "artifacts/official_benchmark_queries_en.json: P1, SOTUYEN1, SOTUYEN2",
+  "metric": "same video and within temporal tolerance",
+  "tolerance_seconds": 10,
+  "k": 1000,
+  "cases": [
+    {
+      "id": "Test/query-p1-1-kis:1",
+      "text": "This is an introduction to a private spacecraft launch. The clip begins with an image of 4 astronauts wearing black suits. One of the spacecraft's intended missions is to study auroras in the polar region.",
+      "targets": [
+        [
+          "L21_V015",
+          25627
+        ]
+      ],
+      "text_vi": "\u0110\u00e2y l\u00e0 ph\u1ea7n gi\u1edbi thi\u1ec7u vi\u1ec7c ph\u00f3ng t\u00e0u v\u0169 tr\u1ee5 t\u01b0 nh\u00e2n. \u0110o\u1ea1n clip b\u1eaft \u0111\u1ea7u v\u1edbi h\u00ecnh \u1ea3nh 4 phi h\u00e0nh gia m\u1eb7c \u00e1o \u0111en. M\u1ed9t trong nh\u1eefng nhi\u1ec7m v\u1ee5 d\u1ef1 ki\u1ebfn c\u1ee7a t\u00e0u v\u0169 tr\u1ee5 l\u00e0 nghi\u00ean c\u1ee9u \u00e1nh s\u00e1ng c\u1ef1c quang \u1edf v\u00f9ng c\u1ef1c"
+    },
+    {
+      "id": "Test/query-p1-10-kis:1",
+      "text": "Find the exact short clip of three people (two women and one man) sitting next to each other, focused on playing a round, hollow metal musical instrument with indentations that produce sound when tapped with hands. There is 1 person in a white shirt sitting between 2 people in black shirts. The background is a multi-compartment bookshelf filled with colorful books.",
+      "targets": [
+        [
+          "L30_V017",
+          3048
+        ]
+      ],
+      "text_vi": "T\u00ecm ch\u00ednh x\u00e1c \u0111o\u1ea1n clip ng\u1eafn c\u00f3 ba ng\u01b0\u1eddi (hai ph\u1ee5 n\u1eef v\u00e0 m\u1ed9t nam gi\u1edbi) \u0111ang ng\u1ed3i c\u1ea1nh nhau, t\u1eadp trung ch\u01a1i nh\u1ea1c c\u1ee5 kim lo\u1ea1i c\u00f3 d\u1ea1ng tr\u00f2n, r\u1ed7ng, v\u1edbi c\u00e1c v\u1ebft l\u00f5m \u0111\u1ec3 t\u1ea1o ra \u00e2m thanh khi g\u00f5 tay. C\u00f3 1 ng\u01b0\u1eddi m\u1eb7c \u00e1o tr\u1eafng ng\u1ed3i gi\u1eefa 2 ng\u01b0\u1eddi m\u1eb7c \u00e1o \u0111en. B\u1ed1i c\u1ea3nh ph\u00eda sau l\u00e0 m\u1ed9t k\u1ec7 s\u00e1ch nhi\u1ec1u ng\u0103n, x\u1ebfp \u0111\u1ea7y s\u00e1ch v\u1edbi nhi\u1ec1u m\u00e0u s\u1eafc"
+    },
+    {
+      "id": "Test/query-p1-11-kis:1",
+      "text": "In the clip, a young man wearing a black baseball cap and a white t-shirt with English text is sitting next to a box. On the box, he arranges many randomly shaped cardboard cutouts. Due to light shining from one side, these cardboard pieces cast a shadow on the wall, forming a portrait of a man with a clear face, neatly styled hair, and wearing a suit.",
+      "targets": [
+        [
+          "L30_V057",
+          3079
+        ]
+      ],
+      "text_vi": "Trong \u0111o\u1ea1n clip c\u00f3 l\u00e0 m\u1ed9t ch\u00e0ng trai \u0111\u1ed9i m\u0169 l\u01b0\u1ee1i trai \u0111en, m\u1eb7c \u00e1o thun tr\u1eafng c\u00f3 d\u00f2ng ch\u1eef ti\u1ebfng Anh, \u0111ang ng\u1ed3i c\u1ea1nh m\u1ed9t chi\u1ebfc h\u1ed9p. Tr\u00ean h\u1ed9p, anh s\u1eafp x\u1ebfp nhi\u1ec1u m\u1ea3nh b\u00eca c\u1eaft r\u1eddi v\u1edbi h\u00ecnh th\u00f9 ng\u1eabu nhi\u00ean.\nNh\u1edd \u00e1nh s\u00e1ng chi\u1ebfu t\u1eeb m\u1ed9t ph\u00eda, c\u00e1c m\u1ea3nh b\u00eca \u0111\u00f3 \u0111\u1ed5 b\u00f3ng l\u00ean t\u01b0\u1eddng, t\u1ea1o th\u00e0nh h\u00ecnh ch\u00e2n dung m\u1ed9t ng\u01b0\u1eddi \u0111\u00e0n \u00f4ng v\u1edbi khu\u00f4n m\u1eb7t r\u00f5 n\u00e9t, t\u00f3c vu\u1ed1t g\u1ecdn v\u00e0 m\u1eb7c vest."
+    },
+    {
+      "id": "Test/query-p1-12-kis:1",
+      "text": "The video describes a scene of decorating donuts. The sequence begins with a white ceramic plate on a rectangular wooden tray. Next to the ceramic plate is a bowl containing a few strawberries, but 2 have fallen out. Additionally, next to the ceramic plate is a small white ceramic bowl containing sliced bananas and a small brown spoon. The next scene shows the chef placing 2 donuts on the ceramic plate and starting to decorate. The first step is drizzling chocolate over the donuts. Then, the chef places banana slices on one donut, and strawberry slices on the other.",
+      "targets": [
+        [
+          "L26_V200",
+          4522
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n video m\u00f4 t\u1ea3 c\u1ea3nh trang tr\u00ed b\u00e1nh r\u00e1n. Ph\u00e2n c\u1ea3nh b\u1eaft \u0111\u1ea7u l\u00e0 m\u1ed9t chi\u1ebfc \u0111\u0129a s\u1ee9 m\u00e0u tr\u1eafng n\u1eb1m tr\u00ean m\u1ed9t khay g\u1ed7 h\u00ecnh ch\u1eef nh\u1eadt. B\u00ean c\u1ea1nh chi\u1ebfc \u0111\u0129a s\u1ee9 l\u00e0 m\u1ed9t ch\u00e9n \u0111\u1ef1ng m\u1ed9t v\u00e0i tr\u00e1i d\u00e2u, nh\u01b0ng c\u00f3 2 tr\u00e1i b\u1ecb r\u01a1i ra ngo\u00e0i. Ngo\u00e0i ra, b\u00ean c\u1ea1nh \u0111\u0129a s\u1ee9 c\u00f2n c\u00f3 m\u1ed9t ch\u00e9n s\u1ee9 nh\u1ecf m\u00e0u tr\u1eafng \u0111\u1ef1ng chu\u1ed1i \u0111\u00e3 \u0111\u01b0\u1ee3c c\u1eaft s\u1eb5n v\u00e0 m\u1ed9t c\u00e1i th\u00eca nh\u1ecf m\u00e0u n\u00e2u. Ph\u00e2n c\u1ea3nh ti\u1ebfp theo cho th\u1ea5y \u0111\u1ea7u b\u1ebfp \u0111\u1eb7t 2 chi\u1ebfc b\u00e1nh r\u00e1n l\u00ean \u0111\u0129a s\u1ee9 v\u00e0 b\u1eaft \u0111\u1ea7u trang tr\u00ed. B\u01b0\u1edbc \u0111\u1ea7u ti\u00ean l\u00e0 vi\u1ec7c r\u01b0\u1edbi chocolate l\u00ean tr\u00ean m\u1eb7t b\u00e1nh. Sau \u0111\u00f3, \u0111\u1ea7u b\u1ebfp \u0111\u1eb7t c\u00e1c l\u00e1t chu\u1ed1i l\u00ean tr\u00ean m\u1ed9t chi\u1ebfc b\u00e1nh r\u00e1n, chi\u1ebfc c\u00f2n l\u1ea1i \u0111\u01b0\u1ee3c \u0111\u1eb7t c\u00e1c l\u00e1t d\u00e2u t\u00e2y l\u00ean."
+    },
+    {
+      "id": "Test/query-p1-13-kis:1",
+      "text": "The video describes a person cleaning a camera. This process begins with disassembling the camera. Next, the detached lens is placed neatly on a pinkish-purple towel. The final scene is cleaning the lens with a cotton swab.",
+      "targets": [
+        [
+          "L30_V095",
+          2749
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n video m\u00f4 t\u1ea3 m\u1ed9t ng\u01b0\u1eddi ng\u1ed3i v\u1ec7 sinh m\u00e1y \u1ea3nh. C\u00f4ng \u0111o\u1ea1n n\u00e0y b\u1eaft \u0111\u1ea7u b\u1eb1ng vi\u1ec7c th\u00e1o r\u1eddi m\u00e1y \u1ea3nh. Ti\u1ebfp theo, chi\u1ebfc \u1ed1ng k\u00ednh \u0111\u00e3 \u0111\u01b0\u1ee3c th\u00e1o r\u1eddi v\u00e0 \u0111\u01b0\u1ee3c \u0111\u1eb7t ngay ng\u1eafn tr\u00ean m\u1ed9t chi\u1ebfc kh\u0103n m\u00e0u t\u00edm h\u1ed3ng. Ph\u00e2n c\u1ea3nh cu\u1ed1i c\u00f9ng l\u00e0 v\u1ec7 sinh \u1ed1ng k\u00ednh (lens) b\u1eb1ng m\u1ed9t chi\u1ebfc t\u0103m b\u00f4ng."
+    },
+    {
+      "id": "Test/query-p1-14-kis:1",
+      "text": "The clip begins with a scene of a monumental sand sculpture at a Sand Sculpture Festival. The work depicts young people playing street sports: one person rollerblading, two people skateboarding. The background features a large arched pattern with carved text. Next, there are scenes of many other sand sculptures, and there are 2 columns of pink smoke.",
+      "targets": [
+        [
+          "L21_V027",
+          26914
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip b\u1eaft \u0111\u1ea7u v\u1edbi c\u1ea3nh m\u1ed9t t\u00e1c ph\u1ea9m \u0111i\u00eau kh\u1eafc c\u00e1t ho\u00e0nh tr\u00e1ng t\u1ea1i L\u1ec5 h\u1ed9i \u0111i\u00eau kh\u1eafc tr\u00ean c\u00e1t. T\u00e1c ph\u1ea9m m\u00f4 t\u1ea3 c\u1ea3nh nh\u1eefng thanh ni\u00ean ch\u01a1i th\u1ec3 thao \u0111\u01b0\u1eddng ph\u1ed1: m\u1ed9t ng\u01b0\u1eddi tr\u01b0\u1ee3t patin, hai ng\u01b0\u1eddi tr\u01b0\u1ee3t v\u00e1n\nN\u1ec1n ph\u00eda sau l\u00e0 h\u1ecda ti\u1ebft v\u00f2m cong l\u1edbn v\u00e0 c\u00f3 kh\u1eafc ch\u1eef.\nTi\u1ebfp theo c\u00f3 c\u1ea3nh nhi\u1ec1u t\u00e1c ph\u1ea9m kh\u00e1c b\u1eb1ng c\u00e1t, v\u00e0 c\u00f3 2 c\u1ed9t kh\u00f3i m\u00e0u h\u1ed3ng"
+    },
+    {
+      "id": "Test/query-p1-15-qa:1",
+      "text": "A video about a charity program by a club named FANA. In the video, it can be seen that this club is giving gifts in a commune in Khanh Hoa province. What is the name of this commune? (at that time)",
+      "targets": [
+        [
+          "L30_V072",
+          1776
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n video v\u1ec1 m\u1ed9t ch\u01b0\u01a1ng tr\u00ecnh t\u1eeb thi\u1ec7n c\u1ee7a m\u1ed9t c\u00e2u l\u1ea1c b\u1ed9 t\u00ean l\u00e0 FANA. Trong \u0111o\u1ea1n video c\u00f3 th\u1ec3 th\u1ea5y c\u00e2u l\u1ea1c b\u1ed9 n\u00e0y \u0111ang \u0111i trao qu\u00e0 t\u1ea1i m\u1ed9t x\u00e3 thu\u1ed9c t\u1ec9nh Kh\u00e1nh H\u00f2a. H\u1ecfi x\u00e3 n\u00e0y c\u00f3 t\u00ean l\u00e0 g\u00ec? (t\u1ea1i th\u1eddi \u0111i\u1ec3m \u0111\u00f3)"
+    },
+    {
+      "id": "Test/query-p1-16-trake:1",
+      "text": "The lion rotates on pole number 4 using its two front legs and then lands. The first moment the lion begins to rotate.",
+      "targets": [
+        [
+          "L24_V033",
+          15946
+        ]
+      ],
+      "text_vi": "L\u00e2n quay v\u00f2ng tr\u00ean c\u1ed9t s\u1ed1 4 b\u1eb1ng 2 ch\u00e2n tr\u01b0\u1edbc r\u1ed3i ti\u1ebfp \u0111\u1ea5t. Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean m\u00e0 l\u00e2n b\u1eaft \u0111\u1ea7u xoay v\u00f2ng."
+    },
+    {
+      "id": "Test/query-p1-16-trake:2",
+      "text": "The first moment all four legs completely touch the ground.",
+      "targets": [
+        [
+          "L24_V033",
+          16006
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc 4 ch\u00e2n ho\u00e0n to\u00e0n ch\u1ea1m \u0111\u1ea5t \u0111\u1ea7u ti\u00ean."
+    },
+    {
+      "id": "Test/query-p1-16-trake:3",
+      "text": "The first moment the two lion performers bow to the judges.",
+      "targets": [
+        [
+          "L24_V033",
+          16368
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean 2 ng\u01b0\u1eddi bi\u1ec3u di\u1ec5n l\u00e2n cu\u1ed1i ch\u00e0o ban gi\u00e1m kh\u1ea3o."
+    },
+    {
+      "id": "Test/query-p1-16-trake:4",
+      "text": "After that, the lion approaches to greet a dragon. The first moment the dragon moves its head.",
+      "targets": [
+        [
+          "L24_V033",
+          16903
+        ]
+      ],
+      "text_vi": "Sau \u0111\u00f3 l\u00e2n ti\u1ebfn l\u1ea1i ch\u00e0o m\u1ed9t con r\u1ed3ng. Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean con r\u1ed3ng c\u1eed \u0111\u1ed9ng \u0111\u1ea7u."
+    },
+    {
+      "id": "Test/query-p1-17-kis:1",
+      "text": "The video is of a charity gift-giving event taking place at a hospital during the 2024 Spring season. In the scene, there are two men (wearing a pink shirt and a white shirt) standing on either side, representing the organizing committee. In the middle are four children and teenagers, including one in a red shirt, one in a white shirt, one in a pink dress, and one in a blue shirt. They are presented with symbolic boards with the content 'Program: Providing financial support for children orphaned by the COVID-19 pandemic'. In front of each child is a large gift bag with a medical logo. Behind them is a red backdrop with slogans welcoming spring and event information.",
+      "targets": [
+        [
+          "L30_V092",
+          2508
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n video trong bu\u1ed5i trao qu\u00e0 t\u1eeb thi\u1ec7n di\u1ec5n ra t\u1ea1i 1 b\u1ec7nh vi\u1ec7n trong d\u1ecbp Xu\u00e2n 2024. Trong c\u1ea3nh c\u00f3 hai ng\u01b0\u1eddi \u0111\u00e0n \u00f4ng (m\u1eb7c \u00e1o s\u01a1 mi h\u1ed3ng v\u00e0 s\u01a1 mi tr\u1eafng) \u0111\u1ee9ng hai b\u00ean, \u0111\u1ea1i di\u1ec7n ban t\u1ed5 ch\u1ee9c. \u1ede gi\u1eefa l\u00e0 b\u1ed1n em nh\u1ecf v\u00e0 thi\u1ebfu ni\u00ean, trong \u0111\u00f3 c\u00f3 em m\u1eb7c \u00e1o \u0111\u1ecf, em m\u1eb7c \u00e1o tr\u1eafng, em m\u1eb7c v\u00e1y h\u1ed3ng v\u00e0 em m\u1eb7c \u00e1o xanh. C\u00e1c em \u0111\u01b0\u1ee3c trao b\u1ea3ng t\u01b0\u1ee3ng tr\u01b0ng v\u1edbi n\u1ed9i dung \u201cCh\u01b0\u01a1ng tr\u00ecnh: Trao kinh ph\u00ed h\u1ed7 tr\u1ee3 cho tr\u1ebb em m\u1ed3 c\u00f4i do d\u1ecbch COVID-19\u201d. Tr\u01b0\u1edbc m\u1eb7t m\u1ed7i em l\u00e0 t\u00fai qu\u00e0 l\u1edbn mang logo y t\u1ebf. Ph\u00eda sau l\u00e0 ph\u00f4ng n\u1ec1n m\u00e0u \u0111\u1ecf v\u1edbi kh\u1ea9u hi\u1ec7u \u0111\u00f3n xu\u00e2n v\u00e0 th\u00f4ng tin s\u1ef1 ki\u1ec7n."
+    },
+    {
+      "id": "Test/query-p1-18-trake:1",
+      "text": "The first moment a mushroom is seen being cut.",
+      "targets": [
+        [
+          "L26_V072",
+          2487
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean th\u1ea5y c\u1eaft n\u1ea5m."
+    },
+    {
+      "id": "Test/query-p1-18-trake:2",
+      "text": "The first moment a water chestnut is being cut.",
+      "targets": [
+        [
+          "L26_V072",
+          3138
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean c\u1eaft c\u1ee7 n\u0103ng."
+    },
+    {
+      "id": "Test/query-p1-18-trake:3",
+      "text": "The first moment tofu is being cut.",
+      "targets": [
+        [
+          "L26_V072",
+          3428
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean c\u1eaft \u0111\u1eadu h\u1ee7."
+    },
+    {
+      "id": "Test/query-p1-18-trake:4",
+      "text": "The moment the pan is placed on the stove, the chef turns on the heat, and the flame is seen appearing.",
+      "targets": [
+        [
+          "L26_V072",
+          3803
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc ch\u1ea3o \u0111\u1eb7t l\u00ean b\u1ebfp, \u0111\u1ea7u b\u1ebfp m\u1edf l\u1eeda v\u00e0 th\u1ea5y l\u1eeda b\u1eaft \u0111\u1ea7u xu\u1ea5t hi\u1ec7n"
+    },
+    {
+      "id": "Test/query-p1-19-qa:1",
+      "text": "In the video, there are two lines of poetry by a poet praising the hero Nguyen Trung Truc at the Nguyen Trung Truc temple in Kien Giang. What are those two lines of poetry?",
+      "targets": [
+        [
+          "L27_V010",
+          5592
+        ]
+      ],
+      "text_vi": "Trong \u0111o\u1ea1n video c\u00f3 2 c\u00e2u th\u01a1 c\u1ee7a m\u1ed9t nh\u00e0 th\u01a1 ca ng\u1ee3i anh h\u00f9ng Nguy\u1ec5n Trung Tr\u1ef1c trong \u0111\u00ecnh th\u1ea7n Nguy\u1ec5n Trung Tr\u1ef1c t\u1ea1i Ki\u00ean Giang. Hai c\u00e2u th\u01a1 \u0111\u00f3 l\u00e0 g\u00ec?"
+    },
+    {
+      "id": "Test/query-p1-2-kis:1",
+      "text": "A news segment introducing a tiger population in a southern locality that has just had about 3-6 new tiger cubs. This is a rare tiger breed.",
+      "targets": [
+        [
+          "L21_V029",
+          11721
+        ]
+      ],
+      "text_vi": "M\u1ea9u tin gi\u1edbi thi\u1ec7u v\u1ec1 \u0111\u00e0n h\u1ed5 t\u1ea1i m\u1ed9t \u0111\u1ecba ph\u01b0\u01a1ng \u1edf mi\u1ec1n Nam v\u1eeba c\u00f3 th\u00eam kho\u1ea3ng 3-6 con h\u1ed5 con. \u0110\u00e2y l\u00e0 m\u1ed9t gi\u1ed1ng h\u1ed5 qu\u00fd hi\u1ebfm"
+    },
+    {
+      "id": "Test/query-p1-20-kis:1",
+      "text": "On a round white plate, there is one panna cotta cup. A hand is seen placing two more panna cotta cups onto the plate one by one. Each panna cotta cup has a smooth ivory-white cream layer, topped with a few slices of red grapes and a green mint leaf for a fresh accent. Next to them on the plate are two edible flowers (red and yellow) to enhance the presentation.",
+      "targets": [
+        [
+          "L26_V004",
+          5418
+        ]
+      ],
+      "text_vi": "Tr\u00ean \u0111\u0129a tr\u00f2n m\u00e0u tr\u1eafng c\u00f3 1 ly panna cotta. C\u00f3 m\u1ed9t b\u00e0n tay l\u1ea7n l\u01b0\u1ee3t \u0111\u1eb7t th\u00eam 2 ly panna cotta n\u1eefa v\u00e0o \u0111\u0129a.\nM\u1ed7i ly panna cotta c\u00f3 l\u1edbp kem m\u1ecbn m\u00e0u tr\u1eafng ng\u00e0, b\u00ean tr\u00ean trang tr\u00ed v\u00e0i l\u00e1t nho \u0111\u1ecf, th\u00eam l\u00e1 b\u1ea1c h\u00e0 xanh t\u1ea1o \u0111i\u1ec3m nh\u1ea5n t\u01b0\u01a1i m\u00e1t.\nB\u00ean c\u1ea1nh tr\u00ean \u0111\u0129a c\u00f2n c\u00f3 hai b\u00f4ng hoa \u0103n \u0111\u01b0\u1ee3c (m\u00e0u \u0111\u1ecf v\u00e0 v\u00e0ng) \u0111\u1ec3 t\u0103ng ph\u1ea7n \u0111\u1eb9p m\u1eaft."
+    },
+    {
+      "id": "Test/query-p1-22-qa:1",
+      "text": "A video about a woman teaching others how to cook. In the video, a person can be seen holding a recipe with the main ingredient being 200g of ground lean meat. What is the title of this recipe (the name of the dish)?",
+      "targets": [
+        [
+          "L30_V078",
+          1855
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n video v\u1ec1 m\u1ed9t ng\u01b0\u1eddi ph\u1ee5 n\u1eef d\u1ea1y n\u1ea5u \u0103n cho nh\u1eefng ng\u01b0\u1eddi kh\u00e1c. Trong \u0111o\u1ea1n video c\u00f3 th\u1ec3 th\u1ea5y m\u1ed9t ng\u01b0\u1eddi \u0111ang c\u1ea7m c\u00f4ng th\u1ee9c m\u00f3n \u0103n v\u1edbi nguy\u00ean li\u1ec7u ch\u00ednh l\u00e0 200g th\u1ecbt n\u1ea1c xay. H\u1ecfi ti\u00eau \u0111\u1ec1 c\u1ee7a c\u00f4ng th\u1ee9c n\u1ea5u \u0103n (t\u00ean m\u00f3n \u0103n) n\u00e0y l\u00e0 g\u00ec?"
+    },
+    {
+      "id": "Test/query-p1-23-kis:1",
+      "text": "A clip about a coastal town that attracts curious tourists due to a dangerous marine animal. This animal is famous from a 1975 film directed by Steven Spielberg.",
+      "targets": [
+        [
+          "L22_V022",
+          16774
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip v\u1ec1 1 th\u1ecb tr\u1ea5n ven bi\u1ec3n thu h\u00fat du kh\u00e1ch hi\u1ebfu k\u1ef3 nh\u1edd 1 lo\u00e0i \u0111\u1ed9ng v\u1eadt bi\u1ec3n nguy hi\u1ec3m. Lo\u00e0i \u0111\u1ed9ng v\u1eadt n\u00e0y n\u1ed5i ti\u1ebfng trong 1 b\u1ed9 phim c\u1ee7a \u0111\u1ea1o di\u1ec5n Steven Spielberg \u0111\u01b0\u1ee3c s\u1ea3n xu\u1ea5t v\u00e0o n\u0103m 1975"
+    },
+    {
+      "id": "Test/query-p1-24-kis:1",
+      "text": "A video reporting on a bicycle race. Find a scene with a direct overhead camera angle following the cyclists. In the frame, there are 3 cyclists riding in a straight line. All 3 cyclists are from the same team, wearing white jerseys and yellow-green shorts. The first cyclist wears a white helmet, the second cyclist wears a red helmet, and the last cyclist wears a black helmet.",
+      "targets": [
+        [
+          "L23_V007",
+          3552
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n video v\u1ec1 t\u01b0\u1eddng thu\u1eadt m\u1ed9t cu\u1ed9c \u0111ua xe \u0111\u1ea1p. T\u00ecm ph\u00e2n c\u1ea3nh v\u1edbi g\u00f3c quay tr\u1ef1c di\u1ec7n t\u1eeb tr\u00ean cao xu\u1ed1ng d\u00f5i theo c\u00e1c tay \u0111ua. Trong khung h\u00ecnh g\u1ed3m c\u00f3 3 tay \u0111ua \u0111ang \u0111\u1ea1p th\u00e0nh m\u1ed9t \u0111\u01b0\u1eddng th\u1eb3ng. C\u1ea3 3 tay \u0111ua \u0111\u1ec1u \u0111\u1ebfn t\u1eeb c\u00f9ng m\u1ed9t \u0111\u1ed9i, v\u1edbi \u0111\u1ed3ng ph\u1ee5c \u00e1o tr\u1eafng qu\u1ea7n v\u00e0ng xanh. Tay \u0111ua \u0111\u1ea7u ti\u00ean \u0111\u1ed9i n\u00f3n tr\u1eafng, tay \u0111ua th\u1ee9 hai \u0111\u1ed9i n\u00f3n \u0111\u1ecf v\u00e0 tay \u0111ua cu\u1ed1i c\u00f9ng \u0111\u1ed9i n\u00f3n \u0111en."
+    },
+    {
+      "id": "Test/query-p1-25-kis:1",
+      "text": "Find a video of a bicycle race, with a flycam angle from above, where an athlete wearing a blue and white jersey overtakes three other athletes to take the lead. Note that this athlete then leads for the rest of the way to the finish line.",
+      "targets": [
+        [
+          "L23_V017",
+          1367
+        ]
+      ],
+      "text_vi": "T\u00ecm m\u1ed9t \u0111o\u1ea1n video \u0111ua xe \u0111\u1ea1p, g\u00f3c quay t\u1eeb flycam tr\u00ean cao, m\u1ed9t v\u1eadn \u0111\u1ed9ng vi\u00ean m\u1eb7c \u00e1o xanh d\u01b0\u01a1ng, tr\u1eafng \u0111ang v\u01b0\u1ee3t ba v\u1eadn \u0111\u1ed9ng vi\u00ean kh\u00e1c v\u00e0 l\u00ean v\u1ecb tr\u00ed d\u1eabn \u0111\u1ea7u. Bi\u1ebft sau \u0111\u00f3 v\u1eadn \u0111\u1ed9ng vi\u00ean n\u00e0y d\u1eabn \u0111\u1ea7u su\u1ed1t \u0111o\u1ea1n \u0111\u01b0\u1eddng c\u00f2n l\u1ea1i \u0111\u1ebfn \u0111\u00edch."
+    },
+    {
+      "id": "Test/query-p1-4-trake:1",
+      "text": "The first moment flour is added to the bowl of asparagus.",
+      "targets": [
+        [
+          "L26_V194",
+          4709
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean b\u1ed9t \u0111\u01b0\u1ee3c b\u1ecf v\u00e0o t\u00f4 m\u0103ng t\u00e2y."
+    },
+    {
+      "id": "Test/query-p1-4-trake:2",
+      "text": "The first moment the first piece of asparagus makes contact with the oil in the pan.",
+      "targets": [
+        [
+          "L26_V194",
+          5146
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean th\u1ea5y mi\u1ebfn m\u0103ng t\u00e2y \u0111\u1ea7u ti\u00ean ti\u1ebfp x\u00fac v\u1edbi d\u1ea7u trong ch\u1ea3o."
+    },
+    {
+      "id": "Test/query-p1-4-trake:3",
+      "text": "The moment the first piece of asparagus leaves the oil pan.",
+      "targets": [
+        [
+          "L26_V194",
+          5435
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc mi\u1ebfng m\u0103ng t\u00e2y \u0111\u1ea7u ti\u00ean r\u1eddi kh\u1ecfi ch\u1ea3o d\u1ea7u."
+    },
+    {
+      "id": "Test/query-p1-4-trake:4",
+      "text": "The moment the last piece of asparagus leaves the oil pan and rests completely on the plate.",
+      "targets": [
+        [
+          "L26_V194",
+          5869
+        ]
+      ],
+      "text_vi": "Kho\u1ea3ng kh\u1eafc mi\u1ebfng m\u0103ng t\u00e2y cu\u1ed1i c\u00f9ng r\u1eddi ch\u1ea3o d\u1ea7u v\u00e0 n\u1eb1m ho\u00e0n to\u00e0n tr\u00ean d\u0129a."
+    },
+    {
+      "id": "Test/query-p1-5-kis:1",
+      "text": "The clip shows two women feeding goats: one wearing a white t-shirt with a red shirt draped over her shoulders, the other wearing a traditional purple striped long-sleeved shirt. Both are smiling and look delighted. The farm space is spacious, with a corrugated iron roof and wooden fences dividing it into many rows of pens, where a long line of goats is kept.",
+      "targets": [
+        [
+          "L27_V014",
+          7330
+        ],
+        [
+          "L27_V014",
+          5940
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip c\u1ea7n t\u00ecm l\u00e0 c\u1ea3nh hai ng\u01b0\u1eddi ph\u1ee5 n\u1eef \u0111ang cho d\u00ea \u0103n: m\u1ed9t ng\u01b0\u1eddi m\u1eb7c \u00e1o thun tr\u1eafng qu\u00e0ng \u00e1o \u0111\u1ecf tr\u00ean vai, ng\u01b0\u1eddi kia m\u1eb7c \u00e1o d\u00e0i tay k\u1ebb s\u1ecdc t\u00edm truy\u1ec1n th\u1ed1ng. C\u1ea3 hai \u0111\u1ec1u m\u1ec9m c\u01b0\u1eddi, t\u1ecf v\u1ebb th\u00edch th\u00fa.\nKh\u00f4ng gian tr\u1ea1i r\u1ed9ng r\u00e3i, c\u00f3 m\u00e1i che b\u1eb1ng t\u00f4n v\u00e0 h\u00e0ng r\u00e0o g\u1ed7 chia th\u00e0nh nhi\u1ec1u d\u00e3y chu\u1ed3ng, trong \u0111\u00f3 c\u00f3 h\u00e0ng d\u00e0i d\u00ea \u0111\u01b0\u1ee3c nu\u00f4i nh\u1ed1t."
+    },
+    {
+      "id": "Test/query-p1-6-kis:1",
+      "text": "The clip begins with a chef placing a vegetarian spring roll dish on a plate, with fillings including rolled green vegetables and tofu, wrapped in yellow and purple rice paper. The plate is decorated with green leaves and purple-yellow pansies, creating a fresh and delicate feel.",
+      "targets": [
+        [
+          "L26_V056",
+          6402
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip c\u1ea7n t\u00ecm b\u1eaft \u0111\u1ea7u b\u1eb1ng c\u1ea3nh 1 ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp \u0111\u1eb7t \u0111ang \u0111\u1eb7t m\u00f3n g\u1ecfi cu\u1ed1n chay b\u00e0y tr\u00ean \u0111\u0129a, nh\u00e2n g\u1ed3m rau xanh cu\u1ed9n tr\u00f2n v\u00e0 \u0111\u1eadu h\u0169, g\u00f3i trong b\u00e1nh tr\u00e1ng m\u00e0u v\u00e0ng v\u00e0 t\u00edm. \u0110\u0129a \u0111\u01b0\u1ee3c trang tr\u00ed th\u00eam l\u00e1 xanh v\u00e0 hoa pansy t\u00edm-v\u00e0ng, t\u1ea1o c\u1ea3m gi\u00e1c thanh m\u00e1t v\u00e0 tinh t\u1ebf."
+    },
+    {
+      "id": "Test/query-p1-7-kis:1",
+      "text": "The clip is a scene in a forest, under a large tree with many dry leaves covering the ground. Prominent in the close-up is a bird with iridescent blue-black feathers on its head and upper body, and reddish-brown wings and back. The bird's eyes are bright red, creating a clear focal point. This is a bird commonly found in the Southern region of Vietnam.",
+      "targets": [
+        [
+          "L29_V023",
+          10941
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip c\u1ea7n t\u00ecm l\u00e0 c\u1ea3nh quay trong m\u1ed9t khu r\u1eebng, d\u01b0\u1edbi g\u1ed1c c\u00e2y to v\u1edbi nhi\u1ec1u l\u00e1 kh\u00f4 ph\u1ee7 \u0111\u1ea7y m\u1eb7t \u0111\u1ea5t. N\u1ed5i b\u1eadt \u1edf c\u1eadn c\u1ea3nh l\u00e0 m\u1ed9t ch\u00fa chim c\u00f3 b\u1ed9 l\u00f4ng \u0111en \u00e1nh xanh \u1edf \u0111\u1ea7u v\u00e0 th\u00e2n tr\u00ean, c\u00f2n c\u00e1nh v\u00e0 l\u01b0ng m\u00e0u n\u00e2u \u0111\u1ecf. \u0110\u00f4i m\u1eaft chim \u0111\u1ecf r\u1ef1c, t\u1ea1o \u0111i\u1ec3m nh\u1ea5n r\u00f5 r\u00e0ng. \u0110\u00e2y l\u00e0 lo\u00e0i chim th\u01b0\u1eddng th\u1ea5y \u1edf v\u00f9ng Nam B\u1ed9 Vi\u1ec7t Nam."
+    },
+    {
+      "id": "Test/query-p1-8-kis:1",
+      "text": "A video about the world's largest Japanese food festival. Find the exact scene of a little girl wearing a red octopus/squid plush in front of her chest. She is holding a paper bag in her hand.",
+      "targets": [
+        [
+          "L22_V030",
+          18382
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n video v\u1ec1 m\u1ed9t l\u1ec5 h\u1ed9i \u1ea9m th\u1ef1c Nh\u1eadt B\u1ea3n l\u1edbn nh\u1ea5t th\u1ebf gi\u1edbi. H\u00e3y t\u00ecm ch\u00ednh x\u00e1c ph\u00e2n c\u1ea3nh m\u1ed9t c\u00f4 b\u00e9 \u0111eo m\u1ed9t con b\u1ea1ch tu\u1ed9c / con m\u1ef1c m\u00e0u \u0111\u1ecf ph\u00eda tr\u01b0\u1edbc ng\u1ef1c. Tr\u00ean tay c\u00f4 b\u00e9 c\u00f3 c\u1ea7m m\u1ed9t chi\u1ebfc t\u00fai gi\u1ea5y."
+    },
+    {
+      "id": "Test/query-p1-9-kis:1",
+      "text": "The clip shows a pineapple harvest in the Mekong Delta: an old woman sitting by a basket of pineapples talking to a girl wearing a pink shirt and a checkered scarf; pineapples are piled up all around, behind them is a woman wearing a conical hat holding a pineapple, and a green boat is docked by the shore, creating a rustic and peaceful rural atmosphere.",
+      "targets": [
+        [
+          "L27_V013",
+          5068
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip l\u00e0 c\u1ea3nh thu ho\u1ea1ch d\u1ee9a \u1edf mi\u1ec1n T\u00e2y: m\u1ed9t b\u00e0 c\u1ee5 ng\u1ed3i b\u00ean gi\u1ecf d\u1ee9a tr\u00f2 chuy\u1ec7n v\u1edbi c\u00f4 g\u00e1i m\u1eb7c \u00e1o h\u1ed3ng qu\u00e0ng kh\u0103n r\u1eb1n; xung quanh ch\u1ea5t \u0111\u1ea7y d\u1ee9a, ph\u00eda sau c\u00f3 ng\u01b0\u1eddi ph\u1ee5 n\u1eef \u0111\u1ed9i n\u00f3n l\u00e1 c\u1ea7m tr\u00e1i d\u1ee9a v\u00e0 m\u1ed9t chi\u1ebfc ghe xanh \u0111\u1eadu c\u1ea1nh b\u1edd, t\u1ea1o kh\u00f4ng kh\u00ed n\u00f4ng th\u00f4n m\u1ed9c m\u1ea1c, y\u00ean b\u00ecnh."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-1-kis:1",
+      "text": "A scene of a group of more than 5 people lined up exercising, performing the movement of touching their toes with both hands. In the group, there is only one person wearing glasses and three people wearing red hats.",
+      "targets": [
+        [
+          "L30_V046",
+          6663
+        ]
+      ],
+      "text_vi": "C\u1ea3nh quay m\u1ed9t nh\u00f3m h\u01a1n 5 ng\u01b0\u1eddi x\u1ebfp th\u00e0nh h\u00e0ng t\u1eadp th\u1ec3 d\u1ee5c, c\u00f9ng th\u1ef1c hi\u1ec7n \u0111\u1ed9ng t\u00e1c hai tay ch\u1ea1m m\u0169i ch\u00e2n. Trong nh\u00f3m ch\u1ec9 c\u00f3 m\u1ed9t ng\u01b0\u1eddi \u0111eo k\u00ednh v\u00e0 ba ng\u01b0\u1eddi \u0111\u1ed9i n\u00f3n c\u00f3 m\u00e0u \u0111\u1ecf."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-10-kis:1",
+      "text": "The action of cutting a bunch of grapes from a grapevine using black scissors. A blue string can be seen tied to the stem of this bunch of grapes before it is cut.",
+      "targets": [
+        [
+          "L29_V013",
+          11345
+        ]
+      ],
+      "text_vi": "H\u00e0nh \u0111\u1ed9ng c\u1eaft ch\u00f9m nho b\u1eb1ng k\u00e9o t\u1eeb gi\u00e0n nho b\u1eb1ng m\u1ed9t chi\u1ebfc k\u00e9o m\u00e0u \u0111en. C\u00f3 th\u1ec3 th\u1ea5y c\u00f3 m\u1ed9t s\u1ee3i d\u00e2y m\u00e0u xanh d\u01b0\u01a1ng \u0111\u01b0\u1ee3c bu\u1ed9c v\u00e0o cu\u1ed1ng c\u1ee7a ch\u00f9m nho n\u00e0y tr\u01b0\u1edbc khi n\u00f3 \u0111\u01b0\u1ee3c c\u1eaft."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-11-kis:1",
+      "text": "Slow-motion footage at the finish line of a bicycle race. The camera angle close to the road captures the moment of finishing in the order of first, second, and third place, respectively: a cyclist in a yellow jersey and black shorts, a cyclist in a blue jersey and black shorts, and a cyclist in a blue jersey and red shorts.",
+      "targets": [
+        [
+          "L23_V021",
+          6363
+        ]
+      ],
+      "text_vi": "C\u1ea3nh quay ch\u1eadm t\u1ea1i v\u1ecb tr\u00ed v\u1ea1ch \u0111\u00edch c\u1ee7a cu\u1ed9c \u0111ua xe \u0111\u1ea1p. G\u00f3c m\u00e1y s\u00e1t m\u1eb7t \u0111\u01b0\u1eddng b\u1eaft tr\u1ecdn kho\u1ea3nh kh\u1eafc v\u1ec1 \u0111\u00edch theo th\u1ee9 t\u1ef1 nh\u1ea5t, nh\u00ec, ba l\u1ea7n l\u01b0\u1ee3t l\u00e0 1 tay \u0111ua \u00e1o v\u00e0ng qu\u1ea7n \u0111en, 1 tay \u0111ua \u00e1o xanh d\u01b0\u01a1ng qu\u1ea7n \u0111en v\u00e0 1 tay \u0111ua \u00e1o xanh d\u01b0\u01a1ng qu\u1ea7n \u0111\u1ecf"
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-12-kis:1",
+      "text": "Four ride-hailing motorcycle drivers are visible in a gas station, with three standing and waiting while one drives from the left to the right of the frame. Before this, a person is seen closing the fuel cap of their motorcycle. Information regarding the price of mazut oil is displayed in the frame.",
+      "targets": [
+        [
+          "L22_V029",
+          6272
+        ]
+      ],
+      "text_vi": "C\u00f3 th\u1ec3 th\u1ea5y trong c\u1ea3nh quay c\u00f3 4 t\u00e0i x\u1ebf xe \u00f4m c\u00f4ng ngh\u1ec7 trong tr\u1ea1m x\u0103ng, trong \u0111\u00f3 3 ng\u01b0\u1eddi \u0111\u1ee9ng \u0111\u1ee3i c\u00f2n 1 ng\u01b0\u1eddi l\u00e1i xe t\u1eeb tr\u00e1i sang ph\u1ea3i khung h\u00ecnh. Tr\u01b0\u1edbc \u0111\u00f3 l\u00e0 c\u1ea3nh m\u1ed9t ng\u01b0\u1eddi \u0111\u1eady n\u1eafp b\u00ecnh x\u0103ng xe m\u00e1y c\u1ee7a h\u1ecd. C\u00f3 th\u00f4ng tin v\u1ec1 gi\u00e1 d\u1ea7u mazut \u0111\u01b0\u1ee3c hi\u1ec3n th\u1ecb trong khung h\u00ecnh."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-13-kis:1",
+      "text": "A person stands in the water and shines a light. This is followed by a scene of this person pulling a fishing net at dawn, after which a group of people approaches to record with a camera.",
+      "targets": [
+        [
+          "L29_V021",
+          6280
+        ]
+      ],
+      "text_vi": "M\u1ed9t ng\u01b0\u1eddi \u0111\u1ee9ng d\u01b0\u1edbi n\u01b0\u1edbc v\u00e0 r\u1ecdi \u0111\u00e8n. Ti\u1ebfp theo l\u00e0 c\u1ea3nh ng\u01b0\u1eddi n\u00e0y k\u00e9o l\u01b0\u1edbi c\u00e1 l\u00fac b\u00ecnh minh, sau \u0111\u00f3 \u0111\u01b0\u1ee3c m\u1ed9t nh\u00f3m ng\u01b0\u1eddi kh\u00e1c ti\u1ebfn \u0111\u1ebfn d\u00f9ng m\u00e1y quay ghi h\u00ecnh."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-14-kis:1",
+      "text": "A chef places stick-shaped ingredients and flower-shaped slices one by one into a dish being steamed in a pot. The ingredients are arranged using chopsticks, alternating around the food already on the plate. Then, the chef uses a spoon to take a soft ingredient from a glass bowl. This ingredient is placed in the center of the plate, surrounded by the previously arranged stick-shaped and flower-shaped pieces.",
+      "targets": [
+        [
+          "L26_V171",
+          5522
+        ]
+      ],
+      "text_vi": "Ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp l\u1ea7n l\u01b0\u1ee3t \u0111\u1eb7t c\u00e1c mi\u1ebfng nguy\u00ean li\u1ec7u d\u1ea1ng thanh v\u00e0 nh\u1eefng l\u00e1t c\u1eaft h\u00ecnh hoa v\u00e0o m\u1ed9t \u0111\u0129a \u0111ang \u0111\u01b0\u1ee3c h\u1ea5p trong n\u1ed3i.\r\nC\u00e1c nguy\u00ean li\u1ec7u \u0111\u01b0\u1ee3c d\u00f9ng \u0111\u0169a s\u1eafp x\u1ebfp xen k\u1ebd xung quanh ph\u1ea7n th\u1ee9c \u0103n \u0111\u00e3 c\u00f3 s\u1eb5n tr\u00ean \u0111\u0129a.\r\nSau \u0111\u00f3, \u0111\u1ea7u b\u1ebfp d\u00f9ng mu\u1ed7ng l\u1ea5y th\u00eam m\u1ed9t lo\u1ea1i nguy\u00ean li\u1ec7u m\u1ec1m t\u1eeb t\u00f4 th\u1ee7y tinh.\r\nPh\u1ea7n nguy\u00ean li\u1ec7u n\u00e0y \u0111\u01b0\u1ee3c \u0111\u1eb7t v\u00e0o gi\u1eefa \u0111\u0129a, xung quanh l\u00e0 c\u00e1c mi\u1ebfng d\u1ea1ng thanh v\u00e0 h\u00ecnh hoa \u0111\u00e3 \u0111\u01b0\u1ee3c s\u1eafp x\u1ebfp tr\u01b0\u1edbc \u0111\u00f3."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-15-qa:1",
+      "text": "An earthquake distribution map of a region in the world, with a legend on the left containing colorful symbols corresponding to epicenters of different earthquake magnitudes. Excluding the legend, how many locations record a magnitude 4 earthquake?",
+      "targets": [
+        [
+          "L21_V010",
+          19548
+        ]
+      ],
+      "text_vi": "B\u1ea3n \u0111\u1ed3 ph\u00e2n b\u1ed1 \u0111\u1ed9ng \u0111\u1ea5t t\u1ea1i m\u1ed9t v\u00f9ng tr\u00ean th\u1ebf gi\u1edbi, v\u1edbi m\u1ed9t b\u1ea3ng ch\u00fa gi\u1ea3i ph\u00eda b\u00ean tr\u00e1i g\u1ed3m c\u00e1c k\u00ed hi\u1ec7u nhi\u1ec1u m\u00e0u s\u1eafc t\u01b0\u01a1ng \u1ee9ng v\u1edbi c\u00e1c v\u1ecb tr\u00ed t\u00e2m ch\u1ea5n c\u00f3 c\u1ea5p \u0111\u1ed9 \u0111\u1ed9ng \u0111\u1ea5t kh\u00e1c nhau. Kh\u00f4ng t\u00ednh b\u1ea3ng ch\u00fa gi\u1ea3i, c\u00f3 bao nhi\u00eau v\u1ecb tr\u00ed ghi nh\u1eadn \u0111\u1ed9ng \u0111\u1ea5t c\u1ea5p \u0111\u1ed9 4?"
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-16-trake:1",
+      "text": "The first moment two golden dragons appear fully while spinning.",
+      "targets": [
+        [
+          "L24_V024",
+          9784
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean xu\u1ea5t hi\u1ec7n \u0111\u1ea7y \u0111\u1ee7 hai con r\u1ed3ng v\u00e0ng \u0111ang xoay v\u00f2ng."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-16-trake:2",
+      "text": "The first moment the lion dancer completes a spin on the pillars (the first moment the lion's feet are placed on the pillar after the spin).",
+      "targets": [
+        [
+          "L24_V024",
+          10132
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean con l\u00e2n ho\u00e0n t\u1ea5t c\u00fa xoay ng\u01b0\u1eddi tr\u00ean c\u00e1c thanh tr\u1ee5 (th\u1eddi \u0111i\u1ec3m \u0111\u00e2u ti\u00ean c\u00e1c ch\u00e2n c\u1ee7a l\u00e2n \u0111\u1eb7t tr\u00ean tr\u1ee5 sau khi xoay)."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-16-trake:3",
+      "text": "The first moment the mallet touches the lion dance bronze gong.",
+      "targets": [
+        [
+          "L24_V024",
+          10191
+        ]
+      ],
+      "text_vi": "Kho\u1ea3nh kh\u1eafc \u0111\u1ea7u ti\u00ean d\u00f9i ch\u1ea1m v\u00e0o k\u1ebbng \u0111\u1ed3ng m\u00faa l\u00e2n."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-17-qa:1",
+      "text": "The clip depicts the aftermath of a severe landslide, with rocks and soil blocking a section of a mountain pass. In a close-up shot, a road marker with a red top is visible, with only the top part exposed as most of it is buried by debris. In the final shot, a motorcyclist struggles to navigate through the muddy area, with a green object hanging from the motorcycle. What is the name of the mountain pass?",
+      "targets": [
+        [
+          "L22_V008",
+          5612
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip m\u00f4 t\u1ea3 h\u1eadu qu\u1ea3 c\u1ee7a hi\u1ec7n t\u01b0\u1ee3ng s\u1ea1t l\u1edf \u0111\u1ea5t nghi\u00eam tr\u1ecdng, \u0111\u1ea5t \u0111\u00e1 tr\u00e0n xu\u1ed1ng g\u00e2y t\u1eafc ngh\u1ebdn ho\u00e0n to\u00e0n m\u1ed9t \u0111o\u1ea1n \u0111\u01b0\u1eddng \u0111\u00e8o. Trong m\u1ed9t c\u1ea3nh quay c\u1eadn, c\u00f3 th\u1ec3 th\u1ea5y m\u1ed9t c\u1ed9t m\u1ed1c \u0111\u01b0\u1eddng b\u1ed9 v\u1edbi ph\u1ea7n \u0111\u1ec9nh m\u00e0u \u0111\u1ecf ch\u1ec9 c\u00f2n l\u1ed9 ra ph\u1ea7n tr\u00ean, ph\u1ea7n l\u1edbn \u0111\u00e3 b\u1ecb \u0111\u1ea5t \u0111\u00e1 v\u00f9i l\u1ea5p. \u1ede c\u1ea3nh quay cu\u1ed1i, m\u1ed9t ng\u01b0\u1eddi \u0111i xe m\u00e1y \u0111ang v\u1eadt l\u1ed9n \u0111\u1ec3 \u0111i\u1ec1u khi\u1ec3n ph\u01b0\u01a1ng ti\u1ec7n v\u01b0\u1ee3t qua khu v\u1ef1c b\u00f9n l\u1ea7y, tr\u00ean chi\u1ebfc xe m\u00e1y c\u00f3 treo m\u1ed9t v\u1eadt m\u00e0u xanh l\u00e1. T\u00ean c\u1ee7a con \u0111\u00e8o l\u00e0 g\u00ec?"
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-18-kis:1",
+      "text": "The scene shows the presentation of a dish after cooking. Vermicelli is placed into an empty bowl first, then the chef adds ladles of broth and ingredients such as chicken, carrots, lemongrass, and wood ear mushrooms into the bowl, finishing by placing a sprig of cilantro on top. The next scene zooms out from the bowl, revealing a small dipping sauce bowl with two chili slices next to it.",
+      "targets": [
+        [
+          "L26_V389",
+          5932
+        ]
+      ],
+      "text_vi": "C\u1ea3nh quay cho th\u1ea5y h\u00e0nh \u0111\u1ed9ng tr\u00ecnh b\u00e0y m\u00f3n \u0103n sau khi ho\u00e0n th\u00e0nh giai \u0111o\u1ea1n ch\u1ebf bi\u1ebfn. B\u00fan \u0111\u01b0\u1ee3c cho \u0111\u1ea7u ti\u00ean v\u00e0o m\u1ed9t ch\u00e9n r\u1ed7ng, sau \u0111\u00f3 \u0111\u1ea7u b\u1ebfp l\u1ea7n l\u01b0\u1ee3t cho t\u1eebng v\u00e1 n\u01b0\u1edbc d\u00f9ng c\u00f9ng c\u00e1c nguy\u00ean li\u1ec7u nh\u01b0 th\u1ecbt g\u00e0, c\u00e0 r\u1ed1t, s\u1ea3, n\u1ea5m m\u00e8o v\u00e0o ch\u00e9n b\u00fan, v\u00e0 k\u1ebft th\u00fac b\u1eb1ng vi\u1ec7c th\u1ea3 m\u1ed9t c\u1ecdng ng\u00f2 l\u00ean tr\u00ean c\u00f9ng. C\u1ea3nh quay ti\u1ebfp theo l\u00e0 c\u1ea3nh zoom xa d\u1ea7n ch\u00e9n b\u00fan, ta th\u1ea5y b\u00ean c\u1ea1nh ch\u00e9n b\u00fan c\u00f2n c\u00f3 1 ch\u00e9n n\u01b0\u1edbc ch\u1ea5m nh\u1ecf v\u1edbi 2 mi\u1ebfng \u1edbt."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-19-kis:1",
+      "text": "A lion dance costume operated by two people stands upright and spins on top of a pillar. After a few seconds of rest, the lion suddenly jumps to the two adjacent pillars, dips its head to bite a pumpkin accompanied by a yellow flower. The scene ends as the lion continues to jump to the next pillars.",
+      "targets": [
+        [
+          "L24_V035",
+          14657
+        ]
+      ],
+      "text_vi": "Con l\u00e2n do hai ng\u01b0\u1eddi \u0111i\u1ec1u khi\u1ec3n \u0111ang \u0111\u1ee9ng th\u1eb3ng v\u00e0 xoay v\u00f2ng tr\u00ean \u0111\u1ec9nh c\u1ed9t. Sau v\u00e0i gi\u00e2y ngh\u1ec9, con l\u00e2n b\u1ea5t ng\u1edd nh\u1ea3y qua hai chi\u1ebfc c\u1ed9t k\u1ebf b\u00ean, ch\u00fai \u0111\u1ea7u xu\u1ed1ng ngo\u1ea1m l\u1ea5y qu\u1ea3 b\u00ed \u0111\u1ecf k\u00e8m b\u00f4ng hoa m\u00e0u v\u00e0ng. C\u1ea3nh quay k\u1ebft th\u00fac khi con l\u00e2n ti\u1ebfp t\u1ee5c nh\u1ea3y sang c\u00e1c c\u1ed9t ti\u1ebfp theo."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-2-kis:1",
+      "text": "The clip begins with a map on which a type of irrigation structure appears four times. It then cuts to a shot of a dam filmed from above, followed by a close-up of the dam in the rain.",
+      "targets": [
+        [
+          "L28_V018",
+          3123
+        ],
+        [
+          "L28_V018",
+          3225
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n phim b\u1eaft \u0111\u1ea7u b\u1eb1ng m\u1ed9t b\u1ea3n \u0111\u1ed3, tr\u00ean \u0111\u00f3 m\u1ed9t lo\u1ea1i c\u00f4ng tr\u00ecnh th\u1ee7y l\u1ee3i l\u1ea7n l\u01b0\u1ee3t xu\u1ea5t hi\u1ec7n b\u1ed1n l\u1ea7n. Sau \u0111\u00f3 chuy\u1ec3n sang c\u1ea3nh m\u1ed9t con \u0111\u1eadp \u0111\u01b0\u1ee3c quay t\u1eeb tr\u00ean cao, ti\u1ebfp \u0111\u1ebfn l\u00e0 c\u1ea3nh c\u1eadn con \u0111\u1eadp d\u01b0\u1edbi tr\u1eddi m\u01b0a."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-20-kis:1",
+      "text": "Three people are walking down a slope in the rain, with two holding umbrellas; the person holding an umbrella behind is wearing a raincoat with a bear print on the back. Then, many people are seen walking together toward a house along a dirt path, next to a pond.",
+      "targets": [
+        [
+          "L21_V026",
+          7526
+        ]
+      ],
+      "text_vi": "Ba ng\u01b0\u1eddi \u0111ang \u0111i b\u1ed9 xu\u1ed1ng m\u1ed9t con d\u1ed1c trong c\u01a1n m\u01b0a, c\u00f3 2 ng\u01b0\u1eddi c\u1ea7m d\u00f9, trong \u0111\u00f3 ng\u01b0\u1eddi c\u1ea7m d\u00f9 \u0111i sau l\u1ea1i m\u1eb7c m\u1ed9t chi\u1ebfc \u00e1o m\u01b0a c\u00f3 in h\u00ecnh con g\u1ea5u \u1edf sau l\u01b0ng. Sau \u0111\u00f3 ta th\u1ea5y nhi\u1ec1u ng\u01b0\u1eddi \u0111ang c\u00f9ng nhau b\u01b0\u1edbc v\u1ec1 h\u01b0\u1edbng m\u1ed9t c\u0103n nh\u00e0 th\u00f4ng qua m\u1ed9t con \u0111\u01b0\u1eddng \u0111\u1ea5t, b\u00ean c\u1ea1nh l\u00e0 m\u1ed9t c\u00e1i ao."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-21-kis:1",
+      "text": "The scene begins with peeled, cooked shrimp on a plate, with a chef placing 3 loaves of bread on the table in the background. This is followed by shots of chefs, some garnishing dishes and others preparing food. The shrimp are cut in half and grilled on a stove.",
+      "targets": [
+        [
+          "L22_V011",
+          15243
+        ]
+      ],
+      "text_vi": "C\u1ea3nh quay b\u1eaft \u0111\u1ea7u b\u1eb1ng c\u1ea3nh nh\u1eefng con t\u00f4m \u0111\u00e3 \u0111\u01b0\u1ee3c l\u1ed9t v\u1ecf v\u00e0 n\u1ea5u ch\u00edn \u0111ang n\u1eb1m tr\u00ean d\u0129a, ph\u00eda sau l\u00e0 ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp \u0111ang \u0111\u1eb7t 3 \u1ed5 b\u00e1nh m\u00ec l\u00ean b\u00e0n. Sau \u0111\u00f3 l\u00e0 c\u1ea3nh quay c\u00e1c \u0111\u1ea7u b\u1ebfp, c\u00f3 ng\u01b0\u1eddi th\u00ec trang tr\u00ed m\u00f3n \u0103n, c\u00f3 ng\u01b0\u1eddi th\u00ec ch\u1ebf bi\u1ebfn m\u00f3n \u0103n. Nh\u1eefng con t\u00f4m \u0111\u01b0\u1ee3c c\u1eaft l\u00e0m \u0111\u00f4i v\u00e0 \u0111\u01b0\u1ee3c n\u01b0\u1edbng tr\u00ean b\u1ebfp."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-22-kis:1",
+      "text": "A woman wearing a pink ao dai and glasses is explaining the different usage cases of the verb 'remember' based on the timeline of the mentioned action.",
+      "targets": [
+        [
+          "L25_V041",
+          16972
+        ]
+      ],
+      "text_vi": "Ng\u01b0\u1eddi ph\u1ee5 n\u1eef m\u1eb7c \u00e1o d\u00e0i m\u00e0u h\u1ed3ng, \u0111eo k\u00ednh \u0111ang gi\u1ea3ng gi\u1ea3i v\u1ec1 c\u00e1c tr\u01b0\u1eddng h\u1ee3p s\u1eed d\u1ee5ng kh\u00e1c nhau c\u1ee7a \u0111\u1ed9ng t\u1eeb 'remember' d\u1ef1a tr\u00ean m\u1ed1c th\u1eddi gian c\u1ee7a h\u00e0nh \u0111\u1ed9ng \u0111\u01b0\u1ee3c nh\u1eafc t\u1edbi."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-23-kis:1",
+      "text": "A male teacher wearing a white shirt and a dark tie stands out against a dark blue background with faint patterns. The lecture slide has a white background with a magenta border, featuring a blue header bar at the top containing globe motifs and yellow/turquoise arrows. Below is a 3-tier diagram linked by downward-pointing turquoise arrows: Tier 1: 2 boxes enclosed by 1 orange box. Tier 2: 1 large dark blue box in the center. Tier 3: 2 boxes enclosed by 1 green box.",
+      "targets": [
+        [
+          "L25_V060",
+          28279
+        ]
+      ],
+      "text_vi": "H\u00ecnh \u1ea3nh gi\u00e1o vi\u00ean nam m\u1eb7c s\u01a1 mi tr\u1eafng, th\u1eaft c\u00e0 v\u1ea1t t\u1ed1i m\u00e0u, n\u1ed5i b\u1eadt tr\u00ean ph\u00f4ng n\u1ec1n xanh d\u01b0\u01a1ng \u0111\u1eadm c\u00f3 hoa v\u0103n m\u1edd.\r\n\r\nSlide b\u00e0i gi\u1ea3ng N\u1ec1n tr\u1eafng v\u1edbi khung vi\u1ec1n m\u00e0u h\u1ed3ng t\u00edm, ph\u00eda tr\u00ean c\u00f3 thanh ti\u00eau \u0111\u1ec1 xanh d\u01b0\u01a1ng ch\u1ee9a h\u1ecda ti\u1ebft \u0111\u1ecba c\u1ea7u v\u00e0 m\u0169i t\u00ean v\u00e0ng/xanh ng\u1ecdc. B\u00ean d\u01b0\u1edbi l\u00e0 s\u01a1 \u0111\u1ed3 3 t\u1ea7ng \u0111\u01b0\u1ee3c li\u00ean k\u1ebft b\u1edfi c\u00e1c m\u0169i t\u00ean xanh ng\u1ecdc tr\u1ecf xu\u1ed1ng:\r\n\r\nT\u1ea7ng 1: 2 kh\u1ed1i h\u1ed9p \u0111\u01b0\u1ee3c bao b\u1edfi 1 kh\u1ed1i h\u1ed9p cam.\r\n\r\nT\u1ea7ng 2: 1 kh\u1ed1i h\u1ed9p l\u1edbn m\u00e0u xanh d\u01b0\u01a1ng \u0111\u1eadm \u1edf ch\u00ednh gi\u1eefa.\r\n\r\nT\u1ea7ng 3: 2 kh\u1ed1i h\u1ed9p \u0111\u01b0\u1ee3c bao b\u1edfi 1 kh\u1ed1i h\u1ed9p xanh l\u00e1 c\u00e2y."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-24-kis:1",
+      "text": "The clip is taken from a report about a group of artisans weaving handicrafts from water hyacinth. It starts with a single pan shot from left to right, showing 4 products in order: a handbag, a flower pot, a tea set, and a handbag. Immediately after this, the woman on the left picks up a teacup from the set and cradles it while listening to the woman on the right talk.",
+      "targets": [
+        [
+          "L29_V001",
+          8844
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip \u0111\u01b0\u1ee3c c\u1eaft t\u1eeb m\u1ed9t ph\u00f3ng s\u1ef1 v\u1ec1 m\u1ed9t nh\u00f3m c\u00e1c ngh\u1ec7 nh\u00e2n l\u00e0m ngh\u1ec1 \u0111an l\u00e1t c\u00e1c s\u1ea3n ph\u1ea9m th\u1ee7 c\u00f4ng t\u1eeb c\u00e2y l\u1ee5c b\u00ecnh. \u0110\u1ea7u ti\u00ean l\u00e0 m\u1ed9t c\u1ea3nh lia cam duy nh\u1ea5t t\u1eeb tr\u00e1i sang ph\u1ea3i, theo th\u1ee9 t\u1ef1 ta th\u1ea5y 4 s\u1ea3n ph\u1ea9m: t\u00fai x\u00e1ch, ch\u1eadu hoa, b\u1ed9 \u1ea5m t\u00e1ch tr\u00e0 v\u00e0 t\u00fai x\u00e1ch. Ngay sau c\u1ea3nh n\u00e0y, ng\u01b0\u1eddi ph\u1ee5 n\u1eef b\u00ean tr\u00e1i l\u1ea5y m\u1ed9t t\u00e1ch tr\u00e0 trong b\u1ed9 \u1ea5m t\u00e1ch v\u00e0 n\u00e2ng niu trong khi nghe ng\u01b0\u1eddi ph\u1ee5 n\u1eef b\u00ean ph\u1ea3i tr\u00f2 chuy\u1ec7n."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-25-kis:1",
+      "text": "Two students wearing white shirts, blue pants, and red scarves are acting as MCs on a school stage, with a red drum kit and a piano in the background.",
+      "targets": [
+        [
+          "L30_V003",
+          6577
+        ]
+      ],
+      "text_vi": "Hai b\u1ea1n h\u1ecdc sinh m\u1eb7c \u0111\u1ed3ng ph\u1ee5c \u00e1o tr\u1eafng, qu\u1ea7n xanh, qu\u00e0ng kh\u0103n \u0111\u1ecf \u0111ang l\u00e0m MC tr\u00ean m\u1ed9t s\u00e2n kh\u1ea5u t\u1ea1i tr\u01b0\u1eddng h\u1ecdc, ph\u00eda sau l\u00e0 m\u1ed9t b\u1ed9 tr\u1ed1ng c\u01a1 m\u00e0u \u0111\u1ecf v\u00e0 m\u1ed9t c\u00e2y \u0111\u00e0n piano."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-3-qa:1",
+      "text": "An image of a fish being placed on a scale, followed by a scene where another fish of the same type is held by its tail by a person. What is the final number displayed on the scale?",
+      "targets": [
+        [
+          "L21_V023",
+          26043
+        ]
+      ],
+      "text_vi": "H\u00ecnh \u1ea3nh m\u1ed9t con c\u00e1 \u0111\u01b0\u1ee3c \u0111\u1eb7t l\u00ean c\u00e2n, sau \u0111\u00f3 c\u00f3 c\u1ea3nh m\u1ed9t con c\u00e1 kh\u00e1c c\u00f9ng lo\u1ea1i b\u1ecb m\u1ed9t ng\u01b0\u1eddi c\u1ea7m \u0111u\u00f4i. Con s\u1ed1 hi\u1ec3n th\u1ecb cu\u1ed1i c\u00f9ng tr\u00ean c\u00e2n l\u00e0 bao nhi\u00eau?"
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-4-kis:1",
+      "text": "A pride of lions is resting and climbing on wooden platforms in an enclosure, with a London Zoo information board for animal monitoring and conservation visible in the foreground. This is followed by a scene of two staff members in green shirts weighing and recording data for an animal on the zoo grounds.",
+      "targets": [
+        [
+          "L22_V021",
+          19936
+        ],
+        [
+          "L22_V021",
+          19850
+        ]
+      ],
+      "text_vi": "M\u1ed9t \u0111\u00e0n s\u01b0 t\u1eed \u0111ang ngh\u1ec9 ng\u01a1i v\u00e0 leo tr\u00e8o tr\u00ean c\u00e1c b\u1ee5c g\u1ed7 trong khu nu\u00f4i d\u01b0\u1ee1ng, ph\u00eda tr\u01b0\u1edbc c\u00f3 b\u1ea3ng th\u00f4ng tin c\u1ee7a London Zoo ph\u1ee5c v\u1ee5 c\u00f4ng t\u00e1c theo d\u00f5i v\u00e0 b\u1ea3o t\u1ed3n \u0111\u1ed9ng v\u1eadt.. Sau \u0111\u00f3 c\u00f3 c\u1ea3nh hai nh\u00e2n vi\u00ean m\u1eb7c \u00e1o xanh l\u00e1 \u0111ang c\u00e2n v\u00e0 ghi nh\u1eadn s\u1ed1 li\u1ec7u c\u1ee7a m\u1ed9t con v\u1eadt trong khu\u00f4n vi\u00ean s\u1edf th\u00fa."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-5-kis:1",
+      "text": "The clip begins with peas being added to squid stir-frying in a pan, next to a plate of sliced onions and red chili peppers prepared for the dish. The clip ends with a slow-motion shot of the pan being shaken over the stove fire.",
+      "targets": [
+        [
+          "L26_V035",
+          5081
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip b\u1eaft \u0111\u1ea7u b\u1eb1ng vi\u1ec7c \u0111\u1eadu h\u00e0 lan \u0111\u01b0\u1ee3c b\u1ecf v\u00e0o v\u1edbi m\u1ef1c \u0111ang \u0111\u01b0\u1ee3c x\u00e0o tr\u00ean ch\u1ea3o, b\u00ean c\u1ea1nh l\u00e0 \u0111\u0129a h\u00e0nh t\u00e2y v\u00e0 \u1edbt \u0111\u1ecf th\u00e1i l\u00e1t chu\u1ea9n b\u1ecb cho v\u00e0o m\u00f3n \u0103n. \u0110o\u1ea1n clip k\u1ebft th\u00fac v\u1edbi khung quay ch\u1eadm (slow motion) c\u1ea3nh l\u1eafc ch\u1ea3o tr\u00ean b\u1ebfp l\u1eeda."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-6-kis:1",
+      "text": "The news segment begins with a man in a dark blue suit, white shirt, and tie sitting on a large chair. He holds a fairly large piece of raw gemstone with both hands, bringing it close to his face to observe. To his right, a woman in business attire with a magenta headscarf stands nearby and smiles. Next is an aerial panoramic view of a large-scale open-pit gemstone mine with a deep multi-level excavation pit and a surrounding transport road system.",
+      "targets": [
+        [
+          "L22_V023",
+          18234
+        ]
+      ],
+      "text_vi": "M\u1ea9u tin b\u1eaft \u0111\u1ea7u v\u1edbi h\u00ecnh \u1ea3nh n\u1ed9t ng\u01b0\u1eddi \u0111\u00e0n \u00f4ng m\u1eb7c vest xanh \u0111\u1eadm, s\u01a1 mi tr\u1eafng v\u00e0 c\u00e0 v\u1ea1t, \u0111ang ng\u1ed3i tr\u00ean m\u1ed9t chi\u1ebfc gh\u1ebf l\u1edbn. \u00d4ng c\u1ea7m b\u1eb1ng hai tay m\u1ed9t kh\u1ed1i \u0111\u00e1 qu\u00fd th\u00f4 kh\u00e1 l\u1edbn, \u0111\u01b0a l\u00ean g\u1ea7n m\u1eb7t \u0111\u1ec3 quan s\u00e1t.\r\nB\u00ean ph\u1ea3i l\u00e0 m\u1ed9t ph\u1ee5 n\u1eef m\u1eb7c trang ph\u1ee5c c\u00f4ng s\u1edf m\u00e0u \u0111en v\u00e0 kh\u0103n tr\u00f9m \u0111\u1ea7u m\u00e0u h\u1ed3ng t\u00edm, \u0111ang \u0111\u1ee9ng c\u1ea1nh v\u00e0 m\u1ec9m c\u01b0\u1eddi. Ti\u1ebfp theo c\u00f3 h\u00ecnh \u1ea3nh to\u00e0n c\u1ea3nh t\u1eeb tr\u00ean cao c\u1ee7a m\u1ed9t m\u1ecf \u0111\u00e1 qu\u00fd l\u1ed9 thi\u00ean quy m\u00f4 l\u1edbn v\u1edbi h\u1ed1 khai th\u00e1c s\u00e2u nhi\u1ec1u t\u1ea7ng v\u00e0 h\u1ec7 th\u1ed1ng \u0111\u01b0\u1eddng v\u1eadn chuy\u1ec3n bao quanh."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-7-kis:1",
+      "text": "The clip begins with star-shaped carrots being boiled in a pot of water, placed in a metal mesh basket and stirred with wooden chopsticks. The clip ends with an image of a beautifully presented plate of boiled vegetables and fried food, including okra, cauliflower, star-shaped carrots, zucchini, a pink dipping sauce bowl in the center, and light pink chopsticks placed on the right.",
+      "targets": [
+        [
+          "L26_V041",
+          3644
+        ],
+        [
+          "L26_V041",
+          6800
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip b\u1eaft \u0111\u1ea7u b\u1eb1ng c\u1ea3nh c\u00e0 r\u1ed1t c\u1eaft h\u00ecnh ng\u00f4i sao \u0111ang \u0111\u01b0\u1ee3c lu\u1ed9c trong n\u1ed3i n\u01b0\u1edbc s\u00f4i, \u0111\u1eb7t trong r\u1ed5 l\u01b0\u1edbi kim lo\u1ea1i v\u00e0 \u0111\u01b0\u1ee3c \u0111\u1ea3o b\u1eb1ng \u0111\u00f4i \u0111\u0169a g\u1ed7. \r\n\u0110o\u1ea1n clip k\u1ebft th\u00fac b\u1eb1ng h\u00ecnh \u1ea3nh \u0111\u0129a rau c\u1ee7 lu\u1ed9c v\u00e0 \u0111\u1ed3 chi\u00ean \u0111\u01b0\u1ee3c tr\u00ecnh b\u00e0y \u0111\u1eb9p m\u1eaft, g\u1ed3m \u0111\u1eadu b\u1eafp, s\u00fap l\u01a1, c\u00e0 r\u1ed1t h\u00ecnh ng\u00f4i sao, b\u00ed xanh, ch\u00e9n n\u01b0\u1edbc ch\u1ea5m m\u00e0u h\u1ed3ng \u1edf gi\u1eefa v\u00e0 \u0111\u00f4i \u0111\u0169a m\u00e0u h\u1ed3ng nh\u1ea1t \u0111\u1eb7t b\u00ean ph\u1ea3i"
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-8-kis:1",
+      "text": "The chef places stick-shaped ingredients and flower-shaped slices one by one onto a plate being steamed in a pot. The ingredients are arranged alternately around the existing food on the plate using chopsticks. Then, the chef uses a spoon to take more of a soft ingredient from a glass bowl. This ingredient is placed in the center of the plate, surrounded by the previously arranged stick and flower-shaped pieces.",
+      "targets": [
+        [
+          "L26_V171",
+          5522
+        ]
+      ],
+      "text_vi": "Ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp l\u1ea7n l\u01b0\u1ee3t \u0111\u1eb7t c\u00e1c mi\u1ebfng nguy\u00ean li\u1ec7u d\u1ea1ng thanh v\u00e0 nh\u1eefng l\u00e1t c\u1eaft h\u00ecnh hoa v\u00e0o m\u1ed9t \u0111\u0129a \u0111ang \u0111\u01b0\u1ee3c h\u1ea5p trong n\u1ed3i.\r\nC\u00e1c nguy\u00ean li\u1ec7u \u0111\u01b0\u1ee3c d\u00f9ng \u0111\u0169a s\u1eafp x\u1ebfp xen k\u1ebd xung quanh ph\u1ea7n th\u1ee9c \u0103n \u0111\u00e3 c\u00f3 s\u1eb5n tr\u00ean \u0111\u0129a.\r\nSau \u0111\u00f3, \u0111\u1ea7u b\u1ebfp d\u00f9ng mu\u1ed7ng l\u1ea5y th\u00eam m\u1ed9t lo\u1ea1i nguy\u00ean li\u1ec7u m\u1ec1m t\u1eeb t\u00f4 th\u1ee7y tinh.\r\nPh\u1ea7n nguy\u00ean li\u1ec7u n\u00e0y \u0111\u01b0\u1ee3c \u0111\u1eb7t v\u00e0o gi\u1eefa \u0111\u0129a, xung quanh l\u00e0 c\u00e1c mi\u1ebfng d\u1ea1ng thanh v\u00e0 h\u00ecnh hoa \u0111\u00e3 \u0111\u01b0\u1ee3c s\u1eafp x\u1ebfp tr\u01b0\u1edbc \u0111\u00f3."
+    },
+    {
+      "id": "Round 1 - 2026/query-p1-9-qa:1",
+      "text": "The footage records cars wading through water, with a yellow, red, and black car preparing to cross the bridge in turn. What is the number written on the sign to the left of the bridge?",
+      "targets": [
+        [
+          "L21_V003",
+          26248
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n phim ghi l\u1ea1i c\u1ea3nh nh\u1eefng chi\u1ebfc xe \u00f4 t\u00f4 l\u1ed9i n\u01b0\u1edbc, chi\u1ebfc xe m\u00e0u v\u00e0ng, m\u00e0u \u0111\u1ecf v\u00e0 m\u00e0u \u0111en l\u1ea7n l\u01b0\u1ee3t chu\u1ea9n b\u1ecb \u0111i qua c\u1ea7u. Con s\u1ed1 \u0111\u01b0\u1ee3c ghi tr\u00ean bi\u1ec3n b\u00e1o b\u00ean tr\u00e1i c\u1ee7a c\u00e2y c\u1ea7u l\u00e0 bao nhi\u00eau?"
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-1-kis:1",
+      "text": "A group of 5 people are playing next to a yellow animal. One of them takes something that looks like a pumpkin and hides it. The man wakes up, does not see the pumpkin, and wakes the animal up.",
+      "targets": [
+        [
+          "L24_V035",
+          640
+        ]
+      ],
+      "text_vi": "Nh\u00f3m 5 ng\u01b0\u1eddi \u0111ang ch\u01a1i \u0111\u00f9a b\u00ean c\u1ea1nh m\u1ed9t con v\u1eadt m\u00e0u v\u00e0ng. M\u1ed9t trong s\u1ed1 \u0111\u00f3 \u0111\u00e3 mang m\u1ed9t v\u1eadt tr\u00f4ng nh\u01b0 tr\u00e1i b\u00ed \u0111\u1ecf \u0111i gi\u1ea5u. Ng\u01b0\u1eddi \u0111\u00e0n \u00f4ng th\u1ee9c d\u1eady kh\u00f4ng th\u1ea5y qu\u1ea3 b\u00ed \u0111\u1ecf \u0111\u00e2u n\u00ean \u0111\u00e1nh th\u1ee9c con v\u1eadt d\u1eady."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-10-kis:1",
+      "text": "A chef prepares a dish in a pan with white pig intestine pieces and green vegetables. The chef adds garlic chives to the pan with the pig intestines and uses a tool to stir the ingredients. Long green garlic chives are mixed with white pig intestine pieces in the pan. The camera zooms in on the pan as the chef continues to stir-fry and mix the two ingredients.",
+      "targets": [
+        [
+          "L26_V120",
+          5332
+        ]
+      ],
+      "text_vi": "M\u1ed9t \u0111\u1ea7u b\u1ebfp ch\u1ebf bi\u1ebfn m\u00f3n \u0103n trong ch\u1ea3o, v\u1edbi c\u00e1c mi\u1ebfng d\u1ed3i tr\u01b0\u1eddng m\u00e0u tr\u1eafng v\u00e0 rau xanh.\r\n\u0110\u1ea7u b\u1ebfp cho b\u00f4ng h\u1eb9 v\u00e0o ch\u1ea3o \u0111ang c\u00f3 d\u1ed3i tr\u01b0\u1eddng r\u1ed3i d\u00f9ng d\u1ee5ng c\u1ee5 \u0111\u1ea3o c\u00e1c nguy\u00ean li\u1ec7u.\r\nC\u00e1c \u0111o\u1ea1n b\u00f4ng h\u1eb9 d\u00e0i m\u00e0u xanh \u0111\u01b0\u1ee3c tr\u1ed9n c\u00f9ng nh\u1eefng mi\u1ebfng d\u1ed3i tr\u01b0\u1eddng tr\u1eafng trong ch\u1ea3o.\r\nM\u00e1y quay chuy\u1ec3n sang c\u1eadn c\u1ea3nh ch\u1ea3o khi \u0111\u1ea7u b\u1ebfp ti\u1ebfp t\u1ee5c x\u00e0o v\u00e0 tr\u1ed9n hai nguy\u00ean li\u1ec7u."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-11-kis:1",
+      "text": "In the video, the chef holds a long ingredient that has been skewered and rolls it through a mixture of chopped green and red ingredients. The ingredient is then transferred to a plate containing white flour for coating. The chef holds the skewer and rotates the ingredient back and forth multiple times on the flour. Finally, the ingredient is completely covered in a layer of white flour and set aside on a plate.",
+      "targets": [
+        [
+          "L26_V392",
+          3692
+        ]
+      ],
+      "text_vi": "Trong video, ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp c\u1ea7m m\u1ed9t nguy\u00ean li\u1ec7u d\u00e0i \u0111\u00e3 \u0111\u01b0\u1ee3c xi\u00ean que v\u00e0 l\u0103n qua h\u1ed7n h\u1ee3p m\u00e0u xanh l\u00e1 c\u00e2y v\u00e0 m\u00e0u \u0111\u1ecf \u0111\u00e3 b\u0103m nh\u1ecf.\r\nNguy\u00ean li\u1ec7u sau \u0111\u00f3 \u0111\u01b0\u1ee3c chuy\u1ec3n sang m\u1ed9t \u0111\u0129a ch\u1ee9a b\u1ed9t tr\u1eafng \u0111\u1ec3 ph\u1ee7 b\u00ean ngo\u00e0i.\r\nNg\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp c\u1ea7m que xi\u00ean v\u00e0 xoay nguy\u00ean li\u1ec7u qua l\u1ea1i nhi\u1ec1u l\u1ea7n tr\u00ean l\u1edbp b\u1ed9t.\r\nCu\u1ed1i c\u00f9ng, nguy\u00ean li\u1ec7u \u0111\u00e3 \u0111\u01b0\u1ee3c ph\u1ee7 k\u00edn m\u1ed9t l\u1edbp b\u1ed9t tr\u1eafng v\u00e0 \u0111\u1eb7t ri\u00eang sang m\u1ed9t chi\u1ebfc \u0111\u0129a."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-12-qa:1",
+      "text": "The video describes the process of making cakes; the resulting cakes are purple, and the ingredients inside include bean sprouts, carrots, and each cake contains one lotus seed. How many cakes does this mold make at a time?",
+      "targets": [
+        [
+          "L26_V192",
+          5736
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n video m\u00f4 t\u1ea3 qu\u00e1 tr\u00ecnh l\u00e0m b\u00e1nh, b\u00e1nh \u0111\u01b0\u1ee3c t\u1ea1o ra c\u00f3 m\u00e0u t\u00edm, nguy\u00ean li\u1ec7u b\u00ean trong c\u00f3 gi\u00e1, c\u00e0 r\u1ed1t, v\u00e0 b\u00ean trong m\u1ed7i b\u00e1nh \u0111\u1ec1u c\u00f3 1 h\u1ea1t sen. M\u1ed7i l\u1ea7n khu\u00f4n n\u00e0y l\u00e0m \u0111\u01b0\u1ee3c bao nhi\u00eau c\u00e1i b\u00e1nh?"
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-13-kis:1",
+      "text": "The chef stirs a mixture of ingredients in a pan, where one can see ingredients such as chicken, red chili, green chili, peanuts, and shallots. Then she turns off the heat, adds lemon zest and lemon juice to the pan before transferring the food mixture to a plate.",
+      "targets": [
+        [
+          "L26_V422",
+          4499
+        ]
+      ],
+      "text_vi": "Ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp \u0111\u1ea3o \u0111\u1ec1u m\u1ed9t h\u1ed7n h\u1ee3p c\u00e1c nguy\u00ean li\u1ec7u trong ch\u1ea3o, nh\u00ecn b\u1eb1ng m\u1eaft th\u01b0\u1eddng c\u00f3 th\u1ec3 th\u1ea5y m\u1ed9t s\u1ed1 nguy\u00ean li\u1ec7u nh\u01b0 th\u1ecbt g\u00e0, \u1edbt \u0111\u1ecf, \u1edbt xanh, \u0111\u1eadu ph\u1ed9ng v\u00e0 h\u00e0nh t\u00edm. Sau \u0111\u00f3 c\u00f4 \u1ea5y t\u1eaft l\u1eeda, cho th\u00eam v\u1ecf chanh v\u00e0 n\u01b0\u1edbc c\u1ed1t chanh v\u00e0o ch\u1ea3o tr\u01b0\u1edbc khi tr\u00fat h\u1ed7n h\u1ee3p th\u1ee9c \u0103n n\u00e0y ra \u0111\u0129a."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-14-kis:1",
+      "text": "A close-up of a group of 3 cyclists moving close together; two racers are wearing blue jerseys and red and white helmets, next to a racer wearing a yellow jersey. Under the chin strap of the red-helmeted racer, there is a white string hanging down near the neck.",
+      "targets": [
+        [
+          "L23_V010",
+          609
+        ]
+      ],
+      "text_vi": "C\u1eadn c\u1ea3nh m\u1ed9t nh\u00f3m 3 v\u1eadn \u0111\u1ed9ng vi\u00ean \u0111ua xe \u0111\u1ea1p \u0111ang di chuy\u1ec3n s\u00e1t nhau, hai tay \u0111ua m\u1eb7c \u00e1o xanh bi\u1ec3n \u0111\u1ed9i m\u0169 b\u1ea3o hi\u1ec3m \u0111\u1ecf v\u00e0 tr\u1eafng, b\u00ean c\u1ea1nh c\u00f3 m\u1ed9t tay \u0111ua m\u1eb7c \u00e1o v\u00e0ng \u0111ang \u0111ua c\u00f9ng. B\u00ean d\u01b0\u1edbi quai m\u0169 c\u1ee7a tay \u0111ua n\u00f3n \u0111\u1ecf c\u00f3 m\u1ed9t s\u1ee3i d\u00e2y m\u00e0u tr\u1eafng treo l\u1ee7ng xu\u1ed1ng g\u1ea7n c\u1ed5."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-15-kis:1",
+      "text": "The footage introduces the ingredients of the dish through 3 transitions: the camera tilts up and ends on the first seafood ingredient; it pans down for a close-up of the second seafood ingredient and then switches to colorful ingredients; finally, a static wide shot of all the ingredients.",
+      "targets": [
+        [
+          "L26_V074",
+          745
+        ],
+        [
+          "L26_V074",
+          679
+        ],
+        [
+          "L26_V074",
+          619
+        ]
+      ],
+      "text_vi": "C\u1ea3nh phim l\u1ea7n l\u01b0\u1ee3t gi\u1edbi thi\u1ec7u c\u00e1c nguy\u00ean li\u1ec7u c\u1ee7a m\u00f3n \u0103n qua 3 chuy\u1ec3n c\u1ea3nh: m\u00e1y quay ch\u00e9o l\u00ean v\u00e0 k\u1ebft th\u00fac \u1edf nguy\u00ean li\u1ec7u h\u1ea3i s\u1ea3n \u0111\u1ea7u ti\u00ean; quay t\u1eeb tr\u00ean xu\u1ed1ng c\u1eadn c\u1ea3nh nguy\u00ean li\u1ec7u h\u1ea3i s\u1ea3n th\u1ee9 hai r\u1ed3i chuy\u1ec3n sang c\u00e1c nguy\u00ean li\u1ec7u nhi\u1ec1u m\u00e0u s\u1eafc; cu\u1ed1i c\u00f9ng l\u00e0 c\u00fa m\u00e1y t\u0129nh to\u00e0n c\u1ea3nh to\u00e0n b\u1ed9 nguy\u00ean li\u1ec7u."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-16-kis:1",
+      "text": "In a rural house with large windows, two women are doing crafts on a wooden bench, and behind them is a row of about 10 wooden cutting boards hanging in a horizontal line.",
+      "targets": [
+        [
+          "L29_V014",
+          10715
+        ]
+      ],
+      "text_vi": "Trong m\u1ed9t ng\u00f4i nh\u00e0 n\u00f4ng th\u00f4n c\u00f3 c\u1eeda s\u1ed5 l\u1edbn, hai ng\u01b0\u1eddi ph\u1ee5 n\u1eef \u0111ang l\u00e0m th\u1ee7 c\u00f4ng tr\u00ean m\u1ed9t b\u1ed9 v\u00e1n ng\u1ef1a, ph\u00eda sau l\u00e0 m\u1ed9t d\u00e3y kho\u1ea3ng 10 th\u1edbt g\u1ed7 \u0111\u01b0\u1ee3c treo th\u00e0nh m\u1ed9t h\u00e0ng ngang."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-17-kis:1",
+      "text": "A stage with large 3D embossed, metallic glitter-covered text that reads 'S\u1eaeC C\u1ed4 ...' placed at the front edge of the stage.",
+      "targets": [
+        [
+          "L30_V026",
+          2028
+        ]
+      ],
+      "text_vi": "S\u00e2n kh\u1ea5u v\u1edbi d\u00f2ng ch\u1eef n\u1ed5i 3D to, \u00e1nh kim ph\u1ee7 kim tuy\u1ebfn c\u00f3 n\u1ed9i dung: \u201cS\u1eaeC C\u1ed4 ...\u201d \u0111\u1eb7t \u1edf m\u00e9p tr\u01b0\u1edbc s\u00e2n kh\u1ea5u."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-18-kis:1",
+      "text": "The footage is shot from behind the lead group, consisting of 1 racer in front and 3 racers following behind, as the group turns right onto Ho Tung Mau street at an intersection with a traffic light counting down to 13 seconds.",
+      "targets": [
+        [
+          "L23_V017",
+          2566
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n phim quay t\u1eeb ph\u00eda sau nh\u00f3m d\u1eabn \u0111\u1ea7u, g\u1ed3m 1 tay \u0111ua d\u1eabn tr\u01b0\u1edbc v\u00e0 3 tay \u0111ua b\u00e1m ph\u00eda sau, khi c\u1ea3 nh\u00f3m r\u1ebd ph\u1ea3i v\u00e0o \u0111\u01b0\u1eddng H\u1ed3 T\u00f9ng M\u1eadu t\u1ea1i giao l\u1ed9 c\u00f3 \u0111\u00e8n xanh \u0111ang \u0111\u1ebfm ng\u01b0\u1ee3c \u0111\u1ebfn 13 gi\u00e2y."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-19-qa:1",
+      "text": "The video records a benefactor supporting an inn for the elderly, then switches to a scene of an old man talking to a group of foreigners. On which street is the inn mentioned in the video located?",
+      "targets": [
+        [
+          "L30_V043",
+          3746
+        ],
+        [
+          "L30_V043",
+          2955
+        ],
+        [
+          "L30_V043",
+          2012
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n phim ghi l\u1ea1i c\u1ea3nh m\u1ea1nh th\u01b0\u1eddng qu\u00e2n h\u1ed7 tr\u1ee3 m\u1ed9t qu\u00e1n tr\u1ecd d\u00e0nh cho ng\u01b0\u1eddi cao tu\u1ed5i, sau \u0111\u00f3 chuy\u1ec3n sang c\u1ea3nh m\u1ed9t c\u1ee5 \u00f4ng tr\u00f2 chuy\u1ec7n v\u1edbi nh\u00f3m ng\u01b0\u1eddi n\u01b0\u1edbc ngo\u00e0i. H\u1ecfi qu\u00e1n tr\u1ecd \u0111\u01b0\u1ee3c nh\u1eafc \u0111\u1ebfn trong \u0111o\u1ea1n phim n\u1eb1m tr\u00ean \u0111\u01b0\u1eddng n\u00e0o?"
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-2-kis:1",
+      "text": "The clip begins with a person using a phone to take a picture of a rhinoceros painting on a wall. The clip ends with a person taking pictures of 3-monkey graffiti on a bridge.",
+      "targets": [
+        [
+          "L21_V013",
+          22596
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip b\u1eaft \u0111\u1ea7u v\u1edbi c\u1ea3nh m\u1ed9t ng\u01b0\u1eddi \u0111ang d\u00f9ng \u0111i\u1ec7n tho\u1ea1i ch\u1ee5p \u1ea3nh b\u1ee9c tranh h\u00ecnh t\u00ea gi\u00e1c tr\u00ean t\u01b0\u1eddng. \u0110o\u1ea1n clip k\u1ebft th\u00fac v\u1edbi c\u1ea3nh m\u1ed9t ng\u01b0\u1eddi ch\u1ee5p \u1ea3nh c\u00e1c h\u00ecnh graffiti 3 ch\u00fa kh\u1ec9 tr\u00ean m\u1ed9t c\u00e2y c\u1ea7u"
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-20-kis:1",
+      "text": "A geography lecture clip featuring a data table on the urban network in Vietnam. The table uses colors to show differences in urban distribution across regions: the 3 regions with the most urban areas have their quantity figures printed in red, while the 2 regions with the fewest urban areas have their figures printed in blue. The table also shows that the region with the fewest urban areas has the highest urban population.",
+      "targets": [
+        [
+          "L25_V060",
+          33602
+        ]
+      ],
+      "text_vi": "Clip b\u00e0i gi\u1ea3ng m\u00f4n \u0110\u1ecba l\u00ed, c\u00f3 1 b\u1ea3ng s\u1ed1 li\u1ec7u v\u1ec1 m\u1ea1ng l\u01b0\u1edbi \u0111\u00f4 th\u1ecb \u1edf Vi\u1ec7t Nam. B\u1ea3ng n\u00e0y th\u1ec3 hi\u1ec7n s\u1ef1 kh\u00e1c nhau v\u1ec1 ph\u00e2n b\u1ed1 \u0111\u00f4 th\u1ecb gi\u1eefa c\u00e1c v\u00f9ng b\u1eb1ng m\u00e0u s\u1eafc: 3 v\u00f9ng c\u00f3 nhi\u1ec1u \u0111\u00f4 th\u1ecb nh\u1ea5t th\u00ec con s\u1ed1 th\u1ec3 hi\u1ec7n s\u1ed1 l\u01b0\u1ee3ng \u0111\u00f4 th\u1ecb \u0111\u01b0\u1ee3c in m\u00e0u \u0111\u1ecf, c\u00f2n 2 v\u00f9ng c\u00f3 \u00edt \u0111\u00f4 th\u1ecb nh\u1ea5t th\u00ec con s\u1ed1 n\u00e0y \u0111\u01b0\u1ee3c in m\u00e0u xanh. T\u1eeb b\u1ea3ng s\u1ed1 li\u1ec7u ta c\u00f2n c\u00f3 th\u1ec3 th\u1ea5y r\u1eb1ng v\u00f9ng c\u00f3 \u00edt \u0111\u00f4 th\u1ecb nh\u1ea5t l\u1ea1i l\u00e0 v\u00f9ng c\u00f3 d\u00e2n s\u1ed1 \u0111\u00f4 thi cao nh\u1ea5t."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-21-trake:1",
+      "text": "Two women working together to seal a cardboard box.",
+      "targets": [
+        [
+          "L30_V031",
+          2105
+        ]
+      ],
+      "text_vi": "Hai ng\u01b0\u1eddi ph\u1ee5 n\u1eef c\u00f9ng nhau d\u00e1n ni\u00eam phong m\u1ed9t th\u00f9ng carton."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-21-trake:2",
+      "text": "Boxes of instant noodles and bags of bread are neatly arranged.",
+      "targets": [
+        [
+          "L30_V031",
+          2146
+        ]
+      ],
+      "text_vi": "C\u00e1c th\u00f9ng m\u00ec t\u00f4m v\u00e0 b\u1ecdc b\u00e1nh m\u00ec \u0111\u01b0\u1ee3c s\u1eafp x\u1ebfp ngay ng\u1eafn."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-21-trake:3",
+      "text": "A man lifts a box of instant noodles and places it on top of a stack of noodle boxes.",
+      "targets": [
+        [
+          "L30_V031",
+          2220
+        ]
+      ],
+      "text_vi": "M\u1ed9t ng\u01b0\u1eddi \u0111\u00e0n \u00f4ng nh\u1ea5c th\u00f9ng m\u00ec t\u00f4m l\u00ean v\u00e0 x\u1ebfp l\u00ean tr\u00ean ch\u1ed3ng th\u00f9ng m\u00ec."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-21-trake:4",
+      "text": "Close-up shot of noodle boxes stacked on a truck.",
+      "targets": [
+        [
+          "L30_V031",
+          2263
+        ]
+      ],
+      "text_vi": "C\u1ea3nh quay c\u1eadn c\u1ea3nh c\u00e1c th\u00f9ng m\u00ec \u0111\u01b0\u1ee3c x\u1ebfp ch\u1ed3ng tr\u00ean xe t\u1ea3i."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-22-kis:1",
+      "text": "In a cooking video, a white seafood ingredient is scored with perpendicular lines on both sides. The ingredient is then cut into strips, placed in a bowl, and mixed with seasonings including wine, pepper, and seasoning powder.",
+      "targets": [
+        [
+          "L26_V470",
+          2100
+        ],
+        [
+          "L26_V470",
+          2541
+        ],
+        [
+          "L26_V470",
+          3157
+        ]
+      ],
+      "text_vi": "Trong video n\u1ea5u \u0103n, m\u1ed9t lo\u1ea1i nguy\u00ean li\u1ec7u h\u1ea3i s\u1ea3n m\u00e0u tr\u1eafng \u0111\u01b0\u1ee3c kh\u1ee9a theo nh\u1eefng \u0111\u01b0\u1eddng th\u1eb3ng vu\u00f4ng g\u00f3c nhau, tr\u00ean c\u1ea3 2 b\u1ec1 m\u1eb7t c\u1ee7a nguy\u00ean li\u1ec7u n\u00e0y. Nguy\u00ean li\u1ec7u sau \u0111\u00f3 \u0111\u01b0\u1ee3c c\u1eaft th\u00e0nh t\u1eebng que v\u00e0 cho v\u00e0o t\u00f4, tr\u01b0\u1edbc khi \u0111\u01b0\u1ee3c tr\u1ed9n \u0111\u1ec1u v\u1edbi c\u00e1c gia v\u1ecb g\u1ed3m r\u01b0\u1ee3u, ti\u00eau v\u00e0 h\u1ea1t n\u00eam."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-23-qa:1",
+      "text": "Biology question number 11 from the 2022 National High School Graduation Exam. The question includes a chart comparing the growth rates of plants in coastal ecosystems. At what salinity level in parts per thousand does plant species (II) achieve its best growth rate?",
+      "targets": [
+        [
+          "L25_V012",
+          22140
+        ],
+        [
+          "L25_V012",
+          14830
+        ]
+      ],
+      "text_vi": "C\u00e2u h\u1ecfi m\u00f4n Sinh h\u1ecdc n\u1eb1m \u1edf s\u1ed1 th\u1ee9 t\u1ef1 11 trong \u0111\u1ec1 thi THPTQG 2022. Trong c\u00e2u h\u1ecfi c\u00f3 m\u1ed9t bi\u1ec3u \u0111\u1ed3 \u0111\u01b0a ra s\u1ef1 so s\u00e1nh t\u1ed1c \u0111\u1ed9 sinh tr\u01b0\u1edfng c\u1ee7a c\u00e1c lo\u00e0i th\u1ef1c v\u1eadt trong c\u00e1c h\u1ec7 sinh th\u00e1i ven bi\u1ec3n. H\u00e3y cho bi\u1ebft lo\u00e0i c\u00e2y (II) \u0111\u1ea1t \u0111\u01b0\u1ee3c t\u1ed1c \u0111\u1ed9 sinh tr\u01b0\u1edfng t\u1ed1t nh\u1ea5t khi m\u00f4i tr\u01b0\u1eddng s\u1ed1ng c\u00f3 \u0111\u1ed9 m\u1eb7n l\u00e0 bao nhi\u00eau ph\u1ea7n ngh\u00ecn?"
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-24-kis:1",
+      "text": "A clip capturing the finish line of a cycling race held in a city in Quang Nam province (as it existed before July 1, 2025). An Estonian cyclist in a blue jersey leads the pack. Just before the finish line, he takes both hands off the handlebars and raises them to celebrate his victory while the bike continues forward. Right behind him, a cyclist in a yellow jersey and a cyclist in an orange jersey are racing toward the finish line.",
+      "targets": [
+        [
+          "L23_V013",
+          4938
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip ghi l\u1ea1i kho\u1ea3nh kh\u1eafc v\u1ec1 \u0111\u00edch c\u1ee7a m\u1ed9t ch\u1eb7ng \u0111ua xe \u0111\u1ea1p di\u1ec5n ra t\u1ea1i th\u00e0nh ph\u1ed1 thu\u1ed9c t\u1ec9nh Qu\u1ea3ng Nam (c\u0169, tr\u01b0\u1edbc ng\u00e0y 01/7/2025). V\u1eadn \u0111\u1ed9ng vi\u00ean ng\u01b0\u1eddi Estonia m\u1eb7c \u00e1o xanh n\u01b0\u1edbc bi\u1ec3n d\u1eabn \u0111\u1ea7u \u0111o\u00e0n. Khi ch\u1ec9 c\u00f2n c\u00e1ch \u0111\u00edch m\u1ed9t \u0111o\u1ea1n ng\u1eafn, anh bu\u00f4ng c\u1ea3 hai tay kh\u1ecfi ghi-\u0111\u00f4ng, giang hai tay l\u00ean cao \u0103n m\u1eebng chi\u1ebfn th\u1eafng trong khi xe v\u1eabn ti\u1ebfn v\u1ec1 ph\u00eda tr\u01b0\u1edbc. Ngay ph\u00eda sau anh l\u00e0 m\u1ed9t v\u1eadn \u0111\u1ed9ng vi\u00ean m\u1eb7c \u00e1o v\u00e0ng v\u00e0 m\u1ed9t v\u1eadn \u0111\u1ed9ng vi\u00ean m\u1eb7c \u00e1o cam \u0111ang l\u1ea7n l\u01b0\u1ee3t lao v\u1ec1 \u0111\u00edch."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-25-kis:1",
+      "text": "A male teacher wearing glasses and a short-sleeved striped shirt appears in the bottom left corner, using both hands to make illustrative gestures while lecturing. The frame contains an illustration of a young woman wearing glasses and a white shirt, sitting cross-legged on a gray sofa, holding a cup of water while looking at a laptop open on her lap.",
+      "targets": [
+        [
+          "L25_V045",
+          16264
+        ]
+      ],
+      "text_vi": "C\u1ea3nh gi\u00e1o vi\u00ean nam \u0111eo k\u00ednh, m\u1eb7c \u00e1o s\u01a1 mi k\u1ebb s\u1ecdc ng\u1eafn tay, xu\u1ea5t hi\u1ec7n \u1edf g\u00f3c d\u01b0\u1edbi b\u00ean tr\u00e1i v\u00e0 d\u00f9ng hai tay l\u00e0m c\u1eed ch\u1ec9 minh h\u1ecda khi \u0111ang gi\u1ea3ng b\u00e0i.\r\n\r\nKhung h\u00ecnh ch\u1ee9a m\u1ed9t b\u1ee9c \u1ea3nh minh h\u1ecda c\u00f4 g\u00e1i tr\u1ebb \u0111eo k\u00ednh, m\u1eb7c \u00e1o s\u01a1 mi tr\u1eafng, ng\u1ed3i khoanh ch\u00e2n tr\u00ean gh\u1ebf sofa m\u00e0u x\u00e1m v\u1eeba c\u1ea7m c\u1ed1c n\u01b0\u1edbc v\u1eeba nh\u00ecn v\u00e0o laptop m\u1edf tr\u00ean \u0111\u00f9i."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-26-kis:1",
+      "text": "A segment from a lecture. The slide includes: a group of white 3D human figures surrounding a red figure in the center; and two male cartoon characters in a tug-of-war competition, facing each other with a rope.",
+      "targets": [
+        [
+          "L25_V062",
+          13788
+        ]
+      ],
+      "text_vi": "\u0110\u00e2y l\u00e0 m\u1ed9t \u0111o\u1ea1n trong b\u00e0i gi\u1ea3ng. Tr\u00ean slide bao g\u1ed3m:\r\n- M\u1ed9t nh\u00f3m nh\u00e2n v\u1eadt ng\u01b0\u1eddi 3D m\u00e0u tr\u1eafng v\u00e2y quanh m\u1ed9t nh\u00e2n v\u1eadt m\u00e0u \u0111\u1ecf \u1edf ch\u00ednh gi\u1eefa.\r\n\r\n- Hai nh\u00e2n v\u1eadt ho\u1ea1t h\u00ecnh nam \u0111ang trong t\u01b0 th\u1ebf thi \u0111\u1ea5u k\u00e9o co, \u0111\u1ed1i \u0111\u1ea7u nhau v\u1edbi s\u1ee3i d\u00e2y th\u1eebng."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-27-qa:1",
+      "text": "A lion dance performance is shown from the beginning of the video, with numbers pasted on the poles used for the performance. In the background, there is a spiral-shaped dragon model. Among the numbers 1 through 8, which one is not visible from the camera's perspective during the first 16 seconds of the video?",
+      "targets": [
+        [
+          "L24_V033",
+          42
+        ],
+        [
+          "L24_V026",
+          141
+        ],
+        [
+          "L24_V018",
+          45
+        ],
+        [
+          "L24_V023",
+          319
+        ],
+        [
+          "L24_V024",
+          319
+        ],
+        [
+          "L24_V033",
+          384
+        ],
+        [
+          "L24_V029",
+          467
+        ],
+        [
+          "L24_V042",
+          356
+        ],
+        [
+          "L24_V019",
+          50
+        ]
+      ],
+      "text_vi": "C\u1ea3nh quay m\u1ed9t ch\u00fa l\u00e2n \u0111ang bi\u1ec3u di\u1ec5n t\u1eeb \u0111\u1ea7u video, c\u00e1c c\u1ed9t \u0111\u1ec3 ch\u00fa l\u00e2n bi\u1ec3u di\u1ec5n \u0111\u01b0\u1ee3c d\u00e1n nh\u1eefng con s\u1ed1. Ph\u00eda sau c\u00f3 1 m\u00f4 h\u00ecnh con r\u1ed3ng u\u1ed1n l\u01b0\u1ee3n h\u00ecnh xo\u1eafn \u1ed1c. Trong c\u00e1c s\u1ed1 t\u1eeb 16 gi\u00e2y \u0111\u1ea7u ti\u00ean c\u1ee7a video, s\u1ed1 n\u00e0o kh\u00f4ng \u0111\u01b0\u1ee3c nh\u00ecn th\u1ea5y t\u1eeb g\u00f3c nh\u00ecn c\u1ee7a camera trong c\u00e1c s\u1ed1 t\u1eeb 1-8."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-28-qa:1",
+      "text": "A shot of a bowl of porridge that has been cooked and fully garnished. Next to the bowl is a small black dish containing an orange topping with a texture similar to small strands. This topping was previously sprinkled over the porridge. Surrounding the topping are vegetables, scallions, etc. What animal does the topping in the video come from?",
+      "targets": [
+        [
+          "L26_V450",
+          6640
+        ],
+        [
+          "L26_V450",
+          1034
+        ]
+      ],
+      "text_vi": "C\u1ea3nh quay m\u1ed9t t\u00f4 ch\u00e1o \u0111\u00e3 \u0111\u01b0\u1ee3c n\u1ea5u v\u00e0 trang tr\u00ed ho\u00e0n ch\u1ec9nh (\u0111\u00e3 xong c\u00e1c giai \u0111o\u1ea1n trang tr\u00ed). K\u1ebf b\u00ean t\u00f4 ch\u00e1o c\u00f3 1 ch\u00e9n nh\u1ecf m\u00e0u \u0111en, \u0111\u1ec3 ch\u1ee9a 1 lo\u1ea1i topping m\u00e0u cam k\u1ebft c\u1ea5u h\u01a1i gi\u1ed1ng nh\u1eefng s\u1ee3i nh\u1ecf. Lo\u1ea1i topping n\u00e0y tr\u01b0\u1edbc \u0111\u00f3 \u0111\u00e3 \u0111\u01b0\u1ee3c r\u1eafc l\u00ean t\u00f4 ch\u00e1o. Xung quanh topping l\u00e0 c\u00e1c lo\u1ea1i rau, h\u00e0nh,... H\u1ecfi topping trong video l\u00e0 th\u1ecbt c\u1ee7a con g\u00ec?"
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-29-qa:1",
+      "text": "A shot listing the ingredients for a dish. The background includes a plate of meat, a bunch of fresh green leaves placed in the left corner, a packet of seasoning, a small glass jar of coconut milk, curry powder, dried wood ear mushrooms placed under a spice bowl, and lemongrass stalks and red chili peppers in the bottom left corner. An ingredient list appears with 9 specific items. What is the weight of the meat listed in the ingredient table (including the number and unit written in the table)?",
+      "targets": [
+        [
+          "L26_V439",
+          1485
+        ]
+      ],
+      "text_vi": "C\u1ea3nh quay li\u1ec7t k\u00ea c\u00e1c nguy\u00ean li\u1ec7u \u0111\u1ec3 n\u1ea5u m\u1ed9t m\u00f3n \u0103n. \u1ea2nh n\u1ec1n bao g\u1ed3m d\u0129a th\u1ecbt, b\u00f3 l\u00e1 t\u01b0\u01a1i xanh \u0111\u1eb7t \u1edf g\u00f3c b\u00ean tr\u00e1i, m\u1ed9t g\u00f3i h\u1ea1t n\u00eam, h\u0169 th\u1ee7y tinh nh\u1ecf \u0111\u1ef1ng n\u01b0\u1edbc c\u1ed1t d\u1eeba, b\u1ed9t c\u00e0 ri, n\u1ea5m m\u00e8o (m\u1ed9c nh\u0129) kh\u00f4 \u0111\u1eb7t ph\u00eda d\u01b0\u1edbi ch\u00e9n gia v\u1ecb, s\u1ea3 c\u00e2y v\u00e0 \u1edbt hi\u1ec3m \u0111\u1ecf \u0111\u1eb7t \u1edf g\u00f3c tr\u00e1i ph\u00eda d\u01b0\u1edbi. B\u1ea3ng nguy\u00ean li\u1ec7u hi\u1ec7n l\u00ean g\u1ed3m 9 th\u00e0nh ph\u1ea7n c\u1ee5 th\u1ec3. H\u1ecfi ph\u1ea7n th\u1ecbt c\u00f3 tr\u1ecdng l\u01b0\u1ee3ng bao nhi\u00eau trong b\u1ea3ng nguy\u00ean li\u1ec7u (s\u1ed1 v\u00e0 \u0111\u01a1n v\u1ecb \u0111\u01b0\u1ee3c ghi trong b\u1ea3ng)?"
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-3-kis:1",
+      "text": "A yellow qilin (or dragon/lion?) jumps or falls from a height, near a small blue toy ship model.",
+      "targets": [
+        [
+          "L24_V044",
+          256
+        ]
+      ],
+      "text_vi": "M\u1ed9t ch\u00fa l\u00e2n (hay r\u1ed3ng/s\u01b0 t\u1eed?) m\u00e0u v\u00e0ng nh\u1ea3y hay r\u01a1i t\u1eeb tr\u00ean cao xu\u1ed1ng, g\u1ea7n v\u1edbi m\u00f4 h\u00ecnh chi\u1ebfc t\u00e0u th\u1ee7y nh\u1ecf m\u00e0u xanh d\u01b0\u01a1ng."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-30-qa:1",
+      "text": "A girl wearing a white apron stands next to a vase of purple galangal flowers. She then places 4 'X's on a white plate, where 'X' is known to be the ingredient for the dish in this episode. She then picks up 2 more 'X's. Afterward, she talks to someone opposite her to see what dish is being cooked today. What is 'X'?",
+      "targets": [
+        [
+          "L26_V254",
+          529
+        ]
+      ],
+      "text_vi": "M\u1ed9t c\u00f4 g\u00e1i \u0111eo t\u1ea1p d\u1ec1 m\u00e0u tr\u1eafng, b\u00ean c\u1ea1nh l\u00e0 m\u1ed9t l\u1ecd hoa ri\u1ec1ng t\u00eda. Sau \u0111\u00f3 c\u00f4 g\u00e1i n\u00e0y \u0111\u1eb7t l\u00ean 1 d\u0129a tr\u1eafng 4 con X, \u0111\u01b0\u1ee3c bi\u1ebft X l\u00e0 nguy\u00ean li\u1ec7u cho m\u00f3n \u0103n trong t\u1eadp n\u00e0y. Sau \u0111\u00f3 ng\u01b0\u1eddi n\u00e0y l\u1ea1i c\u1ea7m l\u00ean 2 con X. Sau \u0111\u00f3 ng\u01b0\u1eddi n\u00e0y \u0111\u1ed1i tho\u1ea1i v\u1edbi m\u1ed9t ng\u01b0\u1eddi \u0111\u1ed1i di\u1ec7n \u0111\u1ec3 xem h\u00f4m nay n\u1ea5u m\u00f3n g\u00ec. H\u1ecfi X l\u00e0 con g\u00ec?"
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-4-kis:1",
+      "text": "Two young people are hanging a large blue-toned banner decorated with images of mountains, clouds, and a road leading to a school. The banner also features images of two children from disadvantaged areas wearing yellow shirts.",
+      "targets": [
+        [
+          "L30_V072",
+          748
+        ]
+      ],
+      "text_vi": "Hai b\u1ea1n tr\u1ebb \u0111ang treo b\u0103ng-r\u00f4n l\u1edbn c\u00f3 t\u00f4ng m\u00e0u xanh d\u01b0\u01a1ng, \u0111\u01b0\u1ee3c trang tr\u00ed b\u1eb1ng h\u00ecnh \u1ea3nh n\u00fai, m\u00e2y v\u00e0 m\u1ed9t con \u0111\u01b0\u1eddng d\u1eabn t\u1edbi tr\u01b0\u1eddng h\u1ecdc. Tr\u00ean b\u0103ng r\u00f4n c\u00f2n c\u00f3 h\u00ecnh \u1ea3nh 02 em b\u00e9 v\u00f9ng kh\u00f3 kh\u0103n \u0111ang m\u1eb7c \u00e1o m\u00e0u v\u00e0ng."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-5-kis:1",
+      "text": "A person in a red shirt and white hat is splashing water onto their face. The frame includes two cyclists, with the person in the dark blue shirt chasing the person in the black and orange shirt.",
+      "targets": [
+        [
+          "L21_V022",
+          26107
+        ],
+        [
+          "L21_V022",
+          26258
+        ]
+      ],
+      "text_vi": "M\u1ed9t ng\u01b0\u1eddi \u00e1o \u0111\u1ecf, \u0111\u1ed9i n\u00f3n m\u00e0u tr\u1eafng, \u0111ang l\u1ea5y n\u01b0\u1edbc r\u01b0\u1edbi v\u00e0o m\u1eb7t c\u1ee7a m\u00ecnh. Khung h\u00ecnh c\u00f3 hai ng\u01b0\u1eddi \u0111i xe \u0111\u1ea1p, ng\u01b0\u1eddi m\u1eb7c \u00e1o xanh \u0111\u1eadm \u0111ang \u0111u\u1ed5i theo ng\u01b0\u1eddi m\u1eb7c \u00e1o \u0111en ph\u1ed1i cam."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-6-kis:1",
+      "text": "A video recorded by a passerby behind shows two young men on a motorcycle suddenly lying flat on the seat and speeding. A blue car and another motorcyclist in a blue shirt also appear in the frame. Two red circles appear to highlight the positions of these two young men.",
+      "targets": [
+        [
+          "L22_V024",
+          20783
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n video do ng\u01b0\u1eddi \u0111i \u0111\u01b0\u1eddng ph\u00eda sau ghi l\u1ea1i cho th\u1ea5y 2 thanh ni\u00ean \u0111i\u1ec1u khi\u1ec3n xe m\u00e1y b\u1ea5t ng\u1edd n\u1eb1m d\u00e0i tr\u00ean y\u00ean v\u00e0 ph\u00f3ng v\u1edbi t\u1ed1c \u0111\u1ed9 cao. Xu\u1ea5t hi\u1ec7n trong khung h\u00ecnh c\u00f2n c\u00f3 m\u1ed9t chi\u1ebfc \u00f4 t\u00f4 m\u00e0u xanh c\u00f9ng m\u1ed9t ng\u01b0\u1eddi \u0111i xe m\u00e1y m\u1eb7c \u00e1o xanh kh\u00e1c. C\u00f3 2 v\u00f2ng tr\u00f2n m\u00e0u \u0111\u1ecf xu\u1ea5t hi\u1ec7n \u0111\u1ec3 khoanh v\u00f9ng v\u1ecb tr\u00ed 2 thanh ni\u00ean n\u00e0y."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-7-qa:1",
+      "text": "The clip is filmed from inside a self-driving car, where the steering wheel can be clearly seen turning to make the car turn right. Then, the camera angle shifts outside, capturing a white car turning left, and in the upper corner of the frame, there is a red sign with 6 Chinese characters. What is the number written on the side of the white car?",
+      "targets": [
+        [
+          "L21_V009",
+          21172
+        ]
+      ],
+      "text_vi": "\u0110o\u1ea1n clip \u0111\u01b0\u1ee3c quay t\u1eeb b\u00ean trong m\u1ed9t chi\u1ebfc xe \u00f4 t\u00f4 t\u1ef1 l\u00e1i, c\u00f3 th\u1ec3 th\u1ea5y r\u00f5 v\u00f4 l\u0103ng \u0111\u01b0\u1ee3c xoay \u0111\u1ec3 chi\u1ebfc xe r\u1ebd sang ph\u1ea3i. Sau \u0111\u00f3, g\u00f3c quay chuy\u1ec3n ra ngo\u00e0i, b\u1eaft tr\u1ecdn c\u1ea3nh chi\u1ebfc xe m\u00e0u tr\u1eafng r\u1ebd tr\u00e1i, v\u00e0 \u1edf g\u00f3c tr\u00ean khung h\u00ecnh c\u00f3 m\u1ed9t d\u01b0\u1edbi m\u1ed9t bi\u1ec3n hi\u1ec7u \u0111\u1ecf g\u1ed3m 6 k\u00fd t\u1ef1 ch\u1eef H\u00e1n. Con s\u1ed1 \u0111\u01b0\u1ee3c vi\u1ebft tr\u00ean ph\u1ea7n h\u00f4ng xe m\u00e0u tr\u1eafng l\u00e0 s\u1ed1 m\u1ea5y?"
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-8-trake:1",
+      "text": "The first scene features a durian.",
+      "targets": [
+        [
+          "L27_V011",
+          3791
+        ]
+      ],
+      "text_vi": "C\u1ea3nh \u0111\u1ea7u ti\u00ean c\u00f3 tr\u00e1i s\u1ea7u ri\u00eang."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-8-trake:2",
+      "text": "The first scene features a mangosteen.",
+      "targets": [
+        [
+          "L27_V011",
+          3870
+        ]
+      ],
+      "text_vi": "C\u1ea3nh \u0111\u1ea7u ti\u00ean c\u00f3 tr\u00e1i m\u0103ng c\u1ee5t."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-8-trake:3",
+      "text": "The first scene features a pomelo.",
+      "targets": [
+        [
+          "L27_V011",
+          4014
+        ]
+      ],
+      "text_vi": "C\u1ea3nh \u0111\u1ea7u ti\u00ean c\u00f3 tr\u00e1i b\u01b0\u1edfi."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-8-trake:4",
+      "text": "The first scene features a langsat.",
+      "targets": [
+        [
+          "L27_V011",
+          4098
+        ]
+      ],
+      "text_vi": "C\u1ea3nh \u0111\u1ea7u ti\u00ean c\u00f3 tr\u00e1i d\u00e2u b\u00f2n bon."
+    },
+    {
+      "id": "Round 2 - 2026/query-p2-9-qa:1",
+      "text": "In the cooking tutorial video, the chef adds green peppercorns, lime leaves, and lemongrass into the bellies of a total of 4 fish. What species of fish is this?",
+      "targets": [
+        [
+          "L26_V161",
+          2869
+        ]
+      ],
+      "text_vi": "Trong video h\u01b0\u1edbng d\u1eabn n\u1ea5u \u0103n, ng\u01b0\u1eddi \u0111\u1ea7u b\u1ebfp l\u1ea7n l\u01b0\u1ee3t cho c\u00e1c lo\u1ea1i h\u01b0\u01a1ng li\u1ec7u g\u1ed3m ti\u00eau xanh, l\u00e1 chanh v\u00e0 s\u1ea3 v\u00e0o b\u00ean trong b\u1ee5ng c\u1ee7a t\u1ed5ng c\u1ed9ng 4 con c\u00e1. \u0110\u00e2y l\u00e0 lo\u00e0i c\u00e1 g\u00ec?"
+    }
+  ],
+  "methods": {
+    "pe_core": {
+      "mrr": 0.4375484109158208,
+      "recall_at_1": 0.3368421052631579,
+      "recall_at_10": 0.6210526315789474,
+      "recall_at_100": 0.7789473684210526,
+      "hits": 88,
+      "cases": 95,
+      "ranks": [
+        26,
+        1,
+        3,
+        1,
+        1,
+        1,
+        5,
+        544,
+        null,
+        174,
+        78,
+        1,
+        115,
+        833,
+        31,
+        null,
+        720,
+        3,
+        1,
+        12,
+        5,
+        2,
+        186,
+        1,
+        11,
+        3,
+        2,
+        3,
+        1,
+        1,
+        1,
+        1,
+        22,
+        1,
+        2,
+        2,
+        17,
+        2,
+        7,
+        null,
+        700,
+        57,
+        13,
+        16,
+        65,
+        604,
+        1,
+        1,
+        null,
+        72,
+        1,
+        159,
+        8,
+        1,
+        1,
+        2,
+        3,
+        1,
+        4,
+        1,
+        10,
+        1,
+        410,
+        1,
+        1,
+        384,
+        36,
+        9,
+        1,
+        91,
+        2,
+        null,
+        1,
+        7,
+        3,
+        1,
+        3,
+        null,
+        204,
+        1,
+        null,
+        3,
+        7,
+        1,
+        1,
+        390,
+        1,
+        3,
+        55,
+        1,
+        2,
+        2,
+        1,
+        964,
+        1
+      ]
+    },
+    "naflex": {
+      "mrr": 0.3397916614469219,
+      "recall_at_1": 0.25263157894736843,
+      "recall_at_10": 0.5684210526315789,
+      "recall_at_100": 0.7578947368421053,
+      "hits": 87,
+      "cases": 95,
+      "ranks": [
+        137,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        null,
+        null,
+        39,
+        72,
+        217,
+        21,
+        541,
+        40,
+        null,
+        421,
+        3,
+        3,
+        117,
+        8,
+        292,
+        90,
+        1,
+        184,
+        76,
+        18,
+        4,
+        1,
+        1,
+        1,
+        3,
+        5,
+        1,
+        11,
+        18,
+        63,
+        1,
+        13,
+        null,
+        397,
+        7,
+        3,
+        14,
+        106,
+        9,
+        1,
+        6,
+        null,
+        857,
+        3,
+        215,
+        6,
+        4,
+        1,
+        2,
+        1,
+        2,
+        5,
+        5,
+        1,
+        10,
+        337,
+        1,
+        1,
+        85,
+        159,
+        6,
+        5,
+        16,
+        1,
+        null,
+        10,
+        1,
+        3,
+        1,
+        7,
+        null,
+        152,
+        155,
+        null,
+        77,
+        2,
+        3,
+        1,
+        57,
+        1,
+        8,
+        1,
+        3,
+        9,
+        1,
+        47,
+        96,
+        7
+      ]
+    },
+    "rrf_pe0.25": {
+      "mrr": 0.40018662823478957,
+      "recall_at_1": 0.3157894736842105,
+      "recall_at_10": 0.5894736842105263,
+      "recall_at_100": 0.8105263157894737,
+      "hits": 87,
+      "cases": 95,
+      "ranks": [
+        88,
+        1,
+        2,
+        1,
+        1,
+        1,
+        1,
+        null,
+        null,
+        38,
+        78,
+        74,
+        32,
+        569,
+        36,
+        null,
+        461,
+        4,
+        1,
+        45,
+        1,
+        79,
+        119,
+        1,
+        137,
+        66,
+        7,
+        3,
+        1,
+        1,
+        1,
+        1,
+        9,
+        1,
+        3,
+        11,
+        39,
+        1,
+        13,
+        null,
+        453,
+        8,
+        3,
+        4,
+        82,
+        21,
+        1,
+        3,
+        null,
+        295,
+        3,
+        208,
+        5,
+        4,
+        1,
+        1,
+        1,
+        2,
+        4,
+        2,
+        1,
+        1,
+        460,
+        1,
+        1,
+        86,
+        101,
+        5,
+        1,
+        21,
+        1,
+        null,
+        6,
+        2,
+        5,
+        1,
+        8,
+        null,
+        180,
+        46,
+        null,
+        25,
+        4,
+        1,
+        1,
+        60,
+        1,
+        3,
+        1,
+        3,
+        3,
+        1,
+        24,
+        96,
+        6
+      ]
+    },
+    "rrf_pe0.50": {
+      "mrr": 0.4249338275964084,
+      "recall_at_1": 0.3368421052631579,
+      "recall_at_10": 0.6,
+      "recall_at_100": 0.7894736842105263,
+      "hits": 87,
+      "cases": 95,
+      "ranks": [
+        54,
+        1,
+        2,
+        1,
+        1,
+        1,
+        1,
+        null,
+        null,
+        51,
+        111,
+        19,
+        50,
+        640,
+        28,
+        null,
+        532,
+        3,
+        1,
+        17,
+        3,
+        17,
+        166,
+        1,
+        52,
+        39,
+        5,
+        1,
+        1,
+        1,
+        1,
+        1,
+        17,
+        1,
+        3,
+        5,
+        14,
+        1,
+        12,
+        null,
+        520,
+        11,
+        13,
+        5,
+        80,
+        74,
+        1,
+        1,
+        null,
+        132,
+        2,
+        209,
+        4,
+        2,
+        1,
+        1,
+        1,
+        1,
+        4,
+        10,
+        1,
+        1,
+        661,
+        1,
+        1,
+        123,
+        62,
+        5,
+        1,
+        31,
+        1,
+        null,
+        3,
+        3,
+        3,
+        1,
+        9,
+        null,
+        239,
+        5,
+        null,
+        5,
+        5,
+        1,
+        1,
+        127,
+        1,
+        3,
+        1,
+        1,
+        2,
+        2,
+        10,
+        200,
+        2
+      ]
+    },
+    "rrf_pe0.75": {
+      "mrr": 0.4300289960952213,
+      "recall_at_1": 0.3368421052631579,
+      "recall_at_10": 0.6105263157894737,
+      "recall_at_100": 0.8,
+      "hits": 88,
+      "cases": 95,
+      "ranks": [
+        30,
+        1,
+        3,
+        1,
+        1,
+        1,
+        1,
+        744,
+        null,
+        100,
+        84,
+        1,
+        92,
+        741,
+        30,
+        null,
+        616,
+        3,
+        1,
+        12,
+        5,
+        7,
+        237,
+        1,
+        26,
+        18,
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        26,
+        1,
+        3,
+        1,
+        9,
+        2,
+        11,
+        null,
+        595,
+        22,
+        19,
+        6,
+        77,
+        194,
+        1,
+        1,
+        null,
+        75,
+        2,
+        177,
+        4,
+        1,
+        1,
+        1,
+        2,
+        1,
+        4,
+        9,
+        1,
+        1,
+        560,
+        1,
+        1,
+        217,
+        44,
+        5,
+        1,
+        71,
+        1,
+        null,
+        2,
+        4,
+        3,
+        1,
+        11,
+        null,
+        251,
+        3,
+        null,
+        4,
+        6,
+        1,
+        1,
+        259,
+        1,
+        3,
+        17,
+        1,
+        2,
+        2,
+        3,
+        508,
+        1
+      ]
+    }
+  }
+}

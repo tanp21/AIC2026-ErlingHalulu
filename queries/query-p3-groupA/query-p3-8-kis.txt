@@ -1,0 +1,1 @@
+Đoạn video 3D mô phỏng nhiệm vụ của một tàu vũ trụ. Có đoạn mô phỏng tàu dùng một loại sóng để quét một bề mặt một địa hình. Có đoạn mô phỏng quỹ đạo của con tàu này.

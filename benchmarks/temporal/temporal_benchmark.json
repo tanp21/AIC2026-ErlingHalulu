@@ -1,0 +1,153 @@
+{
+  "warmups": 3,
+  "runs": 10,
+  "rows": [
+    {
+      "candidate_k": 500,
+      "scoring_method": "raw_mean",
+      "mrr": 0.2857142857142857,
+      "recall_at_10": 0.2857142857142857,
+      "p95_ms": 488.2746819930617
+    },
+    {
+      "candidate_k": 500,
+      "scoring_method": "raw_min",
+      "mrr": 0.21428571428571427,
+      "recall_at_10": 0.2857142857142857,
+      "p95_ms": 449.9230070214253
+    },
+    {
+      "candidate_k": 500,
+      "scoring_method": "shifted_harmonic",
+      "mrr": 0.2857142857142857,
+      "recall_at_10": 0.2857142857142857,
+      "p95_ms": 445.5658980004955
+    },
+    {
+      "candidate_k": 500,
+      "scoring_method": "minmax_mean",
+      "mrr": 0.2857142857142857,
+      "recall_at_10": 0.2857142857142857,
+      "p95_ms": 457.5069370039273
+    },
+    {
+      "candidate_k": 500,
+      "scoring_method": "percentile_mean",
+      "mrr": 0.21428571428571427,
+      "recall_at_10": 0.2857142857142857,
+      "p95_ms": 460.8916830038652
+    },
+    {
+      "candidate_k": 1000,
+      "scoring_method": "raw_mean",
+      "mrr": 0.33333333333333337,
+      "recall_at_10": 0.42857142857142855,
+      "p95_ms": 483.485770993866
+    },
+    {
+      "candidate_k": 1000,
+      "scoring_method": "raw_min",
+      "mrr": 0.22727272727272727,
+      "recall_at_10": 0.2857142857142857,
+      "p95_ms": 503.73646698426455
+    },
+    {
+      "candidate_k": 1000,
+      "scoring_method": "shifted_harmonic",
+      "mrr": 0.32142857142857145,
+      "recall_at_10": 0.42857142857142855,
+      "p95_ms": 497.54177598515525
+    },
+    {
+      "candidate_k": 1000,
+      "scoring_method": "minmax_mean",
+      "mrr": 0.31428571428571433,
+      "recall_at_10": 0.42857142857142855,
+      "p95_ms": 469.8786879889667
+    },
+    {
+      "candidate_k": 1000,
+      "scoring_method": "percentile_mean",
+      "mrr": 0.2619047619047619,
+      "recall_at_10": 0.42857142857142855,
+      "p95_ms": 461.0038580140099
+    },
+    {
+      "candidate_k": 2000,
+      "scoring_method": "raw_mean",
+      "mrr": 0.38095238095238093,
+      "recall_at_10": 0.5714285714285714,
+      "p95_ms": 758.651013020426
+    },
+    {
+      "candidate_k": 2000,
+      "scoring_method": "raw_min",
+      "mrr": 0.22756410256410256,
+      "recall_at_10": 0.2857142857142857,
+      "p95_ms": 693.8580540008843
+    },
+    {
+      "candidate_k": 2000,
+      "scoring_method": "shifted_harmonic",
+      "mrr": 0.36904761904761907,
+      "recall_at_10": 0.5714285714285714,
+      "p95_ms": 704.5259690203238
+    },
+    {
+      "candidate_k": 2000,
+      "scoring_method": "minmax_mean",
+      "mrr": 0.3261904761904762,
+      "recall_at_10": 0.42857142857142855,
+      "p95_ms": 691.1704819940496
+    },
+    {
+      "candidate_k": 2000,
+      "scoring_method": "percentile_mean",
+      "mrr": 0.26432606941081516,
+      "recall_at_10": 0.42857142857142855,
+      "p95_ms": 664.3011889827903
+    },
+    {
+      "candidate_k": 5000,
+      "scoring_method": "raw_mean",
+      "mrr": 0.38095238095238093,
+      "recall_at_10": 0.5714285714285714,
+      "p95_ms": 852.6104979973752
+    },
+    {
+      "candidate_k": 5000,
+      "scoring_method": "raw_min",
+      "mrr": 0.22756410256410256,
+      "recall_at_10": 0.2857142857142857,
+      "p95_ms": 879.2509119957685
+    },
+    {
+      "candidate_k": 5000,
+      "scoring_method": "shifted_harmonic",
+      "mrr": 0.36904761904761907,
+      "recall_at_10": 0.5714285714285714,
+      "p95_ms": 909.1310719959438
+    },
+    {
+      "candidate_k": 5000,
+      "scoring_method": "minmax_mean",
+      "mrr": 0.3344155844155844,
+      "recall_at_10": 0.42857142857142855,
+      "p95_ms": 864.991362002911
+    },
+    {
+      "candidate_k": 5000,
+      "scoring_method": "percentile_mean",
+      "mrr": 0.26432606941081516,
+      "recall_at_10": 0.42857142857142855,
+      "p95_ms": 925.6082909996621
+    }
+  ],
+  "selected": {
+    "candidate_k": 2000,
+    "scoring_method": "raw_mean",
+    "mrr": 0.38095238095238093,
+    "recall_at_10": 0.5714285714285714,
+    "p95_ms": 758.651013020426
+  }
+}
