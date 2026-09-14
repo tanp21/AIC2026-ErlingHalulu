@@ -37,11 +37,11 @@ The repository expects runtime videos below `data/<year>/videos/`, visual indexe
 
 ### Build the Round 1 L-only Flat profiles
 
-Create the two switchable profiles before starting the application. The first command reads the per-frame 2025 embeddings directly; use `--source data/2025/embeddings` instead when the verified shards have already been prepared from that tree.
+Create the two switchable profiles before starting the application. Both sources are the consolidated shard layout (`emb_*.npy` + `meta.parquet` + `info.json`) produced by `scripts.indexing.shard_precomputed`.
 
 ```bash
 uv run python -m scripts.indexing.build_flat_profile \
-  --source data/2025/embeddings/PE-Core-bigG-14-448 \
+  --source data/2025/embeddings \
   --name l2025 --label 'L · embeddings 2025' --default
 uv run python -m scripts.indexing.build_flat_profile \
   --source data/2026/embeddings \
