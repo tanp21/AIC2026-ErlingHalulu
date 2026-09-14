@@ -8,11 +8,11 @@ import { VideoDialog } from "./videoDialog";
 import { formatTimestamp } from "./results";
 
 const STATUS_LABEL = {
-  todo: "Chưa làm", in_progress: "Đang làm", ready: "Sẵn sàng", reviewed: "Đã duyệt",
+  todo: "To do", in_progress: "In progress", ready: "Ready", reviewed: "Reviewed",
 };
 
 function shortLogin(login: string | null) {
-  return login?.split("@")[0] ?? "Chưa nhận";
+  return login?.split("@")[0] ?? "Unassigned";
 }
 
 function emptyAnswer(query: CollabQuery): AnswerDraft {
@@ -62,10 +62,10 @@ export function applyExactFrame(
   eventIndex: number,
 ): { answers: AnswerDraft[]; rowIndex: number } {
   const rows = structuredClone(answers);
-  if (rowIndex >= rows.length) throw new Error("Dòng đáp án không còn tồn tại");
+  if (rowIndex >= rows.length) throw new Error("Answer row no longer exists");
   if (query.kind !== "trake") {
     if (rowIndex < 0) {
-      if (rows.length >= 100) throw new Error("Tối đa 100 dòng đáp án");
+      if (rows.length >= 100) throw new Error("Maximum 100 answer rows");
       rows.push(query.kind === "qa"
         ? { video_id: videoId, frame_id: frameId, answer: "" }
         : { video_id: videoId, frame_id: frameId });
@@ -78,7 +78,7 @@ export function applyExactFrame(
 
   const old = rows[rowIndex] as { video_id: string; frame_ids: Array<number | null> } | undefined;
   if (!old || (old.video_id && old.video_id !== videoId)) {
-    if (rows.length >= 100) throw new Error("Tối đa 100 dòng đáp án");
+    if (rows.length >= 100) throw new Error("Maximum 100 answer rows");
     const frameIds = Array(query.event_count ?? 0).fill(null);
     frameIds[eventIndex] = frameId;
     rows.push({ video_id: videoId, frame_ids: frameIds });
@@ -124,31 +124,31 @@ export function QuickAddResult({ query, result, onChange }: {
       const updated = await patchQuery(query.id, { expected_version: query.version, answers: applied.answers });
       onChange(updated);
       setQaAnswer("");
-      setMessage(`Đã lưu frame ${result.frame_idx} vào ${query.filename}.`);
+      setMessage(`Saved frame ${result.frame_idx} to ${query.filename}.`);
     } catch (caught) {
       const apiError = caught as CollabApiError;
       if (apiError.current) onChange(apiError.current);
-      setError(apiError.current ? "Query vừa được cập nhật trên server. Hãy kiểm tra và thử lại." : apiError.message);
+      setError(apiError.current ? "The query was just updated on the server. Please check and try again." : apiError.message);
     } finally { setBusy(false); }
   }
 
-  return <section className="quick-add" aria-label="Thêm nhanh vào đáp án">
-    <header><span>Query đang làm</span><strong>{query.filename}</strong></header>
-    {query.kind === "qa" && <label>Câu trả lời
-      <input aria-label="Câu trả lời thêm nhanh" maxLength={100} value={qaAnswer}
-        onChange={(event) => setQaAnswer(event.target.value)} placeholder="Nhập câu trả lời QA…" />
+  return <section className="quick-add" aria-label="Quick add to answer">
+    <header><span>Current query</span><strong>{query.filename}</strong></header>
+    {query.kind === "qa" && <label>Answer
+      <input aria-label="Quick add answer" maxLength={100} value={qaAnswer}
+        onChange={(event) => setQaAnswer(event.target.value)} placeholder="Enter QA answer…" />
     </label>}
     {query.kind === "trake" && <div className="quick-add-options">
-      <label>Event<select aria-label="Event thêm nhanh" value={eventIndex} onChange={(event) => setEventIndex(Number(event.target.value))}>
+      <label>Event<select aria-label="Quick add event" value={eventIndex} onChange={(event) => setEventIndex(Number(event.target.value))}>
         {Array.from({ length: query.event_count ?? 0 }, (_, index) => <option key={index} value={index}>E{index + 1}</option>)}
       </select></label>
-      <label>Dòng<select aria-label="Dòng thêm nhanh" value={rowIndex} onChange={(event) => setRowIndex(Number(event.target.value))}>
-        <option value={-1}>Dòng mới</option>
+      <label>Row<select aria-label="Quick add row" value={rowIndex} onChange={(event) => setRowIndex(Number(event.target.value))}>
+        <option value={-1}>New row</option>
         {matchingRows.map(({ index }) => <option key={index} value={index}>#{index + 1}</option>)}
       </select></label>
     </div>}
-    <button type="button" disabled={disabled} onClick={add}>{busy ? "Đang lưu…" : `Thêm frame ${result.frame_idx}`}</button>
-    {atLimit && <small className="quick-add-error">Đáp án đã đủ 100 dòng.</small>}
+    <button type="button" disabled={disabled} onClick={add}>{busy ? "Saving…" : `Add frame ${result.frame_idx}`}</button>
+    {atLimit && <small className="quick-add-error">Answer already has 100 rows.</small>}
     {error && <small className="quick-add-error" role="alert">{error}</small>}
     {message && <small className="quick-add-success" role="status">{message}</small>}
   </section>;
@@ -174,7 +174,7 @@ export function TeamToolbar({ rounds, round, isAdmin, onSelectRound, onRoundLoad
       setTrakeRound(imported);
       setEventCounts(Object.fromEntries(trake.map((query) => [query.id, ""])));
     }
-    catch (error) { onError(error instanceof Error ? error.message : "Upload thất bại"); }
+    catch (error) { onError(error instanceof Error ? error.message : "Upload failed"); }
   }
 
   function finishUpload(imported: RoundSnapshot) {
@@ -194,7 +194,7 @@ export function TeamToolbar({ rounds, round, isAdmin, onSelectRound, onRoundLoad
       finishUpload(updatedRound);
     } catch (error) {
       setTrakeRound(updatedRound);
-      setSetupError(error instanceof Error ? error.message : "Không thể lưu số event");
+      setSetupError(error instanceof Error ? error.message : "Failed to save event count");
     }
   }
 
@@ -204,48 +204,48 @@ export function TeamToolbar({ rounds, round, isAdmin, onSelectRound, onRoundLoad
       const preview = await fetchExportPreview(round.id);
       const warningCount = preview.missing.length + preview.invalid.length + preview.unreviewed.length;
       if (warningCount && !window.confirm(
-        `Còn ${preview.missing.length} câu thiếu, ${preview.invalid.length} câu sai và ${preview.unreviewed.length} câu chưa duyệt. Vẫn xuất?`
+        `There are ${preview.missing.length} missing, ${preview.invalid.length} invalid, and ${preview.unreviewed.length} unreviewed questions. Export anyway?`
       )) return;
       const { blob, filename } = await downloadExport(round.id, warningCount > 0);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; anchor.click();
       URL.revokeObjectURL(url);
-    } catch (error) { onError(error instanceof Error ? error.message : "Không thể xuất ZIP"); }
+    } catch (error) { onError(error instanceof Error ? error.message : "Failed to export ZIP"); }
   }
 
   const trakeCountsReady = trakeRound?.queries.filter((query) => query.kind === "trake" && query.event_count === null)
     .every((query) => Number.isInteger(Number(eventCounts[query.id])) && Number(eventCounts[query.id]) >= 2 && Number(eventCounts[query.id]) <= 100);
 
-  return <section className="team-toolbar query-toolbar" aria-label="Quản lý vòng thi">
-    <label>Vòng<select aria-label="Chọn vòng" value={round?.id ?? ""}
+  return <section className="team-toolbar query-toolbar" aria-label="Round management">
+    <label>Round<select aria-label="Select round" value={round?.id ?? ""}
       onChange={(event) => onSelectRound(Number(event.target.value))}>
-      {!rounds.length && <option value="">Chưa có vòng</option>}
+      {!rounds.length && <option value="">No rounds yet</option>}
       {rounds.map((item) => <option value={item.id} key={item.id}>{item.name}{item.active ? " · active" : ""}</option>)}
     </select></label>
     {round && <div className="progress-chips">
-      <span>Chưa làm {round.counts.todo}</span><span>Đang làm {round.counts.in_progress}</span>
-      <span>Sẵn sàng {round.counts.ready}</span><span>Đã duyệt {round.counts.reviewed}</span>
+      <span>To do {round.counts.todo}</span><span>In progress {round.counts.in_progress}</span>
+      <span>Ready {round.counts.ready}</span><span>Reviewed {round.counts.reviewed}</span>
     </div>}
     <div className="toolbar-actions">
       {isAdmin && round && !round.active && <button onClick={async () => {
         try { onRoundLoaded(await activateRound(round.id)); } catch (error) { onError(String(error)); }
-      }}>Activate vòng</button>}
-      {isAdmin && <button onClick={() => setUploading(!uploading)}>Upload vòng</button>}
-      <button disabled={!round} onClick={exportZip}>Xuất ZIP</button>
+      }}>Activate round</button>}
+      {isAdmin && <button onClick={() => setUploading(!uploading)}>Upload round</button>}
+      <button disabled={!round} onClick={exportZip}>Export ZIP</button>
     </div>
     {uploading && <div className="upload-popover">
       {trakeRound ? <>
-        <strong>Thiết lập event TRAKE</strong><p>Nhập số event cho từng câu trước khi bắt đầu vòng.</p>
+        <strong>Set up TRAKE events</strong><p>Enter the event count for each question before starting the round.</p>
         {trakeRound.queries.filter((query) => query.kind === "trake" && query.event_count === null).map((query) => <label key={query.id}>
           <b>{query.filename}</b><span>{query.prompt}</span>
-          <input aria-label={`Số event ${query.filename}`} type="number" min="2" max="100" value={eventCounts[query.id] ?? ""}
+          <input aria-label={`Event count ${query.filename}`} type="number" min="2" max="100" value={eventCounts[query.id] ?? ""}
             onChange={(event) => setEventCounts((counts) => ({ ...counts, [query.id]: event.target.value }))} />
         </label>)}
         {setupError && <p className="quick-add-error" role="alert">{setupError}</p>}
         <button disabled={!trakeCountsReady}
-          onClick={saveTrakeCounts}>Lưu số event & mở vòng</button>
+          onClick={saveTrakeCounts}>Save event counts & open round</button>
       </> : <>
-      <label>Tên vòng<input value={roundName} onChange={(event) => setRoundName(event.target.value)} /></label>
+      <label>Round name<input value={roundName} onChange={(event) => setRoundName(event.target.value)} /></label>
       <label>Query ZIP<input type="file" accept=".zip,application/zip" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
       <button disabled={!roundName.trim() || !file} onClick={submitUpload}>Import</button>
       </>}
@@ -282,19 +282,19 @@ export function CollaborationPanels(props: Props) {
 
   return (
     <>
-      <aside className="query-panel" aria-label="Danh sách query">
+      <aside className="query-panel" aria-label="Query list">
         <header><span className="eyebrow">Team queue</span><h2>{props.round.name}</h2></header>
-        <input aria-label="Tìm query" placeholder="Tìm mã hoặc nội dung…" value={filterText}
+        <input aria-label="Search query" placeholder="Search by code or content…" value={filterText}
           onChange={(event) => setFilterText(event.target.value)} />
         <div className="query-filters">
-          <button className={mineOnly ? "active" : ""} onClick={() => setMineOnly(!mineOnly)}>Của tôi</button>
-          <select aria-label="Lọc trạng thái" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            <option value="all">Mọi trạng thái</option><option value="todo">Chưa làm</option>
-            <option value="in_progress">Đang làm</option><option value="ready">Sẵn sàng</option>
-            <option value="reviewed">Đã duyệt</option>
+          <button className={mineOnly ? "active" : ""} onClick={() => setMineOnly(!mineOnly)}>Mine</button>
+          <select aria-label="Filter status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="all">All statuses</option><option value="todo">To do</option>
+            <option value="in_progress">In progress</option><option value="ready">Ready</option>
+            <option value="reviewed">Reviewed</option>
           </select>
-          <select aria-label="Lọc loại query" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
-            <option value="all">Mọi loại</option><option value="kis">KIS</option>
+          <select aria-label="Filter query kind" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
+            <option value="all">All kinds</option><option value="kis">KIS</option>
             <option value="qa">QA</option><option value="trake">TRAKE</option>
           </select>
         </div>
@@ -346,7 +346,7 @@ function AnswerEditor({ query, login, selectedResult, searchResults = [], openRe
     }
   }, [query]);
 
-  if (!current) return <aside className="answer-panel"><p>Chưa có query trong vòng này.</p></aside>;
+  if (!current) return <aside className="answer-panel"><p>No queries in this round yet.</p></aside>;
   const editorQuery = current;
   const trakeReady = current.kind !== "trake" || current.event_count !== null;
 
@@ -422,20 +422,20 @@ function AnswerEditor({ query, login, selectedResult, searchResults = [], openRe
     return updated.rowIndex;
   }
 
-  return <><aside className="answer-panel" aria-label="Đáp án query">
+  return <><aside className="answer-panel" aria-label="Query answer">
     <header><span className="eyebrow">{current.kind.toUpperCase()} answer</span><h2>{current.filename}</h2></header>
     <section className="query-prompt"><p>{current.prompt}</p></section>
     {current.kind === "trake" && !trakeReady && <section className="message warning">
-      {isAdmin ? <label>Số event TRAKE
-        <input aria-label="Số event TRAKE" type="number" min="2" max="100" value={eventCount}
+      {isAdmin ? <label>TRAKE event count
+        <input aria-label="TRAKE event count" type="number" min="2" max="100" value={eventCount}
           onChange={(event) => setEventCount(event.target.value)} />
         <button disabled={busy || !eventCount} onClick={() => mutate(() => patchQuery(current.id, {
           expected_version: current.version, event_count: Number(eventCount),
-        }))}>Lưu số event</button>
-      </label> : "Chờ admin đặt số event cho câu TRAKE này."}
+        }))}>Save event count</button>
+      </label> : "Waiting for an admin to set the event count for this TRAKE question."}
     </section>}
     {selectedResult && <section className="selected-evidence">
-      <img src={selectedResult.thumb} alt="Keyframe đang chọn" />
+      <img src={selectedResult.thumb} alt="Selected keyframe" />
       <div><strong>{selectedResult.video_id} · frame {selectedResult.frame_idx}</strong>
         <small className="fusion-evidence">{selectedResult.context_only ? "Neighbouring context frame · not ranked"
           : selectedResult.source === "both"
@@ -444,7 +444,7 @@ function AnswerEditor({ query, login, selectedResult, searchResults = [], openRe
           {selectedResult.source === "both" && selectedResult.transcript_start !== undefined && selectedResult.transcript_end !== undefined
             ? ` · ${formatTimestamp(selectedResult.transcript_start)}–${formatTimestamp(selectedResult.transcript_end)}` : ""}
         </small>
-        <p>{selectedResult.transcript_snippet ?? "Không có transcript cho keyframe này."}</p>
+        <p>{selectedResult.transcript_snippet ?? "No transcript for this keyframe."}</p>
         <dl className="selected-verification">
           {!selectedResult.context_only && <div><dt>{selectedResult.source === "both" ? "Hybrid" : "Result"}</dt><dd>#{selectedResult.rank + 1}</dd></div>}
           {selectedResult.scores.pe_core_rank !== undefined && <div><dt>PE-Core</dt><dd>#{selectedResult.scores.pe_core_rank}</dd></div>}
@@ -457,16 +457,16 @@ function AnswerEditor({ query, login, selectedResult, searchResults = [], openRe
       </div>
     </section>}
     <div className="ownership-row">
-      <span title={current.assignee ?? ""}>Phụ trách: <strong>{shortLogin(current.assignee)}</strong></span>
+      <span title={current.assignee ?? ""}>Assignee: <strong>{shortLogin(current.assignee)}</strong></span>
       {active && <button disabled={busy || dirty} onClick={() => mutate(() => patchQuery(current.id, {
         expected_version: current.version, assignee: current.assignee === login ? null : login,
-      }))}>{current.assignee === login ? "Bỏ nhận câu" : "Nhận câu"}</button>}
+      }))}>{current.assignee === login ? "Unassign myself" : "Assign to me"}</button>}
     </div>
-    {!active && <div className="message warning">Vòng lịch sử · chỉ đọc</div>}
-    {remoteChanged && <div className="message warning">Có bản cập nhật mới trên server. Bản đang sửa vẫn được giữ.
+    {!active && <div className="message warning">Historical round · read-only</div>}
+    {remoteChanged && <div className="message warning">A newer update exists on the server. Your current edits are kept.
       {conflictQuery && <div className="conflict-actions">
-        <button onClick={() => { setCurrent(conflictQuery); setRemoteChanged(false); setConflictQuery(null); setError(""); }}>Giữ nháp và dùng phiên bản server</button>
-        <button onClick={() => accept(conflictQuery)}>Bỏ nháp và tải bản server</button>
+        <button onClick={() => { setCurrent(conflictQuery); setRemoteChanged(false); setConflictQuery(null); setError(""); }}>Keep draft and use server version</button>
+        <button onClick={() => accept(conflictQuery)}>Discard draft and load server version</button>
       </div>}
     </div>}
     {error && <div className="message error" role="alert">{error}</div>}
@@ -475,32 +475,32 @@ function AnswerEditor({ query, login, selectedResult, searchResults = [], openRe
         onChange={(event) => setEventSlot(Number(event.target.value))}>
         {Array.from({ length: current.event_count ?? 0 }, (_, index) => <option key={index} value={index}>E{index + 1}</option>)}
       </select>}
-      <button onClick={addSelected}>Thêm frame {selectedResult.frame_idx}</button>
+      <button onClick={addSelected}>Add frame {selectedResult.frame_idx}</button>
     </div>}
     {active && trakeReady && (answers.length < 100 || answers.some((row) => row.auto_filled)) && <div className="add-result-row auto-fill-row">
       {answers.length < 100 && <>
-        {current.kind === "qa" && <input aria-label="QA answer for auto fill" placeholder="Câu trả lời dùng chung" value={qaAutoAnswer} onChange={(event) => setQaAutoAnswer(event.target.value)} />}
+        {current.kind === "qa" && <input aria-label="QA answer for auto fill" placeholder="Shared answer" value={qaAutoAnswer} onChange={(event) => setQaAutoAnswer(event.target.value)} />}
         <button disabled={busy || (!answerReference(current, answers) && !searchResults.length) || (current.kind === "qa" && !qaAutoAnswer.trim())} onClick={fillTo100}>
-          {busy ? "Đang tìm và lưu…" : answerReference(current, answers) ? "Tìm tương tự & fill đủ 100" : "Fill đủ 100 từ kết quả"}
+          {busy ? "Searching and saving…" : answerReference(current, answers) ? "Find similar & fill to 100" : "Fill to 100 from results"}
         </button>
       </>}
-      {answers.some((row) => row.auto_filled) && <button disabled={busy} onClick={removeAutoFilled}>Xóa kết quả đã fill</button>}
+      {answers.some((row) => row.auto_filled) && <button disabled={busy} onClick={removeAutoFilled}>Remove auto-filled results</button>}
     </div>}
     <div className="answer-rows">
       {answers.map((answer, index) => <AnswerRow key={index} query={current} answer={answer} index={index}
         onUpdate={(row) => updateAnswer(index, row)} onDelete={() => { setAnswers(answers.filter((_, i) => i !== index)); setDirty(true); }}
         onMove={move} onOpenFrame={(videoId, frameId, rowIndex, eventIndex) =>
           setAnswerFrame({ videoId, frameId, rowIndex, eventIndex })} editable={active} />)}
-      {active && trakeReady && answers.length < 100 && <button className="add-answer" onClick={() => { setAnswers([...answers, emptyAnswer(current)]); setDirty(true); }}>+ Thêm dòng dự đoán</button>}
+      {active && trakeReady && answers.length < 100 && <button className="add-answer" onClick={() => { setAnswers([...answers, emptyAnswer(current)]); setDirty(true); }}>+ Add prediction row</button>}
     </div>
     <footer className="answer-actions">
-      <span>{answers.length}/100 dòng · {STATUS_LABEL[current.status]}</span>
+      <span>{answers.length}/100 rows · {STATUS_LABEL[current.status]}</span>
       {active && <button disabled={!dirty || busy || !trakeReady} onClick={() => mutate(() => patchQuery(current.id, {
         expected_version: current.version, answers,
-      }))}>Lưu đáp án</button>}
+      }))}>Save answer</button>}
       {active && (current.status === "ready" || current.status === "reviewed") && <button disabled={dirty || busy}
         onClick={() => mutate(() => reviewQuery(current.id, current.version, current.status !== "reviewed"))}>
-        {current.status === "reviewed" ? "Bỏ duyệt" : "Đánh dấu đã duyệt"}
+        {current.status === "reviewed" ? "Unreview" : "Mark as reviewed"}
       </button>}
     </footer>
   </aside>
@@ -524,27 +524,27 @@ function AnswerRow({ query, answer, index, onUpdate, onDelete, onMove, onOpenFra
   const row = answer as unknown as Record<string, unknown>;
   return <div className={`answer-row${answer.auto_filled ? " auto-filled" : ""}`}>
     <span className="answer-rank">#{index + 1}</span>
-    <label>Video<input aria-label={`Video dòng ${index + 1}`} value={String(row.video_id ?? "")}
+    <label>Video<input aria-label={`Video row ${index + 1}`} value={String(row.video_id ?? "")}
       disabled={!editable}
       onChange={(event) => onUpdate({ ...answer, video_id: event.target.value } as AnswerDraft)} /></label>
     {query.kind === "trake" ? (row.frame_ids as Array<number | null>).map((frame, frameIndex) =>
-      <label key={frameIndex}>E{frameIndex + 1}<input type="number" min="0" aria-label={`E${frameIndex + 1} dòng ${index + 1}`}
+      <label key={frameIndex}>E{frameIndex + 1}<input type="number" min="0" aria-label={`E${frameIndex + 1} row ${index + 1}`}
         disabled={!editable}
         value={frame ?? ""} onChange={(event) => {
           const frames = [...(row.frame_ids as Array<number | null>)];
           frames[frameIndex] = event.target.value === "" ? null : Number(event.target.value);
           onUpdate({ ...answer, frame_ids: frames } as AnswerDraft);
-        }} /></label>) : <label>Frame<input type="number" min="0" aria-label={`Frame dòng ${index + 1}`}
+        }} /></label>) : <label>Frame<input type="number" min="0" aria-label={`Frame row ${index + 1}`}
           disabled={!editable}
           value={(row.frame_id as number | null) ?? ""} onChange={(event) => onUpdate({ ...answer,
             frame_id: event.target.value === "" ? null : Number(event.target.value),
           } as AnswerDraft)} /></label>}
-    {query.kind === "qa" && <label className="answer-text">Answer<input maxLength={100} aria-label={`Answer dòng ${index + 1}`}
+    {query.kind === "qa" && <label className="answer-text">Answer<input maxLength={100} aria-label={`Answer row ${index + 1}`}
       disabled={!editable}
       value={String(row.answer ?? "")} onChange={(event) => onUpdate({ ...answer, answer: event.target.value } as AnswerDraft)} /></label>}
-    <div className="row-actions"><button disabled={!editable} aria-label={`Đưa dòng ${index + 1} lên`} onClick={() => onMove(index, -1)}>↑</button>
-      <button disabled={!editable} aria-label={`Đưa dòng ${index + 1} xuống`} onClick={() => onMove(index, 1)}>↓</button>
-      <button disabled={!editable} aria-label={`Xóa dòng ${index + 1}`} onClick={onDelete}>×</button></div>
+    <div className="row-actions"><button disabled={!editable} aria-label={`Move row ${index + 1} up`} onClick={() => onMove(index, -1)}>↑</button>
+      <button disabled={!editable} aria-label={`Move row ${index + 1} down`} onClick={() => onMove(index, 1)}>↓</button>
+      <button disabled={!editable} aria-label={`Delete row ${index + 1}`} onClick={onDelete}>×</button></div>
     <div className={`answer-previews${query.kind === "trake" ? " trake" : ""}`}>
       {query.kind === "trake" ? (row.frame_ids as Array<number | null>).map((frame, frameIndex) =>
         <FramePreview key={frameIndex} videoId={String(row.video_id ?? "")} frameId={frame}
@@ -570,12 +570,12 @@ function FramePreview({ videoId, frameId, label, rowIndex, onOpen }: {
     && Number.isInteger(shown.frameId) && (shown.frameId ?? -1) >= 0;
   const url = valid ? `/thumb/${shown.videoId}/${shown.frameId}?w=160` : null;
   const caption = label ? `${label} · ${shown.frameId ?? "—"}` : `Frame ${shown.frameId ?? "—"}`;
-  const alt = `Preview ${label ? `${label} ` : ""}frame ${shown.frameId} dòng ${rowIndex + 1}`;
-  const fallback = failedUrl === url ? "Không có ảnh" : "Chưa chọn frame";
-  const fallbackLabel = `${fallback} ${label ? `${label} ` : ""}frame ${shown.frameId ?? "trống"} dòng ${rowIndex + 1}`;
+  const alt = `Preview ${label ? `${label} ` : ""}frame ${shown.frameId} row ${rowIndex + 1}`;
+  const fallback = failedUrl === url ? "No image" : "No frame selected";
+  const fallbackLabel = `${fallback} ${label ? `${label} ` : ""}frame ${shown.frameId ?? "empty"} row ${rowIndex + 1}`;
   return <figure className="answer-preview">
     {url && failedUrl !== url
-      ? <button type="button" aria-label={`Mở video ${shown.videoId} tại frame ${shown.frameId}`}
+      ? <button type="button" aria-label={`Open video ${shown.videoId} at frame ${shown.frameId}`}
         onClick={() => onOpen(shown.videoId, shown.frameId!)}>
         <img src={url} alt={alt} loading="lazy" decoding="async" onError={() => setFailedUrl(url)} />
       </button>

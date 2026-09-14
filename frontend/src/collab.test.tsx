@@ -35,14 +35,14 @@ describe("collaboration panels", () => {
     const onRoundLoaded = vi.fn();
     render(<TeamToolbar rounds={[]} round={null} isAdmin onSelectRound={vi.fn()} onRoundLoaded={onRoundLoaded} onError={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Upload vòng" }));
-    fireEvent.change(screen.getByLabelText("Tên vòng"), { target: { value: "Round P1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Upload round" }));
+    fireEvent.change(screen.getByLabelText("Round name"), { target: { value: "Round P1" } });
     fireEvent.change(screen.getByLabelText("Query ZIP"), { target: { files: [new File(["zip"], "queries.zip")] } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
 
     expect(await screen.findByText("Tìm các cảnh theo thứ tự.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Số event query-1-kis"), { target: { value: "3" } });
-    fireEvent.click(screen.getByRole("button", { name: "Lưu số event & mở vòng" }));
+    fireEvent.change(screen.getByLabelText("Event count query-1-kis"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save event counts & open round" }));
     await waitFor(() => expect(onRoundLoaded).toHaveBeenCalledWith({ ...imported, queries: [updated] }));
   });
 
@@ -52,13 +52,13 @@ describe("collaboration panels", () => {
     const onChange = vi.fn();
     render(<QuickAddResult query={query} result={result} onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Thêm frame 42" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add frame 42" }));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(updated));
     expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({
       expected_version: 0, answers: [{ video_id: "L00_V001", frame_id: 42 }],
     });
-    expect(screen.getByRole("status")).toHaveTextContent("Đã lưu frame 42");
+    expect(screen.getByRole("status")).toHaveTextContent("Saved frame 42");
   });
 
   it("requires QA text and targets a TRAKE event", async () => {
@@ -66,9 +66,9 @@ describe("collaboration panels", () => {
     const qaUpdated = { ...qa, answers: [{ video_id: "L00_V001", frame_id: 42, answer: "Hà Nội" }], version: 1 };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(qaUpdated));
     const { rerender } = render(<QuickAddResult query={qa} result={result} onChange={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Thêm frame 42" })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Câu trả lời thêm nhanh"), { target: { value: "Hà Nội" } });
-    fireEvent.click(screen.getByRole("button", { name: "Thêm frame 42" }));
+    expect(screen.getByRole("button", { name: "Add frame 42" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Quick add answer"), { target: { value: "Hà Nội" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add frame 42" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)).answers[0].answer).toBe("Hà Nội");
 
@@ -76,8 +76,8 @@ describe("collaboration panels", () => {
     const trakeUpdated = { ...trake, answers: [{ video_id: "L00_V001", frame_ids: [null, 42] }], version: 1 };
     fetchMock.mockResolvedValueOnce(jsonResponse(trakeUpdated));
     rerender(<QuickAddResult query={trake} result={result} onChange={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("Event thêm nhanh"), { target: { value: "1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Thêm frame 42" }));
+    fireEvent.change(screen.getByLabelText("Quick add event"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add frame 42" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body)).answers)
       .toEqual([{ video_id: "L00_V001", frame_ids: [null, 42] }]);
@@ -91,14 +91,14 @@ describe("collaboration panels", () => {
     render(<CollaborationPanels round={answered} login="mate@example.com" selectedId={1}
       selectedResult={null} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
 
-    const preview = screen.getByRole("img", { name: "Preview frame 42 dòng 1" });
+    const preview = screen.getByRole("img", { name: "Preview frame 42 row 1" });
     expect(preview).toHaveAttribute("src", "/thumb/L00_V001/42?w=160");
     expect(preview).toHaveAttribute("loading", "lazy");
-    fireEvent.change(screen.getByLabelText("Frame dòng 1"), { target: { value: "315" } });
+    fireEvent.change(screen.getByLabelText("Frame row 1"), { target: { value: "315" } });
     act(() => vi.advanceTimersByTime(399));
     expect(preview).toHaveAttribute("src", "/thumb/L00_V001/42?w=160");
     act(() => vi.advanceTimersByTime(1));
-    expect(screen.getByRole("img", { name: "Preview frame 315 dòng 1" }))
+    expect(screen.getByRole("img", { name: "Preview frame 315 row 1" }))
       .toHaveAttribute("src", "/thumb/L00_V001/315?w=160");
   });
 
@@ -124,13 +124,13 @@ describe("collaboration panels", () => {
     render(<CollaborationPanels round={{ ...round, queries: [trake] }} login="mate@example.com" selectedId={1}
       selectedResult={null} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
 
-    expect(screen.getByRole("img", { name: "Preview E1 frame 10 dòng 1" }))
+    expect(screen.getByRole("img", { name: "Preview E1 frame 10 row 1" }))
       .toHaveAttribute("src", "/thumb/L00_V001/10?w=160");
-    expect(screen.getByRole("img", { name: "Preview E2 frame 20 dòng 1" }))
+    expect(screen.getByRole("img", { name: "Preview E2 frame 20 row 1" }))
       .toHaveAttribute("src", "/thumb/L00_V001/20?w=160");
-    fireEvent.click(screen.getByRole("button", { name: "Mở video L00_V001 tại frame 20" }));
-    expect(screen.getByLabelText("Dòng đáp án")).toHaveValue("0");
-    expect(screen.getByLabelText("TRAKE event trong player")).toHaveValue("1");
+    fireEvent.click(screen.getByRole("button", { name: "Open video L00_V001 at frame 20" }));
+    expect(screen.getByLabelText("Answer row")).toHaveValue("0");
+    expect(screen.getByLabelText("TRAKE event in player")).toHaveValue("1");
   });
 
   it("shows an unparsed TRAKE prompt and lets the admin set its event count", async () => {
@@ -141,8 +141,8 @@ describe("collaboration panels", () => {
       selectedResult={null} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
 
     expect(screen.getByText("Tìm các cảnh theo thứ tự.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Số event TRAKE"), { target: { value: "3" } });
-    fireEvent.click(screen.getByRole("button", { name: "Lưu số event" }));
+    fireEvent.change(screen.getByLabelText("TRAKE event count"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save event count" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({
       expected_version: 0, event_count: 3,
@@ -156,8 +156,8 @@ describe("collaboration panels", () => {
     render(<CollaborationPanels round={answered} login="mate@example.com" selectedId={1}
       selectedResult={null} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
 
-    fireEvent.error(screen.getByRole("img", { name: "Preview frame 42 dòng 1" }));
-    expect(screen.getByRole("img", { name: "Không có ảnh frame 42 dòng 1" })).toBeInTheDocument();
+    fireEvent.error(screen.getByRole("img", { name: "Preview frame 42 row 1" }));
+    expect(screen.getByRole("img", { name: "No image frame 42 row 1" })).toBeInTheDocument();
   });
 
   it("opens a chosen answer frame paused at its exact PTS", async () => {
@@ -181,14 +181,14 @@ describe("collaboration panels", () => {
     render(<CollaborationPanels round={answered} login="mate@example.com" selectedId={1}
       selectedResult={null} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Mở video L00_V001 tại frame 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open video L00_V001 at frame 1" }));
     await waitFor(() => expect(callback).toBeDefined());
     const video = screen.getByLabelText("Video player") as HTMLVideoElement;
     expect(video).not.toHaveAttribute("autoplay");
     expect(video.currentTime).toBe(0);
     fireEvent.loadedMetadata(video);
     expect(video.currentTime).toBe(0.04);
-    expect(screen.getByLabelText("Dòng đáp án")).toHaveValue("0");
+    expect(screen.getByLabelText("Answer row")).toHaveValue("0");
   });
 
   it("appends exact frames to KIS and preserves VQA text when replacing a row", () => {
@@ -216,12 +216,12 @@ describe("collaboration panels", () => {
 
   it("rejects exact-frame capture when creating a 101st prediction", () => {
     const full = Array.from({ length: 100 }, (_, frame_id) => ({ video_id: "L00_V001", frame_id }));
-    expect(() => applyExactFrame(query, full, "L00_V009", 315, -1, 0)).toThrow("Tối đa 100 dòng");
+    expect(() => applyExactFrame(query, full, "L00_V009", 315, -1, 0)).toThrow("Maximum 100 answer rows");
   });
 
   it("rejects a destination row that disappeared from the draft", () => {
     expect(() => applyExactFrame(query, [{ video_id: "L00_V001", frame_id: 1 }],
-      "L00_V009", 315, 4, 0)).toThrow("Dòng đáp án không còn tồn tại");
+      "L00_V009", 315, 4, 0)).toThrow("Answer row no longer exists");
   });
 
   it("puts the paused player frame into the local answer draft", async () => {
@@ -242,19 +242,19 @@ describe("collaboration panels", () => {
     await waitFor(() => expect(callback).toBeDefined());
     callback?.(0, { mediaTime: 0 });
     fireEvent.pause(screen.getByLabelText("Video player"));
-    fireEvent.click(await screen.findByRole("button", { name: "Dùng frame 0" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use frame 0" }));
     expect(screen.getByDisplayValue("L00_V001")).toBeInTheDocument();
     expect(screen.getByDisplayValue("0")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Lưu đáp án" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save answer" })).toBeEnabled();
   });
 
   it("shows query ownership and filters to my work", () => {
     render(<CollaborationPanels round={round} login="mate@example.com" selectedId={1}
       selectedResult={null} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
     expect(screen.getByText("Tìm chiếc xe màu đỏ")).toBeInTheDocument();
-    expect(screen.getAllByText("Chưa làm").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "Của tôi" }));
-    expect(within(screen.getByLabelText("Danh sách query")).queryByText("query-1-kis")).not.toBeInTheDocument();
+    expect(screen.getAllByText("To do").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Mine" }));
+    expect(within(screen.getByLabelText("Query list")).queryByText("query-1-kis")).not.toBeInTheDocument();
   });
 
   it("claims a query and saves a selected keyframe", async () => {
@@ -267,13 +267,13 @@ describe("collaboration panels", () => {
     render(<CollaborationPanels round={round} login="mate@example.com" selectedId={1}
       selectedResult={result} onSelect={vi.fn()} onQueryChange={onQueryChange} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Nhận câu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Assign to me" }));
     await waitFor(() => expect(onQueryChange).toHaveBeenCalledWith(updated));
-    fireEvent.click(screen.getByRole("button", { name: "Thêm frame 42" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add frame 42" }));
     expect(screen.getByDisplayValue("L00_V001")).toBeInTheDocument();
     expect(screen.getByDisplayValue("42")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Bỏ nhận câu" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Lưu đáp án" }));
+    expect(screen.getByRole("button", { name: "Unassign myself" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save answer" }));
     await waitFor(() => expect(onQueryChange).toHaveBeenCalledWith(ready));
     expect(fetchMock).toHaveBeenLastCalledWith("/api/collab/queries/1", expect.objectContaining({ method: "PATCH" }));
   });
@@ -289,10 +289,10 @@ describe("collaboration panels", () => {
     render(<CollaborationPanels round={round} login="mate@example.com" selectedId={1}
       selectedResult={result} searchResults={results} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Fill đủ 100 từ kết quả" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fill to 100 from results" }));
 
-    await waitFor(() => expect(screen.getAllByLabelText(/Video dòng/)).toHaveLength(100));
-    expect(screen.getByText(/100\/100 dòng/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByLabelText(/Video row/)).toHaveLength(100));
+    expect(screen.getByText(/100\/100 rows/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/collab/queries/1", expect.objectContaining({ method: "PATCH" }));
     expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)).answers).toHaveLength(100);
   });
@@ -308,7 +308,7 @@ describe("collaboration panels", () => {
     render(<CollaborationPanels round={answered} login="mate@example.com" selectedId={1}
       selectedResult={null} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Tìm tương tự & fill đủ 100" }));
+    fireEvent.click(screen.getByRole("button", { name: "Find similar & fill to 100" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[0][0]).toBe("/search/image");
@@ -330,8 +330,8 @@ describe("collaboration panels", () => {
     render(<CollaborationPanels round={answered} login="mate@example.com" selectedId={1}
       selectedResult={null} searchResults={liveSearchResults} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "Tìm tương tự & fill đủ 100" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Tìm tương tự & fill đủ 100" }));
+    expect(screen.getByRole("button", { name: "Find similar & fill to 100" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Find similar & fill to 100" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[0][0]).toBe("/search/image");
@@ -358,12 +358,12 @@ describe("collaboration panels", () => {
     render(<CollaborationPanels round={mixed} login="mate@example.com" selectedId={1}
       selectedResult={null} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
 
-    expect(screen.getAllByLabelText(/Video dòng/)).toHaveLength(3);
-    fireEvent.click(screen.getByRole("button", { name: "Xóa kết quả đã fill" }));
-    expect(screen.getAllByLabelText(/Video dòng/)).toHaveLength(1);
+    expect(screen.getAllByLabelText(/Video row/)).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "Remove auto-filled results" }));
+    expect(screen.getAllByLabelText(/Video row/)).toHaveLength(1);
     expect(screen.getByDisplayValue("L00_V001")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Lưu đáp án" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save answer" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)).answers).toEqual([
       { video_id: "L00_V001", frame_id: 42 },
@@ -378,11 +378,11 @@ describe("collaboration panels", () => {
       .mockResolvedValueOnce(jsonResponse(ready));
     render(<CollaborationPanels round={round} login="mate@example.com" selectedId={1}
       selectedResult={result} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Thêm frame 42" }));
-    fireEvent.click(screen.getByRole("button", { name: "Lưu đáp án" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add frame 42" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save answer" }));
     expect(await screen.findByText("stale query version")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Giữ nháp và dùng phiên bản server" }));
-    fireEvent.click(screen.getByRole("button", { name: "Lưu đáp án" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep draft and use server version" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save answer" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const body = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
     expect(body.expected_version).toBe(2);
@@ -396,6 +396,6 @@ describe("collaboration panels", () => {
     render(<CollaborationPanels round={historical} login="mate@example.com" selectedId={1}
       selectedResult={null} onSelect={vi.fn()} onQueryChange={vi.fn()} />);
     expect(screen.getByDisplayValue("L00_V001")).toBeDisabled();
-    expect(screen.getByText("Vòng lịch sử · chỉ đọc")).toBeInTheDocument();
+    expect(screen.getByText("Historical round · read-only")).toBeInTheDocument();
   });
 });

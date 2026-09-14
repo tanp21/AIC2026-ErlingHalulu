@@ -110,6 +110,7 @@ export interface TemporalAudioEvidence {
 }
 export interface TemporalSequence {
   rank: number;
+  video_id: string;
   score: number;
   visual_score: number;
   source: "visual" | "both";

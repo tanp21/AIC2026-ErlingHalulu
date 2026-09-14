@@ -121,9 +121,9 @@ describe("competition search workspace", () => {
     const temporal: TemporalSearchResponse = {
       videos: [{
         video_id: "A", best_score: 0.9, sequences: [
-          { rank: 1, score: 0.7, visual_score: 0.7, source: "visual", start_time: 10, end_time: 20,
+          { rank: 1, video_id: "A", score: 0.7, visual_score: 0.7, source: "visual", start_time: 10, end_time: 20,
             events: [event(0, 10, 10, 0.8), event(1, 20, 20, 0.6)] },
-          { rank: 0, score: 0.9, visual_score: 0.8, source: "both", start_time: 100, end_time: 120,
+          { rank: 0, video_id: "A", score: 0.9, visual_score: 0.8, source: "both", start_time: 100, end_time: 120,
             events: [event(0, 100, 100, 0.9), event(1, 120, 120, 0.7)],
             audio_evidence: { video_id: "A", time: 110, score: 0.5, audio_rank: 1,
               transcript_snippet: "audio support", transcript_start: 105, transcript_end: 115 } },
@@ -146,6 +146,63 @@ describe("competition search workspace", () => {
     fireEvent.click(within(sequences[1]).getByRole("button", { name: /Open event E1/ }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(screen.getAllByText("audio support")).toHaveLength(2);
+  });
+
+  it("toggles temporal results between grouped-by-video and a flat ranked list", async () => {
+    const event = (eventIndex: number, frame: number, time: number, score: number): SearchResult & { event_index: number } => ({
+      ...hit({ frame_idx: frame, time, score, rank: frame }), event_index: eventIndex,
+    });
+    const temporal: TemporalSearchResponse = {
+      videos: [
+        { video_id: "A", best_score: 0.9, sequences: [
+          { rank: 0, video_id: "A", score: 0.9, visual_score: 0.9, source: "visual", start_time: 100, end_time: 120,
+            events: [event(0, 100, 100, 0.9), event(1, 120, 120, 0.7)] },
+        ] },
+        { video_id: "B", best_score: 0.8, sequences: [
+          { rank: 1, video_id: "B", score: 0.8, visual_score: 0.8, source: "visual", start_time: 10, end_time: 20,
+            events: [event(0, 10, 10, 0.8), event(1, 20, 20, 0.6)] },
+        ] },
+      ], total_sequences: 2, total_videos: 2, latency_ms: 25, faiss_latency_ms: 10,
+      mode: "temporal", candidate_k: 2000, scoring_method: "raw_mean",
+      next_cursor: null, has_more: false, truncated: false,
+    };
+    mockAuthenticatedFetch(jsonResponse(temporal));
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Temporal" }));
+    fireEvent.change(screen.getByLabelText("Visual event E1"), { target: { value: "first" } });
+    fireEvent.change(screen.getByLabelText("Visual event E2"), { target: { value: "second" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(await screen.findAllByTestId("temporal-video")).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ranked list" }));
+
+    expect(screen.queryByTestId("temporal-video")).not.toBeInTheDocument();
+    const sequences = screen.getAllByTestId("temporal-sequence");
+    expect(sequences).toHaveLength(2);
+    expect(within(sequences[0]).getByText("A")).toBeInTheDocument();
+    expect(within(sequences[1]).getByText("B")).toBeInTheDocument();
+  });
+
+  it("toggles hybrid results between a flat ranked grid and grouped-by-video", async () => {
+    const fetchMock = mockAuthenticatedFetch(jsonResponse(response([
+      hit({ video_id: "A", frame_idx: 10, time: 10, rank: 0, score: 0.9 }),
+      hit({ video_id: "B", frame_idx: 20, time: 20, rank: 1, score: 0.7 }),
+    ])));
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Visual query (English)"), { target: { value: "red car" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/search")).toBe(true));
+
+    expect(await screen.findAllByRole("button", { name: /Select frame/ })).toHaveLength(2);
+    expect(screen.queryByTestId("video-row")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Group by video" }));
+
+    const rows = screen.getAllByTestId("video-row");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByText("A", { selector: "h3" })).toBeInTheDocument();
+    expect(within(rows[1]).getByText("B", { selector: "h3" })).toBeInTheDocument();
   });
 
   it("hides index comparison when the competition profile only has flat", async () => {
@@ -195,13 +252,13 @@ describe("competition search workspace", () => {
     render(<App />);
 
     expect(await within(screen.getByLabelText("Search controls")).findByText("Tìm chiếc xe màu đỏ")).toBeInTheDocument();
-    expect(screen.getByLabelText("Chọn query đang làm")).toHaveValue("2");
-    expect(screen.queryByRole("complementary", { name: "Danh sách query" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Quản lý truy vấn" }));
-    expect(screen.getByRole("complementary", { name: "Danh sách query" })).toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: "Đáp án query" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Xuất ZIP" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Upload vòng" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Select current query")).toHaveValue("2");
+    expect(screen.queryByRole("complementary", { name: "Query list" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Query management" }));
+    expect(screen.getByRole("complementary", { name: "Query list" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Query answer" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export ZIP" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload round" })).toBeInTheDocument();
   });
 
   it("keeps the search workspace when switching collaboration queries", async () => {
@@ -222,14 +279,14 @@ describe("competition search workspace", () => {
     });
 
     render(<App />);
-    await screen.findByLabelText("Chọn query đang làm");
+    await screen.findByLabelText("Select current query");
     fireEvent.change(screen.getByLabelText("Visual query (English)"), { target: { value: "red car" } });
     fireEvent.change(screen.getByLabelText("Transcript query (Vietnamese)"), { target: { value: "xe màu đỏ" } });
     fireEvent.change(screen.getByLabelText("On-screen text query"), { target: { value: "VTV" } });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(await screen.findByRole("button", { name: /Select frame kept/ })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Chọn query đang làm"), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText("Select current query"), { target: { value: "3" } });
 
     expect(screen.getByLabelText("Visual query (English)")).toHaveValue("red car");
     expect(screen.getByLabelText("Transcript query (Vietnamese)")).toHaveValue("xe màu đỏ");
@@ -280,7 +337,7 @@ describe("competition search workspace", () => {
 
     expect(screen.queryByRole("button", { name: "Ocr" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Tìm bằng OCR" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Nút Search dùng OCR để lọc theo video/)).toBeInTheDocument();
+    expect(screen.getByText(/Search uses OCR to filter by video/)).toBeInTheDocument();
   });
 
   it("uses OCR-only when the main Search button has no visual or audio query", async () => {
@@ -440,15 +497,15 @@ describe("competition search workspace", () => {
     expect(scrollTo).toHaveBeenCalled();
     expect(scrollIntoView).not.toHaveBeenCalled();
     scrollTo.mockClear();
-    fireEvent.wheel(screen.getByRole("complementary", { name: "Transcript video" }));
+    fireEvent.wheel(screen.getByRole("complementary", { name: "Video transcript" }));
     video.currentTime = 9;
     fireEvent.timeUpdate(video);
     expect(scrollTo).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Theo video" }));
+    fireEvent.click(screen.getByRole("button", { name: "Follow video" }));
     expect(scrollTo).toHaveBeenCalled();
-    const transcript = screen.getByRole("complementary", { name: "Transcript video" });
+    const transcript = screen.getByRole("complementary", { name: "Video transcript" });
     fireEvent.keyDown(transcript, { key: " " });
-    fireEvent.click(screen.getByRole("button", { name: "Theo video" }));
+    fireEvent.click(screen.getByRole("button", { name: "Follow video" }));
     transcript.focus();
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab" });
     expect(screen.getByRole("button", { name: "Close video" })).toHaveFocus();
@@ -464,7 +521,7 @@ describe("competition search workspace", () => {
     render(<VideoDialog result={hit({})} onClose={() => {}} />);
 
     expect(screen.getByLabelText("Video player")).toBeInTheDocument();
-    expect(await screen.findByText("Không tải được transcript.")).toBeInTheDocument();
+    expect(await screen.findByText("Failed to load transcript.")).toBeInTheDocument();
   });
 
   it("aborts the media request when the video dialog closes", () => {
@@ -499,7 +556,7 @@ describe("competition search workspace", () => {
     }} />);
     await waitFor(() => expect(callback).toBeDefined());
     callback?.(0, { mediaTime: 0.04 });
-    const useButton = await screen.findByRole("button", { name: "Dùng frame 1" });
+    const useButton = await screen.findByRole("button", { name: "Use frame 1" });
     expect(useButton).toBeDisabled();
     fireEvent.pause(screen.getByLabelText("Video player"));
     fireEvent.click(useButton);
@@ -525,19 +582,19 @@ describe("competition search workspace", () => {
     callback?.(0, { mediaTime: 0.04 });
     const video = screen.getByLabelText("Video player") as HTMLVideoElement;
     fireEvent.pause(video);
-    fireEvent.click(screen.getByRole("button", { name: "Tiến 10 frame" }));
+    fireEvent.click(screen.getByRole("button", { name: "Forward 10 frames" }));
     expect(video.currentTime).toBe(0.1);
-    expect(screen.getByRole("button", { name: "Tiến 1 frame" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Forward 1 frame" })).toBeDisabled();
     await act(async () => callback?.(0, { mediaTime: 0.04 }));
-    expect(screen.getByRole("button", { name: "Dùng frame 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Use frame 1" })).toBeDisabled();
     fireEvent.seeked(video);
-    expect(screen.getByRole("button", { name: "Dùng frame 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Use frame 1" })).toBeDisabled();
     await act(async () => callback?.(0, { mediaTime: 0.04 }));
-    expect(screen.getByRole("button", { name: "Dùng frame 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Use frame 1" })).toBeDisabled();
     await act(async () => callback?.(0, { mediaTime: 0.1 }));
-    expect(await screen.findByRole("button", { name: "Dùng frame 2" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Tiến 1 frame" }));
-    expect(screen.getByRole("button", { name: "Dùng frame 2" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Use frame 2" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Forward 1 frame" }));
+    expect(screen.getByRole("button", { name: "Use frame 2" })).toBeEnabled();
   });
 
   it("resets a selected destination when answer rows are replaced", async () => {
@@ -552,12 +609,12 @@ describe("competition search workspace", () => {
     const { rerender } = render(<VideoDialog result={hit({})} onClose={() => {}} capture={{
       query: dialogQuery, answers: firstAnswers, active: true, onCapture: vi.fn(() => 0),
     }} />);
-    fireEvent.change(screen.getByLabelText("Dòng đáp án"), { target: { value: "1" } });
-    expect(screen.getByLabelText("Dòng đáp án")).toHaveValue("1");
+    fireEvent.change(screen.getByLabelText("Answer row"), { target: { value: "1" } });
+    expect(screen.getByLabelText("Answer row")).toHaveValue("1");
     rerender(<VideoDialog result={hit({})} onClose={() => {}} capture={{
       query: dialogQuery, answers: [...firstAnswers].reverse(), active: true, onCapture: vi.fn(() => 0),
     }} />);
-    expect(screen.getByLabelText("Dòng đáp án")).toHaveValue("-1");
+    expect(screen.getByLabelText("Answer row")).toHaveValue("-1");
   });
 
   it("keeps verification visible while switching search modes", () => {
@@ -605,7 +662,7 @@ describe("competition search workspace", () => {
     await screen.findByText("ranked passage");
     fireEvent.click(await screen.findByRole("button", { name: "Select frame 11" }));
 
-    expect(screen.getByText("Không có transcript match cho kết quả này.")).toBeInTheDocument();
+    expect(screen.getByText("No transcript match for this result.")).toBeInTheDocument();
     expect(screen.queryByText("ranked passage")).not.toBeInTheDocument();
   });
 
@@ -639,7 +696,7 @@ describe("competition search workspace", () => {
     fireEvent.change(screen.getByLabelText("Visual query (English)"), { target: { value: "mountain" } });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
-    expect(await screen.findByText("Không có transcript match cho kết quả này.")).toBeInTheDocument();
+    expect(await screen.findByText("No transcript match for this result.")).toBeInTheDocument();
   });
 
   it("reports API errors without removing the previous results", async () => {

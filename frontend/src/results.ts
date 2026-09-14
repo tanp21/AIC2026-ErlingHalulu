@@ -27,7 +27,10 @@ export function groupResultsByVideo(results: SearchResult[]): VideoGroup[] {
       ),
     }))
     .sort(
-      (a, b) => b.maxScore - a.maxScore || a.bestRank - b.bestRank || a.videoId.localeCompare(b.videoId),
+      // bestRank is authoritative: the backend's rank can reflect tiering the raw
+      // score doesn't capture (e.g. an exact OCR match outranking a higher-scored
+      // fuzzy one), so re-deriving row order from maxScore would silently discard it.
+      (a, b) => a.bestRank - b.bestRank || b.maxScore - a.maxScore || a.videoId.localeCompare(b.videoId),
     );
 }
 

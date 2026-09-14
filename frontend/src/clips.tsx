@@ -10,10 +10,11 @@ import type { KeyframeSource, Shot, ShotKeyframe, ShotLabelReason, TranscriptCue
 export type AppTab = "search" | "queries" | "clips";
 
 export function AppTabs({ tab, onTab }: { tab: AppTab; onTab(next: AppTab): void }) {
-  return <nav className="app-tabs" aria-label="Chế độ làm việc">
+  return <nav className="app-tabs" aria-label="Work mode">
     {(["search", "queries", "clips"] as AppTab[]).map((name) => <button key={name}
       className={name === tab ? "active" : ""} aria-current={name === tab ? "page" : undefined}
-      onClick={() => onTab(name)}>{name === "search" ? "Tìm kiếm" : name === "queries" ? "Quản lý truy vấn" : "Cắt clip"}</button>)}
+      aria-label={name === "search" ? "Search tab" : undefined}
+      onClick={() => onTab(name)}>{name === "search" ? "Search" : name === "queries" ? "Query management" : "Clip Studio"}</button>)}
   </nav>;
 }
 
@@ -76,7 +77,7 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
   useEffect(() => {
     fetchVideoList()
       .then(setVideos)
-      .catch((error) => setListError(error instanceof Error ? error.message : "Không tải được danh sách video"));
+      .catch((error) => setListError(error instanceof Error ? error.message : "Failed to load video list"));
   }, []);
 
   useEffect(() => {
@@ -94,7 +95,7 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
       setKeyframeSource(response.keyframeSource);
       setKeyframeSources(response.keyframeSources);
     }).catch((error) => {
-      if (active) setShotsError(error instanceof Error ? error.message : "Không tải được shot");
+      if (active) setShotsError(error instanceof Error ? error.message : "Failed to load shots");
     }).finally(() => {
       if (active) setShotsLoading(false);
     });
@@ -223,10 +224,10 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
     try {
       const filename = await downloadClip(videoId, currentShot.index);
       setMessageIsError(false);
-      setMessage(`Đã tải ${filename}`);
+      setMessage(`Downloaded ${filename}`);
     } catch (error) {
       setMessageIsError(true);
-      setMessage(error instanceof Error ? error.message : "Không cắt được clip");
+      setMessage(error instanceof Error ? error.message : "Failed to export clip");
     } finally {
       setExporting(false);
     }
@@ -238,10 +239,10 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
     try {
       await copyKeyframe(keyframe.frame);
       setMessageIsError(false);
-      setMessage(`Đã copy keyframe ${keyframe.frameId}`);
+      setMessage(`Copied keyframe ${keyframe.frameId}`);
     } catch (error) {
       setMessageIsError(true);
-      setMessage(error instanceof Error ? error.message : "Không copy được keyframe");
+      setMessage(error instanceof Error ? error.message : "Failed to copy keyframe");
     } finally {
       setCopyingFrame(null);
     }
@@ -270,11 +271,11 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
         ...shot, label: response.labels[String(shot.index)] ?? null,
       })));
       setMessageIsError(false);
-      setMessage(state === "excluded" ? "Đã đánh dấu loại khỏi index"
-        : state === "included" ? "Đã xác nhận giữ trong index" : "Đã xóa nhãn");
+      setMessage(state === "excluded" ? "Marked as excluded from index"
+        : state === "included" ? "Confirmed kept in index" : "Label removed");
     } catch (error) {
       setMessageIsError(true);
-      setMessage(error instanceof Error ? error.message : "Không lưu được nhãn shot");
+      setMessage(error instanceof Error ? error.message : "Failed to save shot label");
     } finally {
       setSavingLabel(false);
     }
@@ -292,7 +293,7 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
     if (!videoId || !isAdmin) return;
     const candidates = shots.filter((shot) => shot.label?.state === "suggested");
     if (!candidates.length || !window.confirm(
-      `${state === "excluded" ? "Loại" : "Giữ"} ${candidates.length} gợi ý của ${videoId}?`,
+      `${state === "excluded" ? "Exclude" : "Keep"} ${candidates.length} suggestions for ${videoId}?`,
     )) return;
     setSavingLabel(true);
     try {
@@ -304,10 +305,10 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
         ...shot, label: response.labels[String(shot.index)] ?? null,
       })));
       setMessageIsError(false);
-      setMessage(`Đã duyệt ${candidates.length} gợi ý`);
+      setMessage(`Reviewed ${candidates.length} suggestions`);
     } catch (error) {
       setMessageIsError(true);
-      setMessage(error instanceof Error ? error.message : "Không lưu được nhãn shot");
+      setMessage(error instanceof Error ? error.message : "Failed to save shot label");
     } finally {
       setSavingLabel(false);
     }
@@ -316,36 +317,36 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
   const canExport = Boolean(videoId && currentShot && paused && !seeking && !exporting);
 
   return <section className="clip-studio">
-    <aside className="clip-video-list" aria-label="Danh sách video">
+    <aside className="clip-video-list" aria-label="Video list">
       <header>
         <span className="eyebrow">Video · {visible.length}</span>
-        <select value={group} aria-label="Lọc theo nhóm"
+        <select value={group} aria-label="Filter by group"
           onChange={(event) => setGroup(event.target.value)}>
-          <option value="all">Tất cả nhóm</option>
+          <option value="all">All groups</option>
           {groups.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
-        <input value={filter} aria-label="Lọc video" placeholder="K01_V001"
+        <input value={filter} aria-label="Filter videos" placeholder="K01_V001"
           onChange={(event) => setFilter(event.target.value)} />
       </header>
       {listError && <p className="clip-state error">{listError}</p>}
-      {!listError && !videos.length && <p className="clip-state">Đang tải danh sách…</p>}
+      {!listError && !videos.length && <p className="clip-state">Loading list…</p>}
       <ol>
         {visible.map((video) => <li key={video.video_id}>
           <button className={video.video_id === videoId ? "active" : ""}
             aria-current={video.video_id === videoId ? "true" : undefined}
             onClick={() => setVideoId(video.video_id)}>
             <span className={video.indexed ? "" : "unindexed"}
-              title={video.indexed ? undefined : "Không có trong index tìm kiếm"}>
+              title={video.indexed ? undefined : "Not in search index"}>
               {video.video_id}
             </span>
-            {!video.has_shots && <em title="Chưa chạy TransNetV2">chưa có shot</em>}
+            {!video.has_shots && <em title="TransNetV2 not run yet">no shots</em>}
           </button>
         </li>)}
       </ol>
     </aside>
 
     <main className="clip-dashboard">
-      {!videoId && <p className="clip-state clip-empty">Chọn một video để bắt đầu.</p>}
+      {!videoId && <p className="clip-state clip-empty">Select a video to begin.</p>}
       {videoId && <>
         <section className="clip-player">
           <video ref={videoRef} key={videoId} src={`/video/${videoId}`} controls preload="metadata"
@@ -359,50 +360,50 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
           <div className="clip-actions">
             <div className="clip-readout">
               <strong>{videoId}</strong>
-              <span>{liveFrameId === null ? "Chưa xác định frame" : `frame ${liveFrameId}`}
-                {currentShot ? ` · shot #${currentShot.index}` : shots.length ? " · ngoài mọi shot" : ""}</span>
+              <span>{liveFrameId === null ? "Frame not determined" : `frame ${liveFrameId}`}
+                {currentShot ? ` · shot #${currentShot.index}` : shots.length ? " · outside any shot" : ""}</span>
             </div>
             <div className="shot-stepper">
-              <button disabled={!shots.length} aria-label="Shot trước" onClick={() => stepShot(-1)}>‹ Shot</button>
-              <button disabled={!shots.length} aria-label="Shot sau" onClick={() => stepShot(1)}>Shot ›</button>
+              <button disabled={!shots.length} aria-label="Previous shot" onClick={() => stepShot(-1)}>‹ Shot</button>
+              <button disabled={!shots.length} aria-label="Next shot" onClick={() => stepShot(1)}>Shot ›</button>
             </div>
             <button className="export-clip" disabled={!canExport} onClick={exportCurrentShot}>
-              {exporting ? "Đang cắt clip…"
+              {exporting ? "Exporting clip…"
                 : currentShot
                   ? `Export shot #${currentShot.index} · ${formatTimestamp(currentShot.start)}–${formatTimestamp(currentShot.end)}`
                   : "Export clip"}
             </button>
           </div>
-          {!paused && <p className="clip-state">Tạm dừng video để cắt shot đang xem.</p>}
+          {!paused && <p className="clip-state">Pause the video to export the shot you're viewing.</p>}
           {message && <p className={`clip-state${messageIsError ? " error" : ""}`}
             role={messageIsError ? "alert" : "status"}>{message}</p>}
         </section>
 
-        <section className="shot-overview" aria-label="Timeline shot">
+        <section className="shot-overview" aria-label="Shot timeline">
           <header>
             <div><span className="eyebrow">Shot timeline</span><strong>{shots.length} shot</strong>
-              <small>{labelCounts.suggested} gợi ý · {labelCounts.excluded} loại · {labelCounts.included} giữ</small></div>
+              <small>{labelCounts.suggested} suggested · {labelCounts.excluded} excluded · {labelCounts.included} kept</small></div>
             <div className="shot-overview-filters">
-              <label>Trạng thái<select aria-label="Lọc trạng thái nhãn" value={labelFilter}
+              <label>Status<select aria-label="Filter label status" value={labelFilter}
                 onChange={(event) => setLabelFilter(event.target.value)}>
-                <option value="all">Tất cả</option><option value="suggested">Gợi ý</option>
-                <option value="excluded">Đã loại</option><option value="included">Đã giữ</option>
-                <option value="unlabelled">Chưa nhãn</option>
+                <option value="all">All</option><option value="suggested">Suggested</option>
+                <option value="excluded">Excluded</option><option value="included">Kept</option>
+                <option value="unlabelled">Unlabelled</option>
               </select></label>
-              <label>Nguồn keyframe<select aria-label="Nguồn keyframe" value={keyframeSource ?? ""}
+              <label>Keyframe source<select aria-label="Keyframe source" value={keyframeSource ?? ""}
                 disabled={!keyframeSources.length}
                 onChange={(event) => setSourcePreference(event.target.value)}>
-                {!keyframeSources.length && <option value="">Không có keyframe</option>}
+                {!keyframeSources.length && <option value="">No keyframe</option>}
                 {keyframeSources.map((source) => <option key={source.name} value={source.name}>{source.label}</option>)}
               </select></label>
-              {isAdmin && <button disabled={!labelCounts.suggested} onClick={nextSuggestion}>Gợi ý tiếp theo</button>}
+              {isAdmin && <button disabled={!labelCounts.suggested} onClick={nextSuggestion}>Next suggestion</button>}
               {isAdmin && <button disabled={!labelCounts.suggested || savingLabel}
-                onClick={() => void reviewAllSuggestions("excluded")}>Loại mọi gợi ý</button>}
+                onClick={() => void reviewAllSuggestions("excluded")}>Exclude all suggestions</button>}
               {isAdmin && <button disabled={!labelCounts.suggested || savingLabel}
-                onClick={() => void reviewAllSuggestions("included")}>Giữ mọi gợi ý</button>}
+                onClick={() => void reviewAllSuggestions("included")}>Keep all suggestions</button>}
             </div>
           </header>
-          {shotsLoading && <p className="clip-state">Đang tải shot…</p>}
+          {shotsLoading && <p className="clip-state">Loading shots…</p>}
           {shotsError && <p className="clip-state error">{shotsError}</p>}
           <ol className="shot-timeline">
             {displayedShots.map((shot) => <li key={shot.index}
@@ -417,87 +418,87 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
           </ol>
         </section>
 
-        {currentShot && <section className="shot-detail" aria-label={`Chi tiết shot ${currentShot.index}`}>
+        {currentShot && <section className="shot-detail" aria-label={`Shot detail ${currentShot.index}`}>
           <header>
-            <div><span className="eyebrow">Shot đang chọn</span><h2>Shot #{currentShot.index}</h2>
+            <div><span className="eyebrow">Selected shot</span><h2>Shot #{currentShot.index}</h2>
               {currentShot.label && <span className={`shot-label ${currentShot.label.state}`}>
                 {currentShot.label.state} · {currentShot.label.reason}
                 {currentShot.label.confidence !== undefined ? ` · ${Math.round(currentShot.label.confidence * 100)}%` : ""}
               </span>}</div>
             <dl>
-              <div><dt>Thời gian</dt><dd>{formatTimestamp(currentShot.start)}–{formatTimestamp(currentShot.end)}</dd></div>
+              <div><dt>Time</dt><dd>{formatTimestamp(currentShot.start)}–{formatTimestamp(currentShot.end)}</dd></div>
               <div><dt>Frame</dt><dd>{currentShot.startFrame}–{currentShot.endFrame}</dd></div>
               <div><dt>Keyframe</dt><dd>{currentShot.keyframes.length}</dd></div>
             </dl>
           </header>
-          {isAdmin && <section className="shot-review" aria-label="Duyệt nhãn shot">
-            <label>Lý do<select aria-label="Lý do loại shot" value={labelReason}
+          {isAdmin && <section className="shot-review" aria-label="Review shot label">
+            <label>Reason<select aria-label="Shot exclusion reason" value={labelReason}
               onChange={(event) => setLabelReason(event.target.value as ShotLabelReason)}>
-              <option value="intro">Intro</option><option value="preview">Điểm tin</option>
+              <option value="intro">Intro</option><option value="preview">Preview</option>
               <option value="presenter">MC</option><option value="outro">Outro</option>
-              <option value="other">Khác</option>
+              <option value="other">Other</option>
             </select></label>
-            <button disabled={savingLabel} onClick={() => void reviewShot("excluded")}>Loại khỏi index</button>
-            <button disabled={savingLabel} onClick={() => void reviewShot("included")}>Giữ trong index</button>
-            {currentShot.label && <button disabled={savingLabel} onClick={() => void reviewShot(null)}>Xóa nhãn</button>}
+            <button disabled={savingLabel} onClick={() => void reviewShot("excluded")}>Exclude from index</button>
+            <button disabled={savingLabel} onClick={() => void reviewShot("included")}>Keep in index</button>
+            {currentShot.label && <button disabled={savingLabel} onClick={() => void reviewShot(null)}>Remove label</button>}
           </section>}
-          {!!currentShot.reviewFrames?.length && <section className="shot-review-frames" aria-label="Frame đại diện để duyệt">
+          {!!currentShot.reviewFrames?.length && <section className="shot-review-frames" aria-label="Representative frames for review">
             {currentShot.reviewFrames.map((frame) => <button key={frame} onClick={() => seekFrame(frame)}
-              aria-label={`Xem frame đại diện ${frame}`}><img src={`/thumb/${videoId}/${frame}?w=320`}
-                loading="lazy" alt={`Frame đại diện ${frame}`} /><span>f{frame}</span></button>)}
+              aria-label={`View representative frame ${frame}`}><img src={`/thumb/${videoId}/${frame}?w=320`}
+                loading="lazy" alt={`Representative frame ${frame}`} /><span>f{frame}</span></button>)}
           </section>}
           <div className="shot-data-grid">
-            <section className="shot-keyframes" aria-label="Keyframe trong shot">
-              <header><strong>Keyframes</strong><span>Trích trực tiếp từ video</span></header>
-              {!currentShot.keyframes.length && <p className="clip-state">Shot này không có keyframe trong nguồn đã chọn.</p>}
+            <section className="shot-keyframes" aria-label="Keyframes in shot">
+              <header><strong>Keyframes</strong><span>Extracted directly from the video</span></header>
+              {!currentShot.keyframes.length && <p className="clip-state">This shot has no keyframes in the selected source.</p>}
               <div className="shot-keyframe-grid">
                 {currentShot.keyframes.map((keyframe) => <article key={keyframe.frameId}>
                   <button className="keyframe-seek" onClick={() => seekFrame(keyframe.frameId)}
-                    aria-label={`Xem frame ${keyframe.frameId}`}>
+                    aria-label={`View frame ${keyframe.frameId}`}>
                     <img src={`${keyframe.thumb}?w=320`} loading="lazy" alt={`Frame ${keyframe.frameId}`} />
                   </button>
                   <footer><div><strong>f{keyframe.frameId}</strong><time>{formatTimestamp(keyframe.time)}</time></div>
                     <button disabled={copyingFrame !== null} onClick={() => void copyFrame(keyframe)}
                       aria-label={`Copy keyframe ${keyframe.frameId}`}>
-                      {copyingFrame === keyframe.frameId ? "Đang copy…" : "Copy ảnh"}
+                      {copyingFrame === keyframe.frameId ? "Copying…" : "Copy image"}
                     </button></footer>
                 </article>)}
               </div>
             </section>
-            <section className="shot-transcript" aria-label="Transcript trong shot">
-              <header><strong>Transcript theo shot</strong><span>{shotCues.length} đoạn</span></header>
-              {transcriptLoading && <p className="clip-state">Đang tải transcript…</p>}
-              {!transcriptLoading && transcriptError && <p className="clip-state">Không tải được transcript.</p>}
-              {!transcriptLoading && !transcriptError && !shotCues.length && <p className="clip-state">Shot này không có lời thoại.</p>}
+            <section className="shot-transcript" aria-label="Transcript for shot">
+              <header><strong>Transcript for shot</strong><span>{shotCues.length} segments</span></header>
+              {transcriptLoading && <p className="clip-state">Loading transcript…</p>}
+              {!transcriptLoading && transcriptError && <p className="clip-state">Failed to load transcript.</p>}
+              {!transcriptLoading && !transcriptError && !shotCues.length && <p className="clip-state">This shot has no speech.</p>}
               <ol>{shotCues.map((cue) => <li key={`${cue.start}-${cue.text}`}>
                 <button onClick={() => seekCue(cue)}><time>{formatTimestamp(cue.start)}</time><span>{cue.text}</span></button>
               </li>)}</ol>
             </section>
           </div>
         </section>}
-        <section className="full-transcript" aria-label="Toàn bộ transcript để copy">
-          <header><div><span className="eyebrow">Transcript đầy đủ</span><strong>{cues.length} đoạn</strong></div>
+        <section className="full-transcript" aria-label="Full transcript to copy">
+          <header><div><span className="eyebrow">Full transcript</span><strong>{cues.length} segments</strong></div>
             <button disabled={!fullTranscript} onClick={() => void copyTranscript()}>
-              {transcriptCopyState === "copied" ? "Đã copy" : transcriptCopyState === "error" ? "Copy thất bại" : "Copy toàn bộ"}
+              {transcriptCopyState === "copied" ? "Copied" : transcriptCopyState === "error" ? "Copy failed" : "Copy all"}
             </button>
           </header>
-          {transcriptLoading && <p className="clip-state">Đang tải transcript…</p>}
-          {!transcriptLoading && transcriptError && <p className="clip-state">Không tải được transcript.</p>}
-          {!transcriptLoading && !transcriptError && !cues.length && <p className="clip-state">Video này không có transcript.</p>}
+          {transcriptLoading && <p className="clip-state">Loading transcript…</p>}
+          {!transcriptLoading && transcriptError && <p className="clip-state">Failed to load transcript.</p>}
+          {!transcriptLoading && !transcriptError && !cues.length && <p className="clip-state">This video has no transcript.</p>}
           {fullTranscript && <pre tabIndex={0}>{fullTranscript}</pre>}
         </section>
       </>}
     </main>
 
-    <aside ref={transcriptRef} className="clip-transcript" aria-label="Transcript toàn video" tabIndex={0}
+    <aside ref={transcriptRef} className="clip-transcript" aria-label="Full video transcript" tabIndex={0}
       onWheel={() => setFollowTranscript(false)} onPointerDown={() => setFollowTranscript(false)}>
-      <header><span className="eyebrow">Transcript</span><strong>Toàn video</strong>
-        {!followTranscript && <button onClick={() => setFollowTranscript(true)}>Theo video</button>}
+      <header><span className="eyebrow">Transcript</span><strong>Full video</strong>
+        {!followTranscript && <button onClick={() => setFollowTranscript(true)}>Follow video</button>}
       </header>
-      {!videoId && <p className="clip-state">Chọn video để xem transcript.</p>}
-      {videoId && transcriptLoading && <p className="clip-state">Đang tải transcript…</p>}
-      {videoId && !transcriptLoading && transcriptError && <p className="clip-state">Không tải được transcript.</p>}
-      {videoId && !transcriptLoading && !transcriptError && !cues.length && <p className="clip-state">Video này không có transcript.</p>}
+      {!videoId && <p className="clip-state">Select a video to view the transcript.</p>}
+      {videoId && transcriptLoading && <p className="clip-state">Loading transcript…</p>}
+      {videoId && !transcriptLoading && transcriptError && <p className="clip-state">Failed to load transcript.</p>}
+      {videoId && !transcriptLoading && !transcriptError && !cues.length && <p className="clip-state">This video has no transcript.</p>}
       <ol>{cues.map((cue, index) => <li key={`${cue.start}-${cue.text}`}
         ref={index === followedCue ? followedCueRef : undefined}
         className={index === activeCue ? "active" : ""}>

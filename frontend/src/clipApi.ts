@@ -33,20 +33,20 @@ export async function updateShotLabels(
 
 export async function copyKeyframe(url: string): Promise<void> {
   if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
-    throw new Error("Trình duyệt không hỗ trợ copy ảnh vào clipboard");
+    throw new Error("Browser does not support copying images to the clipboard");
   }
   const response = await fetch(url);
-  if (!response.ok) throw new Error("Không tải được keyframe");
+  if (!response.ok) throw new Error("Failed to load keyframe");
   const bitmap = await createImageBitmap(await response.blob());
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
   const context = canvas.getContext("2d");
-  if (!context) { bitmap.close(); throw new Error("Không thể xử lý keyframe"); }
+  if (!context) { bitmap.close(); throw new Error("Failed to process keyframe"); }
   context.drawImage(bitmap, 0, 0);
   bitmap.close();
   const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
-    (blob) => blob ? resolve(blob) : reject(new Error("Không thể xử lý keyframe")),
+    (blob) => blob ? resolve(blob) : reject(new Error("Failed to process keyframe")),
     "image/png",
   ));
   await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);

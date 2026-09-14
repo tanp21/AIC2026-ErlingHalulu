@@ -132,24 +132,24 @@ describe("clip studio", () => {
     render(<ClipStudio />);
 
     const missing = await screen.findByRole("button", { name: /L21_V002/ });
-    expect(missing).toHaveTextContent("chưa có shot");
+    expect(missing).toHaveTextContent("no shots");
     expect(await screen.findByRole("button", { name: /L21_V001/ }))
-      .not.toHaveTextContent("chưa có shot");
+      .not.toHaveTextContent("no shots");
   });
 
   it("lists videos that shots exist for but the search index does not cover", async () => {
     render(<ClipStudio />);
 
     const unindexed = await screen.findByRole("button", { name: /K01_V001/ });
-    expect(unindexed).not.toHaveTextContent("chưa có shot");
-    expect(within(unindexed).getByTitle("Không có trong index tìm kiếm")).toBeInTheDocument();
+    expect(unindexed).not.toHaveTextContent("no shots");
+    expect(within(unindexed).getByTitle("Not in search index")).toBeInTheDocument();
   });
 
   it("narrows the list to one group", async () => {
     render(<ClipStudio />);
     await screen.findByRole("button", { name: /K01_V001/ });
 
-    fireEvent.change(screen.getByLabelText("Lọc theo nhóm"), { target: { value: "K01" } });
+    fireEvent.change(screen.getByLabelText("Filter by group"), { target: { value: "K01" } });
 
     expect(screen.getByRole("button", { name: /K01_V001/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /L21_V001/ })).not.toBeInTheDocument();
@@ -162,7 +162,7 @@ describe("clip studio", () => {
       "/shots/L21_V001?keyframe_source=l2025"
     ));
 
-    fireEvent.change(await screen.findByLabelText("Nguồn keyframe"), { target: { value: "l2026" } });
+    fireEvent.change(await screen.findByLabelText("Keyframe source"), { target: { value: "l2026" } });
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
       "/shots/L21_V001?keyframe_source=l2026"
@@ -183,7 +183,7 @@ describe("clip studio", () => {
     fireEvent.play(screen.getByLabelText("Video L21_V001"));
 
     expect(screen.getByRole("button", { name: /Export shot #1/ })).toBeDisabled();
-    expect(screen.getByText("Tạm dừng video để cắt shot đang xem.")).toBeInTheDocument();
+    expect(screen.getByText("Pause the video to export the shot you're viewing.")).toBeInTheDocument();
   });
 
   it("downloads the shot under the playhead, not the one that was clicked", async () => {
@@ -194,7 +194,7 @@ describe("clip studio", () => {
     await act(async () => { fireEvent.click(button); });
 
     expect(globalThis.fetch).toHaveBeenCalledWith("/clip/L21_V001/2");
-    expect(await screen.findByText("Đã tải clip.mp4")).toBeInTheDocument();
+    expect(await screen.findByText("Downloaded clip.mp4")).toBeInTheDocument();
   });
 
   it("reports the server error when a clip cannot be cut", async () => {
@@ -225,20 +225,20 @@ describe("clip studio", () => {
     presentFrame(15);
 
     expect(await screen.findByRole("img", { name: "Frame 15" })).toBeInTheDocument();
-    const shotTranscript = screen.getByLabelText("Transcript trong shot");
+    const shotTranscript = screen.getByLabelText("Transcript for shot");
     expect(within(shotTranscript).getByText("lời trong shot hai")).toBeInTheDocument();
     expect(within(shotTranscript).queryByText("shot cuối")).not.toBeInTheDocument();
   });
 
   it("shows and copies the complete transcript below the shot dashboard", async () => {
     await openVideo();
-    const full = screen.getByLabelText("Toàn bộ transcript để copy");
+    const full = screen.getByLabelText("Full transcript to copy");
 
     expect(within(full).getByText("shot đầu lời trong shot hai shot cuối")).toBeInTheDocument();
-    await act(async () => { fireEvent.click(within(full).getByRole("button", { name: "Copy toàn bộ" })); });
+    await act(async () => { fireEvent.click(within(full).getByRole("button", { name: "Copy all" })); });
 
     expect(writeText).toHaveBeenCalledWith("shot đầu lời trong shot hai shot cuối");
-    expect(within(full).getByRole("button", { name: "Đã copy" })).toBeInTheDocument();
+    expect(within(full).getByRole("button", { name: "Copied" })).toBeInTheDocument();
   });
 
   it("lets the owner confirm an automatic exclusion", async () => {
@@ -249,11 +249,11 @@ describe("clip studio", () => {
 
     expect((await screen.findAllByText(/suggested · presenter/)).length).toBeGreaterThan(0);
     expect(screen.getByRole("option", { name: "Outro" })).toBeInTheDocument();
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Loại khỏi index" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Exclude from index" })); });
 
     expect(globalThis.fetch).toHaveBeenCalledWith("/shots/L21_V001/labels", expect.objectContaining({
       method: "PATCH",
     }));
-    expect(await screen.findByText("Đã đánh dấu loại khỏi index")).toBeInTheDocument();
+    expect(await screen.findByText("Marked as excluded from index")).toBeInTheDocument();
   });
 });

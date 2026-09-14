@@ -147,11 +147,11 @@ export function VideoDialog({ result, onClose, capture, initialFrameId, initialR
       const actualRow = capture.onCapture(liveFrameId, rowIndex, eventIndex);
       if (capture.query.kind === "trake") setRowIndex(actualRow);
       setMessageIsError(false);
-      setMessage(`Đã đưa frame ${liveFrameId} vào dòng #${actualRow + 1}${capture.query.kind === "trake" ? ` · E${eventIndex + 1}` : ""}`);
+      setMessage(`Placed frame ${liveFrameId} into row #${actualRow + 1}${capture.query.kind === "trake" ? ` · E${eventIndex + 1}` : ""}`);
     } catch (error) {
       ownCaptureRef.current = false;
       setMessageIsError(true);
-      setMessage(error instanceof Error ? error.message : "Không thể dùng frame này");
+      setMessage(error instanceof Error ? error.message : "Could not use this frame");
     }
   }
 
@@ -216,40 +216,40 @@ export function VideoDialog({ result, onClose, capture, initialFrameId, initialR
               videoRef.current.currentTime = result.time; setPlaybackTime(result.time);
             }
           }} />
-        {capture && <section className="exact-frame-controls" aria-label="Chọn frame chính xác">
+        {capture && <section className="exact-frame-controls" aria-label="Select exact frame">
           <div className="frame-stepper">
-            <button disabled={!paused || seeking || liveFrameId === null} aria-label="Lùi 10 frame" onClick={() => step(-10)}>−10</button>
-            <button disabled={!paused || seeking || liveFrameId === null} aria-label="Lùi 1 frame" onClick={() => step(-1)}>−1</button>
-            <strong>{liveFrameId === null ? "Chưa xác định frame" : `Frame ${liveFrameId}`}</strong>
-            <button disabled={!paused || seeking || liveFrameId === null} aria-label="Tiến 1 frame" onClick={() => step(1)}>+1</button>
-            <button disabled={!paused || seeking || liveFrameId === null} aria-label="Tiến 10 frame" onClick={() => step(10)}>+10</button>
+            <button disabled={!paused || seeking || liveFrameId === null} aria-label="Back 10 frames" onClick={() => step(-10)}>−10</button>
+            <button disabled={!paused || seeking || liveFrameId === null} aria-label="Back 1 frame" onClick={() => step(-1)}>−1</button>
+            <strong>{liveFrameId === null ? "Frame not determined" : `Frame ${liveFrameId}`}</strong>
+            <button disabled={!paused || seeking || liveFrameId === null} aria-label="Forward 1 frame" onClick={() => step(1)}>+1</button>
+            <button disabled={!paused || seeking || liveFrameId === null} aria-label="Forward 10 frames" onClick={() => step(10)}>+10</button>
           </div>
           <div className="capture-destination">
-            <label>Dòng đáp án<select disabled={!capture.active} aria-label="Dòng đáp án" value={rowIndex} onChange={(event) => setRowIndex(Number(event.target.value))}>
-              <option value={-1}>{capture.query.kind === "trake" ? "Dòng mới" : "Thêm prediction mới"}</option>
-              {capture.answers.map((answer, index) => <option key={index} value={index}>Dòng #{index + 1} · {answer.video_id || "trống"}</option>)}
+            <label>Answer row<select disabled={!capture.active} aria-label="Answer row" value={rowIndex} onChange={(event) => setRowIndex(Number(event.target.value))}>
+              <option value={-1}>{capture.query.kind === "trake" ? "New row" : "Add new prediction"}</option>
+              {capture.answers.map((answer, index) => <option key={index} value={index}>Row #{index + 1} · {answer.video_id || "empty"}</option>)}
             </select></label>
-            {capture.query.kind === "trake" && <label>Event<select disabled={!capture.active} aria-label="TRAKE event trong player" value={eventIndex}
+            {capture.query.kind === "trake" && <label>Event<select disabled={!capture.active} aria-label="TRAKE event in player" value={eventIndex}
               onChange={(event) => setEventIndex(Number(event.target.value))}>
               {Array.from({ length: capture.query.event_count ?? 0 }, (_, index) => <option key={index} value={index}>E{index + 1}</option>)}
             </select></label>}
             <button className="use-exact-frame" disabled={!canCapture} onClick={useFrame}>
-              {liveFrameId === null ? "Dùng frame này" : `Dùng frame ${liveFrameId}`}
+              {liveFrameId === null ? "Use this frame" : `Use frame ${liveFrameId}`}
             </button>
           </div>
-          {!capture.active && <p className="message warning">Vòng lịch sử · không thể ghi frame</p>}
+          {!capture.active && <p className="message warning">Historical round · cannot record frame</p>}
           {message && <p className={`capture-message${messageIsError ? " error" : ""}`} role={messageIsError ? "alert" : "status"}>{message}</p>}
         </section>}
           </div>
-          <aside ref={transcriptRef} className="video-transcript" aria-label="Transcript video" tabIndex={0}
+          <aside ref={transcriptRef} className="video-transcript" aria-label="Video transcript" tabIndex={0}
             onWheel={() => setFollowTranscript(false)} onPointerDown={() => setFollowTranscript(false)}
             onKeyDown={(event) => {
               if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Spacebar"].includes(event.key)) {
                 setFollowTranscript(false);
               }
             }}>
-            <header><span className="eyebrow">TRANSCRIPT</span><strong>Lời thoại đang phát</strong>
-              {!followTranscript && <button type="button" onClick={() => setFollowTranscript(true)}>Theo video</button>}
+            <header><span className="eyebrow">TRANSCRIPT</span><strong>Currently playing</strong>
+              {!followTranscript && <button type="button" onClick={() => setFollowTranscript(true)}>Follow video</button>}
             </header>
             <section className="video-ranking-evidence" aria-label="Ranking evidence">
               <strong>{evidenceLabel}</strong>
@@ -264,9 +264,9 @@ export function VideoDialog({ result, onClose, capture, initialFrameId, initialR
               </small>}
               {result.matched_keywords?.length ? <small>Match: {result.matched_keywords.join(", ")}</small> : null}
             </section>
-            {transcriptLoading && <p className="transcript-state">Đang tải transcript…</p>}
-            {!transcriptLoading && transcriptError && <p className="transcript-state">Không tải được transcript.</p>}
-            {!transcriptLoading && !transcriptError && cues.length === 0 && <p className="transcript-state">Video này không có transcript.</p>}
+            {transcriptLoading && <p className="transcript-state">Loading transcript…</p>}
+            {!transcriptLoading && transcriptError && <p className="transcript-state">Failed to load transcript.</p>}
+            {!transcriptLoading && !transcriptError && cues.length === 0 && <p className="transcript-state">This video has no transcript.</p>}
             {cues.length > 0 && <ol>
               {cues.map((cue, index) => <li key={`${cue.start}-${cue.text}`}
                 ref={index === followedCue ? followedCueRef : undefined}

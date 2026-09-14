@@ -52,7 +52,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .search-sidebar.collapsed { padding: 16px 8px; overflow: hidden; }
 .transcript-panel { padding: 24px 22px; border-left: 1px solid var(--line); }
 
-.brand-row, .results-header, .video-row > header, .selection-summary, .score-details > div,
+.brand-row, .video-row > header, .selection-summary, .score-details > div,
 .keyframe-card footer, .open-video, .compare-row {
   display: flex;
   align-items: center;
@@ -87,7 +87,7 @@ h3 { margin-bottom: 0; }
 .collapsed .panel-toggle { width: 32px; }
 
 .field { display: block; margin-bottom: 18px; }
-.field > span, .mode-switch legend {
+.field > span {
   display: block;
   margin-bottom: 8px;
   color: #aeb8c4;
@@ -180,8 +180,6 @@ kbd { padding: 2px 5px; border: 1px solid #ffffff20; border-radius: 4px; backgro
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
-.results-header { position: sticky; top: -24px; z-index: 1; min-height: 70px; margin: -24px -22px 18px; padding: 22px; border-bottom: 1px solid var(--line); background: rgba(8, 11, 16, .92); backdrop-filter: blur(16px); }
-.results-header h2 { color: #c4ced8; font-size: 13px; font-weight: 550; }
 .loading-indicator { color: var(--accent); font-size: 11px; font-weight: 700; }
 .loading-indicator::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite alternate; }
 @keyframes pulse { to { opacity: .25; transform: scale(.7); } }
@@ -189,12 +187,31 @@ kbd { padding: 2px 5px; border: 1px solid #ffffff20; border-radius: 4px; backgro
 .message { margin-bottom: 14px; padding: 10px 12px; border: 1px solid; border-radius: 8px; font-size: 12px; }
 .message.error { border-color: #ff7c8344; background: #44171b55; color: #ffafb3; }
 .message.warning { border-color: #f4cc7244; background: #49381255; color: var(--warning); }
-.empty-state { display: grid; place-items: center; min-height: calc(100dvh - 145px); color: var(--muted); text-align: center; }
-.empty-state > span { grid-row: 1; display: grid; place-items: center; width: 58px; height: 58px; border: 1px solid var(--line-strong); border-radius: 18px; background: var(--surface); color: var(--accent); font-size: 29px; }
-.empty-state h3 { grid-row: 2; align-self: end; margin: 16px 0 5px; color: var(--text); font-size: 16px; }
-.empty-state p { grid-row: 3; align-self: start; max-width: 300px; font-size: 12px; }
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: calc(100dvh - 145px); color: var(--muted); text-align: center; }
+.empty-state > span { color: var(--muted); font-size: 42px; line-height: 1; }
+.empty-state h3 { margin: 0; color: var(--muted); font-size: 16px; font-weight: 600; }
+.empty-state p { margin: 0; max-width: 300px; font-size: 12px; color: var(--muted); }
 
 .video-groups { display: grid; gap: 14px; }
+.view-toggle { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: #090e14; }
+.view-toggle button { min-height: 26px; padding: 4px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 9px; font-weight: 700; white-space: nowrap; }
+.view-toggle button.active { background: #192634; color: #e5edf5; box-shadow: inset 0 0 0 1px #32465a; }
+.temporal-sequences-flat .temporal-sequence > header strong { display: flex; align-items: center; }
+.frame-video-id { position: absolute; top: 6px; left: 6px; max-width: calc(100% - 12px); overflow: hidden; padding: 2px 5px; border-radius: 4px; background: #000a; color: #dce5ed; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+
+.results-body { position: relative; min-height: 200px; }
+.results-body.is-loading > *:not(.loading-overlay) { filter: blur(4px); pointer-events: none; user-select: none; }
+.context-frames-body { min-height: 84px; }
+.context-frames-body .loading-overlay .spinner { width: 22px; height: 22px; border-width: 2px; }
+.loading-overlay { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; }
+/* Anchored to the current scroll position (not the full, possibly much taller, blurred
+   content) so the spinner stays centred in whatever part of a long results list is
+   actually on screen, instead of drifting off-screen on a tall page. */
+.loading-overlay-sticky { position: sticky; inset: auto; top: 0; height: 0; overflow: visible; }
+.loading-overlay-sticky .spinner { position: relative; top: 38dvh; }
+.spinner { width: 30px; height: 30px; border: 3px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+.search-button .spinner { width: 16px; height: 16px; border-width: 2px; border-color: #09231d40; border-top-color: #09231d; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 10px; }
 .results-grid .keyframe-card { min-width: 0; }
 .keyframe-context { position: sticky; bottom: -48px; z-index: 3; margin: 18px -22px -48px; padding: 10px 22px 12px; border-top: 1px solid var(--line-strong); background: rgba(8, 11, 16, .98); backdrop-filter: blur(14px); }
@@ -650,7 +667,7 @@ kbd { padding: 2px 5px; border: 1px solid #ffffff20; border-radius: 4px; backgro
 .working-query > div { display: flex; align-items: center; gap: 6px; }
 .working-query strong { overflow: hidden; font-family: ui-monospace, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .working-query p { display: -webkit-box; overflow: hidden; margin: 8px 0 0; color: #c8d2dc; font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
-.search-composer form { display: grid; grid-template-columns: minmax(0, 1fr) 108px; gap: 10px; align-items: end; min-width: 0; }
+.search-composer form { display: grid; grid-template-columns: minmax(0, 1fr) 64px; gap: 10px; align-items: stretch; min-width: 0; }
 .composer-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; min-width: 0; }
 .composer-fields.mode-ocr { grid-template-columns: 1fr; }
 .composer-fields label > span, .composer-fields .field > span { display: block; margin-bottom: 5px; color: #aeb8c4; font-size: 9px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
@@ -666,7 +683,10 @@ kbd { padding: 2px 5px; border: 1px solid #ffffff20; border-radius: 4px; backgro
 .composer-query-footer input[type="range"] { flex: 1; height: 18px; padding: 0; border: 0; background: transparent; accent-color: var(--accent); }
 .composer-query-footer strong { flex: 0 0 auto; color: var(--accent); font-family: ui-monospace, monospace; font-size: 10px; }
 .composer-query-footer select { flex: 1; height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: #0d141c; font-size: 11px; }
-.composer-submit { min-height: 58px; }
+.composer-submit { min-height: 40px; }
+.search-button.icon-only { width: 100%; height: 100%; flex-direction: column; justify-content: center; gap: 8px; padding: 0; }
+.search-button.icon-only .search-icon { font-size: 26px; line-height: 1; }
+.search-button.icon-only .spinner { width: 20px; height: 20px; }
 .temporal-primary { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .search-composer .field { margin: 0; }
 .sidebar-working-query { margin: 0 0 18px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
@@ -828,7 +848,6 @@ kbd { padding: 2px 5px; border: 1px solid #ffffff20; border-radius: 4px; backgro
   .search-sidebar.collapsed { width: 100%; height: 48px; padding: 8px; }
   .results-workspace { height: auto; min-height: 100dvh; padding-inline: 12px; }
   .keyframe-context { margin-inline: -12px; padding-inline: 12px; }
-  .results-header { margin-inline: -12px; padding-inline: 14px; }
   .transcript-panel { min-height: 420px; }
   .keyframe-card { flex-basis: 168px; }
   .app-shell.team-mode, .search-center { display: block; height: auto; }

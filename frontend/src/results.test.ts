@@ -20,7 +20,7 @@ function result(overrides: Partial<SearchResult>): SearchResult {
 }
 
 describe("groupResultsByVideo", () => {
-  it("orders video rows by their best score and frames chronologically", () => {
+  it("orders video rows by their best backend rank and frames chronologically", () => {
     const groups = groupResultsByVideo([
       result({ video_id: "A", rank: 0, score: 0.8, time: 50 }),
       result({ video_id: "B", rank: 1, score: 0.9, time: 30 }),
@@ -28,16 +28,26 @@ describe("groupResultsByVideo", () => {
       result({ video_id: "B", rank: 3, score: 0.6, time: 5 }),
     ]);
 
-    expect(groups.map((group) => group.videoId)).toEqual(["B", "A"]);
-    expect(groups[0].results.map((item) => item.time)).toEqual([5, 30]);
-    expect(groups[1].results.map((item) => item.time)).toEqual([10, 50]);
+    expect(groups.map((group) => group.videoId)).toEqual(["A", "B"]);
+    expect(groups[0].results.map((item) => item.time)).toEqual([10, 50]);
+    expect(groups[1].results.map((item) => item.time)).toEqual([5, 30]);
   });
 
-  it("uses original rank then video id as stable row tie breakers", () => {
+  it("does not let a higher raw score override a better (lower) backend rank", () => {
+    // e.g. an exact OCR match tiered ahead of a fuzzy match with a higher raw score.
     const groups = groupResultsByVideo([
-      result({ video_id: "B", rank: 4, score: 0.8 }),
-      result({ video_id: "A", rank: 2, score: 0.8 }),
-      result({ video_id: "C", rank: 2, score: 0.8 }),
+      result({ video_id: "exact-match", rank: 0, score: 0.2044 }),
+      result({ video_id: "fuzzy-match", rank: 6, score: 0.2156 }),
+    ]);
+
+    expect(groups.map((group) => group.videoId)).toEqual(["exact-match", "fuzzy-match"]);
+  });
+
+  it("uses score then video id as tie breakers when backend rank ties", () => {
+    const groups = groupResultsByVideo([
+      result({ video_id: "B", rank: 2, score: 0.8 }),
+      result({ video_id: "A", rank: 2, score: 0.9 }),
+      result({ video_id: "C", rank: 2, score: 0.9 }),
     ]);
 
     expect(groups.map((group) => group.videoId)).toEqual(["A", "C", "B"]);

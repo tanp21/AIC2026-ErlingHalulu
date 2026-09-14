@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import { formatTimestamp, getRelativeScoreTier } from "./results";
+import { LoadingOverlay } from "./loadingOverlay";
 import { QueryBox } from "./queryBox";
 import type { AudioMethod, SearchResult, TemporalEventHit, TemporalSearchResponse, TemporalSequence } from "./types";
 
@@ -66,7 +67,7 @@ export function TemporalSidebarFields(props: TemporalSidebarFieldsProps) {
     props.onEvents(events);
   }
   return <section className="temporal-sidebar" aria-label="Temporal event sequence">
-    <header><div><span className="eyebrow">Event tiếp theo</span><strong>E2–E{props.events.length}</strong></div>
+    <header><div><span className="eyebrow">Next event</span><strong>E2–E{props.events.length}</strong></div>
       <span>{props.events.length} events</span></header>
     <div className="temporal-sidebar-list">
       {props.events.slice(1).map((event, offset) => {
@@ -90,7 +91,7 @@ export function TemporalSidebarFields(props: TemporalSidebarFieldsProps) {
         onClick={() => props.onEvents([...props.events, ""])}>＋ Add event</button>
     </div>
     <label className="field temporal-sidebar-gap">
-      <span>Max gap giữa các event · giây</span>
+      <span>Max gap between events · seconds</span>
       <input aria-label="Temporal max gap seconds" type="number" min="1" max="600" step="1"
         value={props.maxGap} onChange={(event) => props.onMaxGap(Number(event.target.value))} />
     </label>
@@ -101,6 +102,7 @@ export function temporalSelection(event: TemporalEventHit, sequence: TemporalSeq
   const evidence = sequence.audio_evidence;
   return {
     ...event,
+    rank: sequence.rank,
     source: sequence.source,
     score: sequence.score,
     transcript_snippet: evidence?.transcript_snippet,
@@ -118,12 +120,16 @@ export function temporalSelection(event: TemporalEventHit, sequence: TemporalSeq
   };
 }
 
+export type ResultsViewMode = "grouped" | "ranked";
+
 interface TemporalWorkspaceProps {
   response: TemporalSearchResponse | null;
   loading: boolean;
   loadingMore: boolean;
   error: string;
   moreError: string;
+  viewMode: ResultsViewMode;
+  onViewMode(mode: ResultsViewMode): void;
   onOpen(event: TemporalEventHit, sequence: TemporalSequence): void;
   onLoadMore(): void;
 }
@@ -132,9 +138,30 @@ export function TemporalWorkspace(props: TemporalWorkspaceProps) {
   const workspaceRef = useRef<HTMLElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const sequences = useMemo(() => props.response?.videos.flatMap((video) => video.sequences) ?? [], [props.response]);
+  const rankedSequences = useMemo(() => [...sequences].sort((a, b) => a.rank - b.rank), [sequences]);
   const scores = sequences.map((sequence) => sequence.score);
   const min = scores.length ? Math.min(...scores) : 0;
   const max = scores.length ? Math.max(...scores) : 0;
+
+  function renderSequence(sequence: TemporalSequence, showVideoId: boolean) {
+    const tier = getRelativeScoreTier(sequence.score, min, max);
+    return <article className={`temporal-sequence tier-${tier}`} data-testid="temporal-sequence" key={`${sequence.video_id}-${sequence.rank}`}>
+      <header>
+        <strong>{showVideoId && <span className="row-rank">{String(sequence.rank + 1).padStart(2, "0")}</span>}
+          {showVideoId ? sequence.video_id : `${formatTimestamp(sequence.start_time)}–${formatTimestamp(sequence.end_time)}`}</strong>
+        <span>{showVideoId && <>{formatTimestamp(sequence.start_time)}–{formatTimestamp(sequence.end_time)} · </>}
+          <b>{sequence.score.toFixed(4)}</b>{sequence.source === "both" && <> · visual {sequence.visual_score.toFixed(4)}</>}</span>
+      </header>
+      <div className="temporal-timeline">{sequence.events.map((event, index) => <div className="temporal-event" key={`${event.frame_idx}-${index}`}>
+        {index > 0 && <span className="temporal-arrow" aria-hidden="true">→</span>}
+        <button type="button" aria-label={`Open event E${index + 1} ${event.video_id} at ${formatTimestamp(event.time)}`}
+          onClick={() => props.onOpen(event, sequence)}>
+          <img src={event.thumb} alt="" loading="lazy" />
+          <span><b>E{index + 1}</b><time>{formatTimestamp(event.time)}</time><em>{event.score.toFixed(4)}</em></span>
+        </button>
+      </div>)}</div>
+    </article>;
+  }
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -147,36 +174,24 @@ export function TemporalWorkspace(props: TemporalWorkspaceProps) {
     return () => observer.disconnect();
   }, [props.response?.has_more, props.loadingMore, props.moreError, props.onLoadMore]);
 
-  const status = props.response
-    ? `${props.response.videos.length}/${props.response.total_videos} videos · ${props.response.total_sequences} sequences · ${props.response.latency_ms} ms`
-    : "";
   return <main ref={workspaceRef} className="results-workspace temporal-workspace" aria-label="Temporal search results">
-    <header className="results-header"><div><span className="eyebrow">Temporal results</span><h2>{status || "Ready to search"}</h2></div>
-      {props.loading && <span className="loading-indicator" role="status">Searching</span>}</header>
     {props.error && <div className="message error" role="alert">{props.error}</div>}
     {props.response?.warning && <div className="message warning">{props.response.warning}</div>}
     {!props.response && !props.loading && <div className="empty-state"><span>⇢</span><h3>Find an ordered visual sequence</h3><p>Describe two or more events in chronological order.</p></div>}
     {props.response && !props.loading && !props.response.videos.length && <div className="empty-state"><span>∅</span><h3>No sequences found</h3><p>Broaden an event or increase the maximum gap.</p></div>}
-    <div className="temporal-videos">{props.response?.videos.map((video, videoIndex) =>
-      <section className="temporal-video" key={video.video_id} data-testid="temporal-video">
-        <header><div><span className="row-rank">{String(videoIndex + 1).padStart(2, "0")}</span><h3>{video.video_id}</h3></div>
-          <div className="row-stats"><span>{video.sequences.length} sequence{video.sequences.length === 1 ? "" : "s"}</span><strong>best {video.best_score.toFixed(4)}</strong></div></header>
-        <div className="temporal-sequences">{video.sequences.map((sequence) => {
-          const tier = getRelativeScoreTier(sequence.score, min, max);
-          return <article className={`temporal-sequence tier-${tier}`} data-testid="temporal-sequence" key={sequence.rank}>
-            <header><strong>{formatTimestamp(sequence.start_time)}–{formatTimestamp(sequence.end_time)}</strong>
-              <span><b>{sequence.score.toFixed(4)}</b>{sequence.source === "both" && <> · visual {sequence.visual_score.toFixed(4)}</>}</span></header>
-            <div className="temporal-timeline">{sequence.events.map((event, index) => <div className="temporal-event" key={`${event.frame_idx}-${index}`}>
-              {index > 0 && <span className="temporal-arrow" aria-hidden="true">→</span>}
-              <button type="button" aria-label={`Open event E${index + 1} ${event.video_id} at ${formatTimestamp(event.time)}`}
-                onClick={() => props.onOpen(event, sequence)}>
-                <img src={event.thumb} alt="" loading="lazy" />
-                <span><b>E{index + 1}</b><time>{formatTimestamp(event.time)}</time><em>{event.score.toFixed(4)}</em></span>
-              </button>
-            </div>)}</div>
-          </article>;
-        })}</div>
-      </section>)}</div>
+    <div className={`results-body${props.loading ? " is-loading" : ""}`}>
+      <LoadingOverlay active={props.loading} sticky />
+      {props.viewMode === "grouped" ? (
+        <div className="temporal-videos">{props.response?.videos.map((video, videoIndex) =>
+          <section className="temporal-video" key={video.video_id} data-testid="temporal-video">
+            <header><div><span className="row-rank">{String(videoIndex + 1).padStart(2, "0")}</span><h3>{video.video_id}</h3></div>
+              <div className="row-stats"><span>{video.sequences.length} sequence{video.sequences.length === 1 ? "" : "s"}</span><strong>best {video.best_score.toFixed(4)}</strong></div></header>
+            <div className="temporal-sequences">{video.sequences.map((sequence) => renderSequence(sequence, false))}</div>
+          </section>)}</div>
+      ) : (
+        <div className="temporal-sequences temporal-sequences-flat">{rankedSequences.map((sequence) => renderSequence(sequence, true))}</div>
+      )}
+    </div>
     {props.response && props.response.videos.length > 0 && <div ref={sentinelRef} className="load-more-sentinel">
       {props.loadingMore && <span className="loading-indicator" role="status">Loading more</span>}
       {props.moreError && <><span role="alert">{props.moreError}</span><button type="button" onClick={props.onLoadMore}>Retry</button></>}

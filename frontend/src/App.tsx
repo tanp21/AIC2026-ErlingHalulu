@@ -6,8 +6,10 @@ import { CollaborationPanels, QuickAddResult, TeamToolbar } from "./collab";
 import { AppTabs, ClipStudio } from "./clips";
 import type { AppTab } from "./clips";
 import { formatTimestamp, getRelativeScoreTier, groupResultsByVideo } from "./results";
+import { LoadingOverlay } from "./loadingOverlay";
 import { VideoDialog } from "./videoDialog";
 import { TemporalPrimaryFields, TemporalSidebarFields, temporalSelection, TemporalWorkspace } from "./temporal";
+import type { ResultsViewMode } from "./temporal";
 import { QueryBox } from "./queryBox";
 export { VideoDialog } from "./videoDialog";
 import type {
@@ -73,8 +75,7 @@ function SearchSidebar(props: SearchSidebarProps) {
 
   return (
     <aside className="search-sidebar" aria-label="Search controls">
-      <fieldset className="mode-switch">
-        <legend>Search mode</legend>
+      <fieldset className="mode-switch" aria-label="Search mode">
         <div>
           {MODE_OPTIONS.map((option) => (
             <button
@@ -91,9 +92,9 @@ function SearchSidebar(props: SearchSidebarProps) {
       </fieldset>
 
       <section className="sidebar-working-query">
-        <span className="eyebrow">Query đang làm</span>
+        <span className="eyebrow">Current query</span>
         {props.query ? <><div><strong>{props.query.filename}</strong><i className={`query-kind kind-${props.query.kind}`}>{props.query.kind}</i></div>
-          <p>{props.query.prompt}</p></> : <p>Chưa chọn query đội.</p>}
+          <p>{props.query.prompt}</p></> : <p>No team query selected.</p>}
       </section>
 
       {props.mode === "temporal" && <TemporalSidebarFields events={props.temporalEvents} maxGap={props.temporalMaxGap}
@@ -103,8 +104,8 @@ function SearchSidebar(props: SearchSidebarProps) {
         <section className="sidebar-ocr">
           <label className="field"><span>OCR query</span><textarea aria-label="On-screen text query" value={props.ocrQuery}
             onChange={(event) => props.onOcrQuery(event.target.value)} rows={3}
-            placeholder="Biển hiệu, phụ đề, tên chương trình…" /></label>
-          <small>Nút Search dùng OCR để lọc theo video và giữ đúng shot chứa chữ; nếu chỉ nhập OCR thì tìm OCR độc lập.</small>
+            placeholder="Signs, subtitles, program names…" /></label>
+          <small>Search uses OCR to filter by video and keep only the shot containing the text; if only OCR is entered, it searches OCR independently.</small>
         </section>
 
         {hasVisualIndex && (
@@ -235,7 +236,7 @@ function SearchComposer({ mode, visualQuery, audioQuery, temporalEvents, audioMe
       event.currentTarget.form?.requestSubmit();
     }
   };
-  return <section className="search-composer" aria-label="Truy vấn tìm kiếm">
+  return <section className="search-composer" aria-label="Search query">
     <form onSubmit={onSubmit}>
       <div className={`composer-fields mode-${mode}`}>
         {mode !== "audio" && mode !== "temporal" && <QueryBox
@@ -259,7 +260,7 @@ function SearchComposer({ mode, visualQuery, audioQuery, temporalEvents, audioMe
           value={audioQuery}
           onChange={onAudioQuery}
           onKeyDown={submitOnEnter}
-          placeholder="Nhập nội dung lời nói cần tìm…"
+          placeholder="Enter the spoken content to search for…"
           footer={<>
             <span>Audio search</span>
             <select aria-label="Audio search" value={audioMethod} onChange={(event) => onAudioMethod(event.target.value as AudioMethod)}>
@@ -273,8 +274,11 @@ function SearchComposer({ mode, visualQuery, audioQuery, temporalEvents, audioMe
           onEvents={onTemporalEvents} onAudioQuery={onAudioQuery}
           onAudioMethod={onAudioMethod} onPeWeight={onPeWeight} />}
       </div>
-      <button className="search-button composer-submit" type="submit" aria-label="Search">
-        <span>{loading ? "Searching…" : "Search"}</span><kbd>Enter</kbd>
+      <button className="search-button composer-submit icon-only" type="submit" aria-label="Search">
+        {loading ? <span className="spinner" aria-hidden="true" /> : <>
+          <span className="search-icon" aria-hidden="true">⌕</span>
+          <kbd>Enter</kbd>
+        </>}
       </button>
     </form>
   </section>;
@@ -301,6 +305,7 @@ function KeyframeCard({ result, selected, tier, onSelect, onOpen, onSimilar }: K
         onClick={onSelect}
       >
         <img src={result.thumb} alt="" loading="lazy" />
+        <span className="frame-video-id">{result.video_id}</span>
         <span className="frame-overlay"><time>{time}</time><span className={`source source-${result.source}`}>{result.source}</span></span>
       </button>
       <footer>
@@ -330,6 +335,8 @@ interface ResultsWorkspaceProps {
   warning: string;
   truncated: boolean;
   profile?: string;
+  viewMode: ResultsViewMode;
+  onViewMode(mode: ResultsViewMode): void;
   onSelect(result: SearchResult): void;
   onOpen(result: SearchResult): void;
   onLoadMore(): void;
@@ -384,8 +391,14 @@ function ResultsWorkspace(props: ResultsWorkspaceProps) {
         <div className="empty-state"><span>∅</span><h3>No matches found</h3><p>Try broader wording or a different search mode.</p></div>
       )}
 
-      <div className="results-grid">
-              {props.results.map((result) => (
+      <div className={`results-body${props.loading ? " is-loading" : ""}`}>
+        <LoadingOverlay active={props.loading} sticky />
+        {props.viewMode === "grouped" ? (
+          <div className="video-groups">{props.groups.map((group, index) => (
+            <section className="video-row" data-testid="video-row" key={group.videoId}>
+              <header><div><span className="row-rank">{String(index + 1).padStart(2, "0")}</span><h3>{group.videoId}</h3></div>
+                <div className="row-stats"><span>{group.results.length} frame{group.results.length === 1 ? "" : "s"}</span><strong>best {group.maxScore.toFixed(4)}</strong></div></header>
+              <div className="frame-strip">{group.results.map((result) => (
                 <KeyframeCard
                   key={`${result.video_id}-${result.frame_idx}-${result.rank}`}
                   result={result}
@@ -395,10 +408,28 @@ function ResultsWorkspace(props: ResultsWorkspaceProps) {
                   onOpen={() => props.onOpen(result)}
                   onSimilar={() => props.onSimilar(result)}
                 />
-              ))}
+              ))}</div>
+            </section>
+          ))}</div>
+        ) : (
+          <div className="results-grid">
+                {props.results.map((result) => (
+                  <KeyframeCard
+                    key={`${result.video_id}-${result.frame_idx}-${result.rank}`}
+                    result={result}
+                    selected={props.selected?.video_id === result.video_id && props.selected.frame_idx === result.frame_idx}
+                    tier={getRelativeScoreTier(result.score, min, max)}
+                    onSelect={() => props.onSelect(result)}
+                    onOpen={() => props.onOpen(result)}
+                    onSimilar={() => props.onSimilar(result)}
+                  />
+                ))}
+          </div>
+        )}
+        <KeyframeContext
+          selected={props.selected} profile={props.profile} suppressOwnLoading={props.loading}
+          onSelect={props.onSelect} onOpen={props.onOpen} />
       </div>
-      <KeyframeContext key={props.selected ? `${props.selected.video_id}:${props.selected.frame_idx}` : "none"}
-        selected={props.selected} profile={props.profile} onSelect={props.onSelect} onOpen={props.onOpen} />
       {props.searched && props.results.length > 0 && (
         <div ref={sentinelRef} className="load-more-sentinel">
           {props.loadingMore && <span className="loading-indicator" role="status">Loading more</span>}
@@ -412,14 +443,13 @@ function ResultsWorkspace(props: ResultsWorkspaceProps) {
   );
 }
 
-function KeyframeContext({ selected, profile, onSelect, onOpen }: { selected: SearchResult | null; profile?: string; onSelect(result: SearchResult): void; onOpen(result: SearchResult): void }) {
+function KeyframeContext({ selected, profile, suppressOwnLoading, onSelect, onOpen }: { selected: SearchResult | null; profile?: string; suppressOwnLoading?: boolean; onSelect(result: SearchResult): void; onOpen(result: SearchResult): void }) {
   const [frames, setFrames] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const stripRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!selected) { setFrames([]); setLoading(false); return; }
     const controller = new AbortController();
-    setFrames([]);
     setLoading(true);
     fetchKeyframeContext(selected.video_id, selected.frame_idx, profile).then((data) => {
       if (!controller.signal.aborted) {
@@ -435,10 +465,13 @@ function KeyframeContext({ selected, profile, onSelect, onOpen }: { selected: Se
     });
   }, [frames, selected?.frame_idx]);
   if (!selected) return null;
+  const showOwnLoading = loading && !suppressOwnLoading;
   return <section className="keyframe-context" aria-label="Neighbouring keyframes">
     <div><strong>{selected.video_id} <b>Selected frame {selected.frame_idx}</b></strong><button type="button" onClick={() => onOpen(selected)}>▶ Play video</button></div>
-    <div ref={stripRef} className="context-frames">
-      {loading && <span className="context-loading">Loading neighbouring keyframes…</span>}
+    <div className={`results-body context-frames-body${showOwnLoading ? " is-loading" : ""}`}>
+      <LoadingOverlay active={showOwnLoading} />
+      <div ref={stripRef} className="context-frames">
+      {!loading && !frames.length && <span className="context-loading">No neighbouring keyframes.</span>}
       {frames.map((frame) => {
         const active = frame.frame_idx === selected.frame_idx;
         return <button key={frame.frame_idx} type="button" aria-current={active ? "true" : undefined}
@@ -448,6 +481,7 @@ function KeyframeContext({ selected, profile, onSelect, onOpen }: { selected: Se
           {active && <i aria-hidden="true">✓</i>}
         </button>;
       })}
+      </div>
     </div>
   </section>;
 }
@@ -462,16 +496,16 @@ function TranscriptPanel({ selected, query, canAdd, onOpen, onQueryChange }: {
   const [view, setView] = useState<"ranking" | "team">("ranking");
   return (
     <aside className="transcript-panel" aria-label="Transcript evidence">
-      <div className="evidence-view-switch" role="group" aria-label="Chế độ panel bên phải">
+      <div className="evidence-view-switch" role="group" aria-label="Right panel mode">
         <div>
           <button type="button" className={view === "ranking" ? "active" : ""} aria-pressed={view === "ranking"}
-            onClick={() => setView("ranking")}>Ranking &amp; nội dung khớp</button>
+            onClick={() => setView("ranking")}>Ranking &amp; matched content</button>
           <button type="button" className={view === "team" ? "active" : ""} aria-pressed={view === "team"}
-            onClick={() => setView("team")}>Kết quả của nhóm</button>
+            onClick={() => setView("team")}>Team results</button>
         </div>
       </div>
       {view === "team" ? <TeamQueryResults query={query} editable={canAdd} onQueryChange={onQueryChange} /> : !selected ? (
-        <div className="transcript-empty"><span>RANK</span><p>Chọn một keyframe để xem ranking và nội dung khớp.</p></div>
+        <div className="transcript-empty"><span>RANK</span><p>Select a keyframe to see ranking and matched content.</p></div>
       ) : (
         <>
           <section className="selection-summary">
@@ -510,14 +544,14 @@ function TranscriptPanel({ selected, query, canAdd, onOpen, onQueryChange }: {
             <article className="evidence-card ocr-evidence"><header><span>OCR match</span><b>ON-SCREEN</b></header>
               {selected.ocr_snippet ? <><blockquote>{selected.ocr_snippet}</blockquote>
                 {selected.ocr_start !== undefined && selected.ocr_end !== undefined && <time>{formatTimestamp(selected.ocr_start)}–{formatTimestamp(selected.ocr_end)}</time>}</>
-                : <p>Không có OCR match cho kết quả này.</p>}
+                : <p>No OCR match for this result.</p>}
               {selected.ocr_matched_keywords?.length ? <div className="keyword-chips">{selected.ocr_matched_keywords.map((word) => <i key={word}>{word}</i>)}</div> : null}
             </article>
             <article className="evidence-card transcript-evidence"><header><span>Transcript match</span><b>{selected.audio_method ?? "AUDIO"}</b></header>
               {selected.transcript_snippet ? <><blockquote>{selected.transcript_snippet}</blockquote>
                 {selected.transcript_start !== undefined && selected.transcript_end !== undefined && <time>{formatTimestamp(selected.transcript_start)}–{formatTimestamp(selected.transcript_end)}</time>}
                 {selected.matched_keywords?.length ? <div className="keyword-chips">{selected.matched_keywords.map((word) => <i key={word}>{word}</i>)}</div> : null}</>
-                : <p>Không có transcript match cho kết quả này.</p>}
+                : <p>No transcript match for this result.</p>}
             </article>
           </section>
           {canAdd && <QuickAddResult query={query} result={selected} onChange={onQueryChange} />}
@@ -544,7 +578,7 @@ function TeamQueryResults({ query, editable, onQueryChange }: {
     setError("");
   }, [query?.id, query?.version]);
 
-  if (!query) return <div className="team-results-empty">Chưa chọn query đang làm.</div>;
+  if (!query) return <div className="team-results-empty">No current query selected.</div>;
   const activeQuery = query;
 
   function changeRow(index: number, patch: Record<string, unknown>) {
@@ -567,33 +601,33 @@ function TeamQueryResults({ query, editable, onQueryChange }: {
       onQueryChange(updated);
       setDirty(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Không thể lưu đáp án");
+      setError(caught instanceof Error ? caught.message : "Failed to save answer");
     } finally { setBusy(false); }
   }
 
-  return <section className="team-results-compact" aria-label="Kết quả hiện tại của nhóm">
-    <header><strong>{answers.length} kết quả</strong><span>{query.filename}</span></header>
-    {!answers.length && <div className="team-results-empty compact">Nhóm chưa lưu kết quả cho query này.</div>}
+  return <section className="team-results-compact" aria-label="Team's current results">
+    <header><strong>{answers.length} results</strong><span>{query.filename}</span></header>
+    {!answers.length && <div className="team-results-empty compact">The team hasn't saved results for this query yet.</div>}
     <div>{answers.map((answer, rowIndex) => {
       const row = answer as unknown as Record<string, unknown>;
       const frames = query.kind === "trake"
         ? row.frame_ids as Array<number | null>
         : [row.frame_id as number | null];
       return <article key={rowIndex}>
-        <header><b>#{rowIndex + 1}</b><input aria-label={`Video kết quả ${rowIndex + 1}`} value={String(row.video_id ?? "")}
+        <header><b>#{rowIndex + 1}</b><input aria-label={`Video result ${rowIndex + 1}`} value={String(row.video_id ?? "")}
           disabled={!editable} placeholder="Video ID" onChange={(event) => changeRow(rowIndex, { video_id: event.target.value })} />
-          {editable && <button type="button" aria-label={`Xóa kết quả ${rowIndex + 1}`} onClick={() => {
+          {editable && <button type="button" aria-label={`Delete result ${rowIndex + 1}`} onClick={() => {
             setAnswers(answers.filter((_, index) => index !== rowIndex)); setDirty(true);
           }}>×</button>}</header>
-        {query.kind === "qa" && <textarea aria-label={`Câu trả lời ${rowIndex + 1}`} value={String(row.answer ?? "")}
-          disabled={!editable} placeholder="Câu trả lời" onChange={(event) => changeRow(rowIndex, { answer: event.target.value })} />}
+        {query.kind === "qa" && <textarea aria-label={`Answer ${rowIndex + 1}`} value={String(row.answer ?? "")}
+          disabled={!editable} placeholder="Answer" onChange={(event) => changeRow(rowIndex, { answer: event.target.value })} />}
         <div className="team-result-frames">{frames.map((frameId, frameIndex) =>
           <figure key={frameIndex}>
             {row.video_id && frameId != null
               ? <img src={`/thumb/${String(row.video_id)}/${frameId}?w=160`} alt={`Frame ${frameId}`} loading="lazy" />
-              : <span>Chưa chọn frame</span>}
+              : <span>No frame selected</span>}
             <figcaption><label>{query.kind === "trake" ? `E${frameIndex + 1}` : "Frame"}<input type="number" min="0"
-              aria-label={`${query.kind === "trake" ? `E${frameIndex + 1}` : "Frame"} kết quả ${rowIndex + 1}`}
+              aria-label={`${query.kind === "trake" ? `E${frameIndex + 1}` : "Frame"} result ${rowIndex + 1}`}
               disabled={!editable} value={frameId ?? ""} onChange={(event) => {
                 const value = event.target.value === "" ? null : Number(event.target.value);
                 if (query.kind === "trake") {
@@ -603,8 +637,8 @@ function TeamQueryResults({ query, editable, onQueryChange }: {
           </figure>)}</div>
       </article>;
     })}</div>
-    {editable && <footer><button type="button" disabled={answers.length >= 100 || busy} onClick={addRow}>+ Thêm kết quả</button>
-      <button type="button" className="save" disabled={!dirty || busy} onClick={save}>{busy ? "Đang lưu…" : "Lưu đáp án"}</button></footer>}
+    {editable && <footer><button type="button" disabled={answers.length >= 100 || busy} onClick={addRow}>+ Add result</button>
+      <button type="button" className="save" disabled={!dirty || busy} onClick={save}>{busy ? "Saving…" : "Save answer"}</button></footer>}
     {error && <p className="team-results-error" role="alert">{error}</p>}
   </section>;
 }
@@ -632,6 +666,8 @@ export default function App() {
   const [temporalResponse, setTemporalResponse] = useState<TemporalSearchResponse | null>(null);
   const [selected, setSelected] = useState<SearchResult | null>(null);
   const [openResult, setOpenResult] = useState<SearchResult | null>(null);
+  const [classicViewMode, setClassicViewMode] = useState<ResultsViewMode>("ranked");
+  const [temporalViewMode, setTemporalViewMode] = useState<ResultsViewMode>("grouped");
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreError, setMoreError] = useState("");
@@ -890,7 +926,7 @@ export default function App() {
       setActiveRound(loaded.round);
       setSelectedQueryId(loaded.round.queries[0]?.id ?? null);
     } catch (roundError) {
-      setError(roundError instanceof Error ? roundError.message : "Không thể tải vòng");
+      setError(roundError instanceof Error ? roundError.message : "Failed to load round");
     }
   }
 
@@ -924,6 +960,11 @@ export default function App() {
   const status = response
     ? `${response.results.length}/${response.total_results} keyframes loaded · ${groups.length} videos · ${response.latency_ms} ms`
     : "";
+  const temporalStatus = temporalResponse
+    ? `${temporalResponse.videos.length}/${temporalResponse.total_videos} videos · ${temporalResponse.total_sequences} sequences · ${temporalResponse.latency_ms} ms`
+    : "";
+  const searchStatus = mode === "temporal" ? temporalStatus : status;
+  const currentViewMode = mode === "temporal" ? temporalViewMode : classicViewMode;
 
   const searchUi = <section className="search-page" hidden={tab !== "search"}>
       <SearchSidebar
@@ -971,6 +1012,7 @@ export default function App() {
         {mode === "temporal" ? <TemporalWorkspace
         response={temporalResponse} loading={loading} loadingMore={loadingMore}
         error={sessionError || error} moreError={moreError} onLoadMore={loadNextPage}
+        viewMode={temporalViewMode} onViewMode={setTemporalViewMode}
         onOpen={(event: TemporalEventHit, sequence: TemporalSequence) => {
           const result = temporalSelection(event, sequence); setSelected(result); setOpenResult(result);
         }}
@@ -987,6 +1029,7 @@ export default function App() {
         warning={response?.warning ?? ""}
         truncated={response?.truncated ?? false}
         profile={response?.profile}
+        viewMode={classicViewMode} onViewMode={setClassicViewMode}
         onSelect={setSelected}
         onOpen={setOpenResult}
         onSimilar={rerankFrom}
@@ -999,18 +1042,18 @@ export default function App() {
 
   const tabs = <AppTabs tab={tab} onTab={setTab} />;
   const queryPicker = <div className="nav-query-current">
-    <label className="nav-query-picker">Query đang làm
-      <select aria-label="Chọn query đang làm" value={currentQuery?.id ?? ""}
+    <label className="nav-query-picker">Current query
+      <select aria-label="Select current query" value={currentQuery?.id ?? ""}
         disabled={!activeRound?.queries.length} onChange={(event) => selectCollabQuery(Number(event.target.value))}>
-        {!activeRound?.queries.length && <option value="">Chưa có query</option>}
+        {!activeRound?.queries.length && <option value="">No queries yet</option>}
         {activeRound?.queries.map((query) => <option key={query.id} value={query.id}>{query.filename} · {query.kind.toUpperCase()}</option>)}
       </select>
     </label>
     {currentQuery && <div className="nav-query-meta">
-      <span className={`query-status status-${currentQuery.status}`}>{({ todo: "Chưa làm", in_progress: "Đang làm", ready: "Sẵn sàng", reviewed: "Đã duyệt" })[currentQuery.status]}</span>
-      <span>Người làm: <b>{currentQuery.assignee?.split("@")[0] ?? "Chưa nhận"}</b></span>
+      <span className={`query-status status-${currentQuery.status}`}>{({ todo: "To do", in_progress: "In progress", ready: "Ready", reviewed: "Reviewed" })[currentQuery.status]}</span>
+      <span>Assignee: <b>{currentQuery.assignee?.split("@")[0] ?? "Unassigned"}</b></span>
       <span className={currentQuery.reviewed_by ? "reviewed" : "unreviewed"}>
-        {currentQuery.reviewed_by ? `Duyệt bởi ${currentQuery.reviewed_by.split("@")[0]}` : "Chưa duyệt"}
+        {currentQuery.reviewed_by ? `Reviewed by ${currentQuery.reviewed_by.split("@")[0]}` : "Not reviewed"}
       </span>
     </div>}
   </div>;
@@ -1033,7 +1076,15 @@ export default function App() {
       <header className="team-toolbar app-header">
         <div className="team-brand"><span className="eyebrow">AIC HCMC</span><strong>{tab === "queries" ? "Query management" : "Search workspace"}</strong></div>
         {tabs}
-        {tab === "search" && status && <div className="nav-search-status" aria-label="Trạng thái kết quả tìm kiếm">{status}</div>}
+        {tab === "search" && searchStatus && <div className="nav-search-status" aria-label="Search result status">{searchStatus}</div>}
+        {tab === "search" && <div className="view-toggle" role="group" aria-label="Results view">
+          <button type="button" className={currentViewMode === "grouped" ? "active" : ""} aria-pressed={currentViewMode === "grouped"}
+            aria-label="Group by video" title="Group by video"
+            onClick={() => (mode === "temporal" ? setTemporalViewMode : setClassicViewMode)("grouped")}>Grouped</button>
+          <button type="button" className={currentViewMode === "ranked" ? "active" : ""} aria-pressed={currentViewMode === "ranked"}
+            aria-label="Ranked list" title="Ranked list"
+            onClick={() => (mode === "temporal" ? setTemporalViewMode : setClassicViewMode)("ranked")}>Ranked</button>
+        </div>}
         {queryPicker}
       </header>
       {searchUi}
@@ -1045,7 +1096,7 @@ export default function App() {
           selectedResult={selected} openResult={openResult} onCloseVideo={() => setOpenResult(null)}
           searchResults={response?.results ?? []}
           onSelect={selectCollabQuery} onQueryChange={updateCollabQuery} />
-          : <div className="empty-state query-empty"><h3>Chưa có vòng truy vấn</h3><p>Upload một vòng để bắt đầu phân công và quản lý đáp án.</p></div>}
+          : <div className="empty-state query-empty"><h3>No query round yet</h3><p>Upload a round to start assigning and managing answers.</p></div>}
       </section>
       {openResult && !(activeRound && login) && <VideoDialog result={openResult} onClose={() => setOpenResult(null)} startPaused />}
     </div>
