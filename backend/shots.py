@@ -67,6 +67,19 @@ def shots_path(row, data_dir=DATA):
     return Path(data_dir) / str(row["year"]) / "shots" / row["group"] / f"{row['video_id']}.json"
 
 
+def streaming_path(row, data_dir=DATA):
+    """Prefer the faststart remux (scripts.media.faststart_remux) if present.
+
+    Falls back to the original file untouched -- a video that hasn't been remuxed
+    yet (new upload mid-competition, batch job not finished) still streams exactly
+    as before. Only the byte-serving route uses this; thumbnails, shot export, and
+    frame maps all keep reading row["path"] (the original), so PTS/frame_id
+    computation can never depend on the faststart copy existing or being correct.
+    """
+    candidate = Path(data_dir) / str(row["year"]) / "videos_faststart" / row["group"] / f"{row['video_id']}.mp4"
+    return candidate if candidate.exists() else Path(row["path"])
+
+
 def scan_media(data_dir=DATA):
     """Every video on the data disk, keyed by video id.
 

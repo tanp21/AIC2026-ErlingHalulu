@@ -4,10 +4,14 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from functools import lru_cache
 import json
+import logging
 import os
 from pathlib import Path
 import math
+import threading
 from typing import Callable, Hashable, Iterable, Sequence
+
+from .core import TextEmbeddingBatcher
 
 
 AUDIO_INDEX = os.environ.get("AIC_AUDIO_INDEX", "aic_audio_v1")
@@ -17,6 +21,7 @@ QUERY_INSTRUCTION = (
     "passage that best matches the described spoken content."
 )
 MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
+logger = logging.getLogger("uvicorn.error")
 ROOT = Path(__file__).resolve().parent.parent
 _AUDIO_DIR = Path(os.environ.get("AIC_DATA_DIR", ROOT / "data")) / "2026" / "audio"
 RAW_TRANSCRIPT_PATH = _AUDIO_DIR / "step_data.parquet"
@@ -49,6 +54,9 @@ TRANSCRIPT_PATH = transcript_path()
 
 _client = None
 _model = None
+_audio_text_batcher = None
+_audio_text_batcher_running = True
+_audio_text_batcher_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -863,15 +871,54 @@ def load_embedding_model():
         _model = SentenceTransformer(
             MODEL_NAME, device=device, model_kwargs={"torch_dtype": torch.float16},
         )
+        logger.info("Qwen embedding device=%s", device)
     return _model
 
 
-def encode_query(text: str) -> list[float]:
-    vector = load_embedding_model().encode(
-        text,
+def _encode_audio_batch(texts):
+    import numpy as np
+
+    vectors = load_embedding_model().encode(
+        list(texts),
         prompt=f"Instruct: {QUERY_INSTRUCTION}\nQuery:",
         normalize_embeddings=True,
     )
+    return np.asarray(vectors, dtype="float32")
+
+
+def _get_audio_text_batcher():
+    global _audio_text_batcher
+    with _audio_text_batcher_lock:
+        if not _audio_text_batcher_running:
+            raise RuntimeError("audio embedding batcher is not running")
+        if _audio_text_batcher is None:
+            _audio_text_batcher = TextEmbeddingBatcher(_encode_audio_batch)
+        return _audio_text_batcher
+
+
+def start_audio_text_batcher():
+    global _audio_text_batcher_running
+    with _audio_text_batcher_lock:
+        _audio_text_batcher_running = True
+
+
+def close_audio_text_batcher():
+    global _audio_text_batcher, _audio_text_batcher_running
+    with _audio_text_batcher_lock:
+        _audio_text_batcher_running = False
+        batcher = _audio_text_batcher
+        if batcher is not None:
+            batcher.close()
+        _audio_text_batcher = None
+
+
+def encode_query(text: str) -> list[float]:
+    # Routed through the same coalescing-batcher pattern as backend.core's PE-Core
+    # text encoding: 5 concurrent hybrid searches each calling Qwen.encode()
+    # independently measured at ~4x slower under concurrency than one alone (no
+    # batching, unlike the visual side), since GPU inference calls don't overlap
+    # efficiently without being combined into one batched forward pass.
+    vector = _get_audio_text_batcher().encode([text])[0]
     return vector.astype("float32").tolist()
 
 

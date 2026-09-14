@@ -6,6 +6,7 @@ import secrets
 import subprocess
 import tempfile
 import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
@@ -35,6 +36,11 @@ SEARCH_SNAPSHOT_TTL_SECONDS = 600
 TEMPORAL_PAGE_SIZE = 20
 TEMPORAL_RESULT_LIMIT = 10_000
 MAX_QUERY_IMAGE_BYTES = 6 * 1024 * 1024
+
+# Shared across hybrid/OCR-filtered requests instead of a fresh pool per call;
+# sized for the worst case of 5 concurrent requests x 2 workers each (visual+audio
+# or primary+ocr fan-out).
+_SEARCH_FANOUT_EXECUTOR = ThreadPoolExecutor(max_workers=10, thread_name_prefix="search-fanout")
 
 
 class SearchReq(BaseModel):
@@ -230,7 +236,7 @@ def warmup_search():
 
     started = time.perf_counter()
     visual_query = core.encode_text("warmup visual search")
-    logger.info("warm-up PE-Core: %.1f ms", (time.perf_counter() - started) * 1000)
+    logger.info("warm-up PE-Core: %.1f ms (device=%s)", (time.perf_counter() - started) * 1000, core.DEVICE)
 
     started = time.perf_counter()
     core.get_index("flat").search(visual_query, 1)
@@ -258,11 +264,14 @@ async def lifespan(app):
     app.state.search_snapshots = SearchSnapshotStore()
     app.state.temporal_snapshots = TemporalSnapshotStore()
     core.start_text_batcher()
+    audio_search.start_audio_text_batcher()
     try:
         warmup_search()
         yield
     finally:
         core.close_text_batcher()
+        audio_search.close_audio_text_batcher()
+        _SEARCH_FANOUT_EXECUTOR.shutdown(wait=False, cancel_futures=True)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -299,17 +308,17 @@ def _audio_search_or_503(req, text):
 def _visual_audio_search(req, visual_operation, audio_text):
     if not audio_text:
         return visual_operation()
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        visual_future = executor.submit(visual_operation)
-        audio_future = executor.submit(audio_search_response, req, audio_text)
-        visual = visual_future.result()
-        try:
-            audio = audio_future.result()
-        except Exception as exc:
-            visual["mode"] = "hybrid"
-            visual["warning"] = f"audio_unavailable: {exc}"
-            visual["latencies"] = {"visual_ms": visual["latency_ms"]}
-            return visual
+    executor = _SEARCH_FANOUT_EXECUTOR
+    visual_future = executor.submit(visual_operation)
+    audio_future = executor.submit(audio_search_response, req, audio_text)
+    visual = visual_future.result()
+    try:
+        audio = audio_future.result()
+    except Exception as exc:
+        visual["mode"] = "hybrid"
+        visual["warning"] = f"audio_unavailable: {exc}"
+        visual["latencies"] = {"visual_ms": visual["latency_ms"]}
+        return visual
     return {
         "results": fuse_search_results(
             visual["results"], audio["results"], SEARCH_RESULT_LIMIT
@@ -329,18 +338,18 @@ def _visual_audio_search(req, visual_operation, audio_text):
 def _with_ocr_filter(req, ocr_text, primary_operation):
     if not ocr_text:
         return primary_operation()
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        primary_future = executor.submit(primary_operation)
-        # filter_mode: OCR text is machine-read and often has a wrong character or two, so a
-        # verbatim-phrase filter can hard-exclude the right shot over one typo. search_ocr_filter
-        # still requires every query term (fuzzy-tolerant) and boosts the literal phrase, so an
-        # exact match still outranks a fuzzy one -- it just isn't an all-or-nothing gate anymore.
-        ocr_future = executor.submit(ocr_search_response, req, ocr_text, filter_mode=True)
-        primary = primary_future.result()
-        try:
-            ocr = ocr_future.result()
-        except Exception as exc:
-            raise HTTPException(503, f"ocr search unavailable: {exc}") from exc
+    executor = _SEARCH_FANOUT_EXECUTOR
+    primary_future = executor.submit(primary_operation)
+    # filter_mode: OCR text is machine-read and often has a wrong character or two, so a
+    # verbatim-phrase filter can hard-exclude the right shot over one typo. search_ocr_filter
+    # still requires every query term (fuzzy-tolerant) and boosts the literal phrase, so an
+    # exact match still outranks a fuzzy one -- it just isn't an all-or-nothing gate anymore.
+    ocr_future = executor.submit(ocr_search_response, req, ocr_text, filter_mode=True)
+    primary = primary_future.result()
+    try:
+        ocr = ocr_future.result()
+    except Exception as exc:
+        raise HTTPException(503, f"ocr search unavailable: {exc}") from exc
     mode = primary["mode"]
     latencies = {**primary.get("latencies", {}), "ocr_ms": ocr["latency_ms"]}
     if mode in {"visual", "audio"}:
@@ -749,20 +758,20 @@ def temporal_search_response(req: TemporalSearchReq, candidate_k, scoring_method
     if not audio_text:
         return temporal_visual_search(req, candidate_k, scoring_method)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        visual_future = executor.submit(
-            temporal_visual_paths, req, candidate_k, scoring_method
+    executor = _SEARCH_FANOUT_EXECUTOR
+    visual_future = executor.submit(
+        temporal_visual_paths, req, candidate_k, scoring_method
+    )
+    audio_future = executor.submit(_temporal_audio_hits, audio_text, req.audio_method)
+    visual = visual_future.result()
+    try:
+        audio_hits = audio_future.result()
+    except Exception as exc:
+        response = finalize_temporal_response(
+            visual["paths"], visual, scoring_method, candidate_k
         )
-        audio_future = executor.submit(_temporal_audio_hits, audio_text, req.audio_method)
-        visual = visual_future.result()
-        try:
-            audio_hits = audio_future.result()
-        except Exception as exc:
-            response = finalize_temporal_response(
-                visual["paths"], visual, scoring_method, candidate_k
-            )
-            response["warning"] = f"audio_unavailable: {exc}"
-            return response
+        response["warning"] = f"audio_unavailable: {exc}"
+        return response
     return finalize_temporal_response(
         visual["paths"], visual, scoring_method, candidate_k, audio_hits
     )
@@ -772,13 +781,14 @@ def audio_search_response(req: SearchReq, text: str):
     t0 = time.perf_counter()
     profile = req.profile or core.default_profile()
     hits = _audio_hits(text, req.audio_method)
-    _, _, _, lookup = core.load_meta(profile)
+    meta = core.load_meta(profile)
+    lookup = meta[3]
     results = []
     for rank, hit in enumerate(hits, 1):
         row = lookup.get(hit.video_id)
         if row is None:
             continue
-        frame = core.nearest_frame(hit.video_id, hit.anchor_sec, profile)
+        frame = core.nearest_frame(hit.video_id, hit.anchor_sec, profile, meta=meta)
         mapping = frame_maps.load(hit.video_id)
         results.append({
             "rank": len(results),
@@ -953,13 +963,20 @@ def fuse_search_results(visual, audio, k=100, max_time_delta=30.0, time_delta_ce
     visual = [dict(hit) for hit in visual]
     audio = [dict(hit) for hit in audio]
     used_audio = set()
+    # Grouping by video_id turns the per-visual-hit scan into O(hits for that video)
+    # instead of O(len(audio)) -- with both pools up to SEARCH_RESULT_LIMIT (10,000),
+    # the original full rescan was up to 10,000 x 10,000 comparisons per hybrid
+    # request, measured as the dominant cost behind hybrid mode being several
+    # seconds slower than its visual/audio branches individually.
+    audio_by_video = defaultdict(list)
+    for audio_rank, audio_hit in enumerate(audio, 1):
+        audio_by_video[audio_hit["video_id"]].append((audio_rank, audio_hit))
     fused = []
     for visual_rank, visual_hit in enumerate(visual, 1):
         candidates = [
             (abs(visual_hit["time"] - audio_hit["time"]), audio_rank, audio_hit)
-            for audio_rank, audio_hit in enumerate(audio, 1)
+            for audio_rank, audio_hit in audio_by_video.get(visual_hit["video_id"], ())
             if audio_rank not in used_audio
-            and audio_hit["video_id"] == visual_hit["video_id"]
             and abs(visual_hit["time"] - audio_hit["time"])
                 <= _audio_time_window(audio_hit, floor=max_time_delta, ceiling=time_delta_ceiling)
         ]
@@ -1121,7 +1138,7 @@ def get_frame(
 @app.get("/video/{video_id}")
 def get_video(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
     row = resolve(video_id)
-    return FileResponse(row["path"], media_type="video/mp4")
+    return FileResponse(shots.streaming_path(row), media_type="video/mp4")
 
 
 @app.get("/frame-map/{video_id}")

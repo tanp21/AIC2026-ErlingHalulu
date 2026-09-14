@@ -24,6 +24,11 @@ MODEL = "hf-hub:timm/PE-Core-bigG-14-448"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 USE_AMP = DEVICE == "cuda"
 
+# Unbounded, FAISS's default OpenMP pool spans every visible core per search call.
+# LatestWinsCoordinator allows up to 5 concurrent flat-index searches, so on a
+# 6-core host that oversubscribes the CPU badly under full team load.
+faiss.omp_set_num_threads(int(os.environ.get("AIC_FAISS_OMP_THREADS", "2")))
+
 INDEX_NAMES = ["flat", "ivf", "hnsw"]
 
 _model = None
@@ -397,9 +402,14 @@ def indexed_frame_embedding(index_name, video_id, frame_idx, profile=None):
     return _normalize(get_index(index_name, profile).reconstruct(global_id)), global_id
 
 
-def nearest_frame(video_id, time_seconds, profile=None):
+def nearest_frame(video_id, time_seconds, profile=None, meta=None):
     profile = profile or default_profile()
-    id_video, id_frame, _, video_lookup = load_meta(profile)
+    # meta lets a caller looping over many hits (audio search pools up to
+    # SEARCH_RESULT_LIMIT) load it once instead of once per hit -- load_meta()
+    # itself is a cheap dict lookup once cached, but repeating it per hit measured
+    # as the single largest chunk of per-request time under concurrency, since
+    # every call point contends for the GIL.
+    id_video, id_frame, _, video_lookup = meta if meta is not None else load_meta(profile)
     row = video_lookup.get(video_id)
     if row is None:
         raise KeyError(video_id)

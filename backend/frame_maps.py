@@ -71,6 +71,12 @@ def load_path(path):
         )
 
 
-@lru_cache(maxsize=32)
+@lru_cache(maxsize=None)
+# Unbounded: the corpus is currently ~1500 videos at ~30KB/map (well under 100MB
+# total), and a single search pools up to SEARCH_RESULT_LIMIT (10,000) results
+# spanning potentially hundreds of distinct videos -- a small bound here (previously
+# 32) meant that loop thrashed the cache on nearly every call, measured at ~1.6ms
+# per load under thrashing vs. a cache hit, i.e. up to ~16s added to a single
+# search request. There is no eviction concern worth trading that away for.
 def load(video_id):
     return load_path(MAP_DIR / f"{video_id}.npz")

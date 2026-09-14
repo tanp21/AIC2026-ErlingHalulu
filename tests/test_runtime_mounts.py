@@ -9,6 +9,7 @@ import numpy as np
 
 from backend import core
 from backend import frame_maps
+from backend import shots
 from backend import thumb
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,17 @@ class RuntimeMountTests(unittest.TestCase):
             core.mounted_video_path(row, Path("/data")),
             Path("/data/2026/videos/L21/L21_V015.mp4"),
         )
+
+    def test_streaming_path_prefers_faststart_copy_when_present(self):
+        row = {"year": "2026", "group": "L21", "video_id": "L21_V015", "path": "/data/2026/videos/L21/L21_V015.mp4"}
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            self.assertEqual(shots.streaming_path(row, data_dir), Path(row["path"]))
+
+            faststart = data_dir / "2026" / "videos_faststart" / "L21" / "L21_V015.mp4"
+            faststart.parent.mkdir(parents=True)
+            faststart.write_bytes(b"remuxed")
+            self.assertEqual(shots.streaming_path(row, data_dir), faststart)
 
     def test_frame_map_directory_follows_index_mount(self):
         self.assertEqual(
@@ -78,8 +90,9 @@ class RuntimeMountTests(unittest.TestCase):
         self.assertIn("acl video path_beg /video/", haproxy)
         self.assertIn("use_backend teammate_video if video !admin", haproxy)
         self.assertIn("backend teammate_video", haproxy)
+        self.assertIn("stick-table type ip size 10k expire 1m store bytes_out_rate(1s)", haproxy)
         self.assertIn(
-            "filter bwlim-out teammate_video_limit limit 24m key int(1)",
+            "filter bwlim-out teammate_video_limit limit 20m key src",
             haproxy,
         )
         self.assertIn(
