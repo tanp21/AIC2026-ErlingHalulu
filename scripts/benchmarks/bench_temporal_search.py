@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 
 
 CANDIDATE_K_VALUES = (500, 1000, 2000, 5000)
+MIN_GAP_SECONDS_VALUES = (0.0, 1.0, 1.5, 2.0)
 
 
 def _matches(result, truth, tolerance_seconds):
@@ -40,7 +41,8 @@ def select_config(rows):
     if not rows:
         raise ValueError("benchmark produced no configuration rows")
     return max(rows, key=lambda row: (
-        row["mrr"], row["recall_at_10"], -row["p95_ms"], -row["candidate_k"]
+        row["mrr"], row["recall_at_10"], -row["p95_ms"], -row["candidate_k"],
+        -row["min_gap_seconds"],
     ))
 
 
@@ -49,7 +51,7 @@ def _p95(values):
     return ordered[max(0, (95 * len(ordered) + 99) // 100 - 1)]
 
 
-def _ranked_paths(query, candidate_k, scoring_method):
+def _ranked_paths(query, candidate_k, scoring_method, min_gap_seconds=0.0):
     from backend.app import TemporalSearchReq, _temporal_audio_hits, temporal_visual_paths
     from backend.temporal_search import fuse_audio, temporal_nms
 
@@ -58,7 +60,7 @@ def _ranked_paths(query, candidate_k, scoring_method):
         audio_text=query.get("audio_text"),
         max_gap_seconds=query.get("max_gap_seconds", 120),
     )
-    visual = temporal_visual_paths(request, candidate_k, scoring_method)
+    visual = temporal_visual_paths(request, candidate_k, scoring_method, min_gap_seconds=min_gap_seconds)
     paths = visual["paths"]
     if request.audio_text:
         try:
@@ -84,44 +86,53 @@ def run_benchmark(manifest, warmups=3, runs=10):
     rows = []
     for candidate_k in CANDIDATE_K_VALUES:
         for scoring_method in SCORING_METHODS:
-            reciprocal_ranks = []
-            recalls = []
-            timings = []
-            for query in queries:
-                for _ in range(warmups):
-                    _ranked_paths(query, candidate_k, scoring_method)
-                ranked = None
-                for _ in range(runs):
-                    started = time.perf_counter()
-                    ranked = _ranked_paths(query, candidate_k, scoring_method)
-                    timings.append((time.perf_counter() - started) * 1000)
-                metrics = evaluate_results(
-                    ranked or [], query["ground_truth"],
-                    manifest.get("tolerance_seconds", 10),
-                )
-                reciprocal_ranks.append(metrics["reciprocal_rank"])
-                recalls.append(metrics["recall_at_10"])
-            rows.append({
-                "candidate_k": candidate_k,
-                "scoring_method": scoring_method,
-                "mrr": statistics.fmean(reciprocal_ranks),
-                "recall_at_10": statistics.fmean(recalls),
-                "p95_ms": _p95(timings),
-            })
+            for min_gap_seconds in MIN_GAP_SECONDS_VALUES:
+                reciprocal_ranks = []
+                recalls = []
+                timings = []
+                for query in queries:
+                    for _ in range(warmups):
+                        _ranked_paths(query, candidate_k, scoring_method, min_gap_seconds)
+                    ranked = None
+                    for _ in range(runs):
+                        started = time.perf_counter()
+                        ranked = _ranked_paths(query, candidate_k, scoring_method, min_gap_seconds)
+                        timings.append((time.perf_counter() - started) * 1000)
+                    metrics = evaluate_results(
+                        ranked or [], query["ground_truth"],
+                        manifest.get("tolerance_seconds", 10),
+                    )
+                    reciprocal_ranks.append(metrics["reciprocal_rank"])
+                    recalls.append(metrics["recall_at_10"])
+                rows.append({
+                    "candidate_k": candidate_k,
+                    "scoring_method": scoring_method,
+                    "min_gap_seconds": min_gap_seconds,
+                    "mrr": statistics.fmean(reciprocal_ranks),
+                    "recall_at_10": statistics.fmean(recalls),
+                    "p95_ms": _p95(timings),
+                })
     return rows
 
 
 def _markdown(rows, selected):
     lines = [
         "# Temporal search benchmark", "",
-        "| K | Scoring | MRR | Recall@10 | p95 ms |", "|---:|---|---:|---:|---:|",
+        "| K | Scoring | Min gap (s) | MRR | Recall@10 | p95 ms |",
+        "|---:|---|---:|---:|---:|---:|",
     ]
-    for row in sorted(rows, key=lambda item: (item["candidate_k"], item["scoring_method"])):
+    for row in sorted(rows, key=lambda item: (
+        item["candidate_k"], item["scoring_method"], item["min_gap_seconds"]
+    )):
         lines.append(
-            f'| {row["candidate_k"]} | {row["scoring_method"]} | '
+            f'| {row["candidate_k"]} | {row["scoring_method"]} | {row["min_gap_seconds"]} | '
             f'{row["mrr"]:.4f} | {row["recall_at_10"]:.4f} | {row["p95_ms"]:.1f} |'
         )
-    lines.extend(["", f'Chosen: K={selected["candidate_k"]}, `{selected["scoring_method"]}`.'])
+    lines.extend([
+        "",
+        f'Chosen: K={selected["candidate_k"]}, `{selected["scoring_method"]}`, '
+        f'min_gap_seconds={selected["min_gap_seconds"]}.',
+    ])
     return "\n".join(lines) + "\n"
 
 
@@ -141,7 +152,7 @@ def main():
     report = {"warmups": args.warmups, "runs": args.runs, "rows": rows, "selected": selected}
     (args.output_dir / "temporal_benchmark.json").write_text(json.dumps(report, indent=2) + "\n")
     (args.output_dir / "temporal_benchmark.md").write_text(_markdown(rows, selected))
-    config = {key: selected[key] for key in ("candidate_k", "scoring_method")}
+    config = {key: selected[key] for key in ("candidate_k", "scoring_method", "min_gap_seconds")}
     (args.output_dir / "temporal_config.json").write_text(json.dumps(config, indent=2) + "\n")
     print(json.dumps(config))
 

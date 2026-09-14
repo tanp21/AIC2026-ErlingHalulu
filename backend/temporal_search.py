@@ -105,7 +105,7 @@ def _prepare_candidates(candidates_by_event, candidate_k):
 
 
 def build_sequences(candidates_by_event, max_gap_seconds, scoring_method, candidate_k,
-                    beam_size=1):
+                    beam_size=1, min_gap_seconds=0.0):
     """Return the best path ending at every reachable final-event candidate."""
     if scoring_method not in SCORING_METHODS:
         raise ValueError(f"unknown temporal scoring method: {scoring_method}")
@@ -163,13 +163,21 @@ def build_sequences(candidates_by_event, max_gap_seconds, scoring_method, candid
                 while heap and heap[0][5] < cutoff:
                     heapq.heappop(heap)
                 selected = []
+                too_close = []
                 while heap and len(selected) < beam_size:
                     item = heapq.heappop(heap)
                     if item[5] < cutoff:
                         continue
+                    if row["time"] - item[5] < min_gap_seconds:
+                        # Too close to be a distinct event now, but a later (more
+                        # distant) row may still legitimately extend from it.
+                        too_close.append(item)
+                        continue
                     if item[5] <= row["time"]:
                         selected.append(item)
                 for item in selected:
+                    heapq.heappush(heap, item)
+                for item in too_close:
                     heapq.heappush(heap, item)
                 group = []
                 for _, _, _, best_index, best_state_index, _ in selected:

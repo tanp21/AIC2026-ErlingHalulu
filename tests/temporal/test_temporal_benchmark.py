@@ -48,10 +48,10 @@ class TemporalBenchmarkMetricTests(unittest.TestCase):
 class TemporalBenchmarkSelectionTests(unittest.TestCase):
     def test_selects_mrr_then_recall_then_latency_then_smaller_k(self):
         rows = [
-            {"candidate_k": 2000, "scoring_method": "raw_mean", "mrr": 0.7, "recall_at_10": 0.8, "p95_ms": 900},
-            {"candidate_k": 1000, "scoring_method": "raw_min", "mrr": 0.7, "recall_at_10": 0.9, "p95_ms": 1200},
-            {"candidate_k": 2000, "scoring_method": "raw_min", "mrr": 0.7, "recall_at_10": 0.9, "p95_ms": 800},
-            {"candidate_k": 5000, "scoring_method": "percentile_mean", "mrr": 0.6, "recall_at_10": 1.0, "p95_ms": 100},
+            {"candidate_k": 2000, "scoring_method": "raw_mean", "min_gap_seconds": 0.0, "mrr": 0.7, "recall_at_10": 0.8, "p95_ms": 900},
+            {"candidate_k": 1000, "scoring_method": "raw_min", "min_gap_seconds": 0.0, "mrr": 0.7, "recall_at_10": 0.9, "p95_ms": 1200},
+            {"candidate_k": 2000, "scoring_method": "raw_min", "min_gap_seconds": 0.0, "mrr": 0.7, "recall_at_10": 0.9, "p95_ms": 800},
+            {"candidate_k": 5000, "scoring_method": "percentile_mean", "min_gap_seconds": 0.0, "mrr": 0.6, "recall_at_10": 1.0, "p95_ms": 100},
         ]
 
         selected = select_config(rows)
@@ -60,13 +60,22 @@ class TemporalBenchmarkSelectionTests(unittest.TestCase):
         self.assertEqual(selected["scoring_method"], "raw_min")
 
     def test_smaller_k_is_final_tie_breaker(self):
-        common = {"mrr": 0.7, "recall_at_10": 0.9, "p95_ms": 800}
+        common = {"mrr": 0.7, "recall_at_10": 0.9, "p95_ms": 800, "min_gap_seconds": 0.0}
         selected = select_config([
             {**common, "candidate_k": 2000, "scoring_method": "raw_mean"},
             {**common, "candidate_k": 500, "scoring_method": "raw_mean"},
         ])
 
         self.assertEqual(selected["candidate_k"], 500)
+
+    def test_smaller_min_gap_is_last_tie_breaker(self):
+        common = {"mrr": 0.7, "recall_at_10": 0.9, "p95_ms": 800, "candidate_k": 2000, "scoring_method": "raw_mean"}
+        selected = select_config([
+            {**common, "min_gap_seconds": 1.5},
+            {**common, "min_gap_seconds": 0.0},
+        ])
+
+        self.assertEqual(selected["min_gap_seconds"], 0.0)
 
 
 if __name__ == "__main__":

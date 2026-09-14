@@ -1,4 +1,5 @@
 {
   "candidate_k": 2000,
-  "scoring_method": "raw_mean"
+  "scoring_method": "shifted_harmonic",
+  "min_gap_seconds": 1.5
 }

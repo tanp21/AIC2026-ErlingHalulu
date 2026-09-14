@@ -197,7 +197,7 @@ class TemporalEndpointTests(unittest.IsolatedAsyncioTestCase):
             return function(*args)
 
         with (
-            patch("backend.app.load_temporal_config", return_value=(2000, "raw_min")),
+            patch("backend.app.load_temporal_config", return_value=(2000, "raw_min", 1.5)),
             patch("backend.app.temporal_search_response", return_value=result) as search,
             patch("backend.app.run_in_threadpool", side_effect=inline),
         ):
@@ -210,7 +210,7 @@ class TemporalEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["videos"][0]["video_id"], "A")
         search.assert_called_once()
-        self.assertEqual(search.call_args.args[1:], (2000, "raw_min"))
+        self.assertEqual(search.call_args.args[1:], (2000, "raw_min", 1.5))
         cursor = response.json()["next_cursor"]
 
         denied = await self.client.post(

@@ -102,6 +102,23 @@
       ]
     },
     {
+      "id": "query-p2-21-trake",
+      "events": [
+        "two women taping and sealing a cardboard carton box together",
+        "instant noodle boxes and bread packs neatly stacked and arranged",
+        "a man lifting a box of instant noodles and stacking it on top of a pile of boxes",
+        "close up of instant noodle boxes stacked on the back of a truck"
+      ],
+      "max_gap_seconds": 120,
+      "ground_truth": [
+        {
+          "video_id": "L30_V031",
+          "frame_ids": [2105, 2146, 2220, 2263],
+          "event_times": [84.2, 85.84, 88.8, 90.52]
+        }
+      ]
+    },
+    {
       "id": "query-p3-24",
       "events": [
         "Turtle Tower at Hoan Kiem Lake first appears in a travel news report",

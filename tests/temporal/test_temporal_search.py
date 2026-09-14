@@ -83,6 +83,37 @@ class TemporalDynamicProgrammingTests(unittest.TestCase):
             [],
         )
 
+    def test_min_gap_rejects_a_too_close_higher_scoring_candidate(self):
+        candidates = [
+            [hit(0, "A", 10, 10, 0.5)],
+            [hit(1, "A", 20, 10.5, 0.9), hit(1, "A", 30, 20, 0.5)],
+        ]
+
+        unrestricted = build_sequences(candidates, 30, "raw_mean", 10, min_gap_seconds=0)
+        restricted = build_sequences(candidates, 30, "raw_mean", 10, min_gap_seconds=5)
+
+        self.assertEqual(
+            [event["frame_idx"] for event in unrestricted[0]["events"]], [10, 20]
+        )
+        self.assertEqual(
+            [event["frame_idx"] for event in restricted[0]["events"]], [10, 30]
+        )
+
+    def test_min_gap_candidate_remains_usable_for_a_later_more_distant_row(self):
+        candidates = [
+            [hit(0, "A", 10, 10, 0.5)],
+            [hit(1, "A", 20, 10.5, 0.9), hit(1, "A", 40, 40, 0.1)],
+        ]
+
+        paths = build_sequences(candidates, 60, "raw_mean", 10, beam_size=2, min_gap_seconds=5)
+
+        self.assertEqual(
+            sorted(
+                [event["frame_idx"] for event in path["events"]] for path in paths
+            ),
+            [[10, 40]],
+        )
+
     def test_percentile_and_minmax_inputs_are_derived_per_event(self):
         candidates = [
             [hit(0, "A", 1, 1, 0.9, 1), hit(0, "A", 2, 2, 0.9, 2)],
