@@ -60,24 +60,34 @@ class RuntimeMountTests(unittest.TestCase):
         self.assertIn("backend/shot_labels.py", dockerfile)
         self.assertIn("mkdir /cache /workspace /labels", dockerfile)
 
-    def test_public_ingress_uses_basic_auth_and_overwrites_identity(self):
+    def test_public_ingress_grants_identity_by_tailscale_serve_header(self):
         compose = (ROOT / "compose.yaml").read_text()
         haproxy = (ROOT / "haproxy.cfg").read_text()
         gitignore = (ROOT / ".gitignore").read_text().splitlines()
 
-        self.assertIn('"0.0.0.0:8000:8000"', compose)
-        self.assertIn("./haproxy-users.cfg:/usr/local/etc/haproxy/users.cfg:ro", compose)
+        self.assertIn('"127.0.0.1:8000:8000"', compose)
+        self.assertNotIn("haproxy-users.cfg", compose)
         self.assertGreaterEqual(
             compose.count('user: "${AIC_UID:-1000}:${AIC_GID:-1000}"'), 2
         )
-        self.assertIn('"/usr/local/etc/haproxy/users.cfg"', compose)
-        self.assertIn("acl authenticated http_auth(aic_users)", haproxy)
-        self.assertIn("http-request del-header X-AIC-User", haproxy)
-        self.assertIn("http-request auth realm AIC if !health !authenticated", haproxy)
+        self.assertIn("acl local_proxy src 127.0.0.1 172.16.0.0/12", haproxy)
         self.assertIn(
-            "http-request set-header X-AIC-User %[http_auth_user] if authenticated",
+            "acl has_ts_login req.hdr(Tailscale-User-Login) -m found", haproxy
+        )
+        self.assertIn("http-request del-header X-AIC-User", haproxy)
+        self.assertIn("http-request deny deny_status 403 if !health !local_proxy", haproxy)
+        self.assertIn(
+            'http-request set-header X-AIC-User "%[req.hdr(Tailscale-User-Login)]" '
+            "if local_proxy has_ts_login",
             haproxy,
         )
+        self.assertIn(
+            'http-request set-header X-AIC-User "${AIC_ADMIN_USER}" if local_proxy !has_ts_login',
+            haproxy,
+        )
+        self.assertNotIn("http_auth", haproxy)
+        # The Basic Auth password file is no longer wired in, but stays gitignored in case
+        # it is ever reintroduced.
         self.assertIn("/haproxy-users.cfg", gitignore)
 
     def test_teammate_video_has_a_shared_wan_budget_but_admin_does_not(self):
@@ -86,9 +96,11 @@ class RuntimeMountTests(unittest.TestCase):
 
         ingress = compose.split("  ingress:\n", 1)[1].split("\nvolumes:\n", 1)[0]
         self.assertIn("env_file:\n      - .env.secure", ingress)
-        self.assertIn('acl admin http_auth_user -i "${AIC_ADMIN_USER}"', haproxy)
+        self.assertIn(
+            'acl is_admin_login req.hdr(Tailscale-User-Login) -i "${AIC_ADMIN_USER}"', haproxy
+        )
         self.assertIn("acl video path_beg /video/", haproxy)
-        self.assertIn("use_backend teammate_video if video !admin", haproxy)
+        self.assertIn("use_backend teammate_video if video !is_admin_login", haproxy)
         self.assertIn("backend teammate_video", haproxy)
         self.assertIn("stick-table type ip size 10k expire 1m store bytes_out_rate(1s)", haproxy)
         self.assertIn(

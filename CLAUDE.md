@@ -104,7 +104,9 @@ Hybrid degrades gracefully: if the audio branch raises, the visual results are r
 
 ### Access model
 
-`TrustedIngressAccessMiddleware` wraps every request. `/healthz` is the only anonymous route; everything else requires the internal `X-AIC-User` header set by HAProxy after Basic Auth, whose value must be in `AIC_ALLOWED_USERS`. `AccessConfig.from_env()` rejects anything other than **exactly five unique logins** with `AIC_ADMIN_USER` among them.
+`TrustedIngressAccessMiddleware` wraps every request. `/healthz` is the only anonymous route; everything else requires the internal `X-AIC-User` header set by HAProxy, whose value must be in `AIC_ALLOWED_USERS`. `AccessConfig.from_env()` rejects anything other than **exactly five unique logins** with `AIC_ADMIN_USER` among them.
+
+For the Tailscale-only deployment (no public port forwarding, no Basic Auth), `tailscale serve` on the host terminates the tailnet HTTPS connection and proxies to `127.0.0.1:8000`, adding a `Tailscale-User-Login` header naming the connecting tailnet member. HAProxy copies that header into `X-AIC-User` — but only when the request arrived over loopback/the Docker bridge (`acl local_proxy` in `haproxy.cfg`); anything else is rejected with 403, and `compose.yaml` publishes the ingress port as `127.0.0.1:8000` so nothing external can reach it directly anyway. Each `AIC_ALLOWED_USERS` entry must be a teammate's real Tailscale account login. See `docs/team-deployment.md`.
 
 The middleware also enforces per-route body limits before the handler runs (16 KiB default, 8 MiB for `POST /search/image`, 1 MiB for an owner's `POST /api/collab/rounds`), buffers the body with a 10 s timeout, holds global + per-user semaphores for `/video/*` and `/thumb|/frame/*`, and emits an `audit user=… path=… status=…` log line per request.
 

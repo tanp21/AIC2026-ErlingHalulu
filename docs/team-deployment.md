@@ -1,10 +1,46 @@
 # Direct-IP Team Deployment
 
-This runbook exposes AIC Search directly through a Viettel router to a five-person team.
-It intentionally uses plain HTTP because the operator accepted the risk. Basic Auth credentials,
+This runbook originally exposed AIC Search directly through a Viettel router to a five-person
+team, authenticating each teammate with HAProxy Basic Auth. **The deployment has since moved to
+Tailscale instead of router port forwarding** (see "Tailscale deployment model" below); the
+Basic Auth runbook is kept below for reference in case port forwarding is ever reintroduced. It
+intentionally uses plain HTTP because the operator accepted the risk. Basic Auth credentials,
 queries, images, and videos are not encrypted in transit.
 
-## Deployment model
+## Tailscale deployment model
+
+```text
+Owner + four teammates, all on the same tailnet
+          │
+          ▼
+tailscale serve (https://<host>.<tailnet>.ts.net, on the host's own tailscaled)
+          │  proxies to 127.0.0.1:8000, adding Tailscale-User-Login
+          ▼
+HAProxy (trusts that header from loopback only) ──► FastAPI ──► Elasticsearch
+```
+
+Access goes through `tailscale serve` (already configured on this host as
+`https://<device>.<tailnet>.ts.net → http://127.0.0.1:8000`), not a raw `<tailscale-ip>:8000`
+URL — that matters because `tailscale serve` terminates the tailnet HTTPS connection itself and
+re-issues the request to HAProxy over loopback, so HAProxy never sees the original peer's IP.
+Instead it reads the `Tailscale-User-Login` header tailscaled adds to every proxied request,
+naming exactly which tailnet member is connecting, and copies it into `X-AIC-User` — but only
+when the request truly arrived over loopback/the Docker bridge (`acl local_proxy` in
+`haproxy.cfg`); anything else hitting the frontend directly is rejected with 403. `compose.yaml`
+additionally publishes the ingress port as `127.0.0.1:8000` (not `0.0.0.0`), so nothing external
+can reach it at all except through tailscaled's own local proxy.
+
+There is no more per-teammate login — whoever is signed into Tailscale on a given device is who
+the app sees. Each of the five entries in `AIC_ALLOWED_USERS` must be a teammate's **real
+Tailscale account login** (the email they sign into Tailscale with), or they get 403 once
+invited onto the tailnet; anything not in that list is rejected the same way regardless of who it
+is. Deploying is then just: keep `tailscale serve` pointed at `127.0.0.1:8000` (`tailscale serve
+status` shows the current mapping), invite the four teammates onto this tailnet from the
+[Tailscale admin console](https://login.tailscale.com/admin/users) with those exact emails, and
+run `docker compose up -d --build --wait`. No router port forward and no `haproxy-users.cfg` are
+needed.
+
+## Direct-IP (Basic Auth) deployment model — legacy
 
 ```text
 Owner + four teammates

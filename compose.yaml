@@ -92,13 +92,10 @@ services:
       - -db
       - -f
       - /usr/local/etc/haproxy/haproxy.cfg
-      - -f
-      - /usr/local/etc/haproxy/users.cfg
     ports:
-      - "0.0.0.0:8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
-      - ./haproxy-users.cfg:/usr/local/etc/haproxy/users.cfg:ro
     depends_on:
       app:
         condition: service_healthy
@@ -113,7 +110,7 @@ services:
     pids_limit: 64
     user: "${AIC_UID:-1000}:${AIC_GID:-1000}"
     healthcheck:
-      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg", "-f", "/usr/local/etc/haproxy/users.cfg"]
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
       interval: 10s
       timeout: 3s
       retries: 3
