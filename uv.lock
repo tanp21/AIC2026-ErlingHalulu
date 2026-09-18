@@ -40,6 +40,10 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+agent = [
+    { name = "google-genai" },
+    { name = "httpx" },
+]
 server = [
     { name = "elasticsearch" },
     { name = "faiss-cpu" },
@@ -74,6 +78,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+agent = [
+    { name = "google-genai", specifier = ">=1.0.0" },
+    { name = "httpx", specifier = ">=0.27" },
+]
 server = [
     { name = "elasticsearch", specifier = ">=9.0.0,<10" },
     { name = "faiss-cpu", specifier = ">=1.9.0" },

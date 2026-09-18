@@ -9,7 +9,7 @@ import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
-from typing import Literal
+from typing import Annotated, Literal, Union
 
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Path, Query, Request, UploadFile
@@ -37,10 +37,18 @@ TEMPORAL_PAGE_SIZE = 20
 TEMPORAL_RESULT_LIMIT = 10_000
 MAX_QUERY_IMAGE_BYTES = 6 * 1024 * 1024
 
+AGENT_BATCH_MAX_QUERIES = 12
+AGENT_RESULT_LIMIT = 500
+AGENT_TEMPORAL_VIDEO_LIMIT = 50
+AGENT_SNIPPET_CHARS = 400
+
 # Shared across hybrid/OCR-filtered requests instead of a fresh pool per call;
 # sized for the worst case of 5 concurrent requests x 2 workers each (visual+audio
 # or primary+ocr fan-out).
 _SEARCH_FANOUT_EXECUTOR = ThreadPoolExecutor(max_workers=10, thread_name_prefix="search-fanout")
+# Separate from the fan-out pool: an agent batch's temporal+audio sub-query itself
+# submits to _SEARCH_FANOUT_EXECUTOR, so sharing one pool could starve that inner work.
+_AGENT_BATCH_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="agent-batch")
 
 
 class SearchReq(BaseModel):
@@ -97,6 +105,71 @@ class TemporalSearchReq(BaseModel):
 class CompareReq(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     k: int = Field(default=50, ge=1, le=200)
+
+
+VideoId = Annotated[str, Field(pattern=r"^[A-Z]\d{2}_V\d{3}$")]
+AgentQueryId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.:-]{1,40}$")]
+AgentText = Annotated[str, Field(min_length=1, max_length=2000)]
+
+
+class AgentVisualQuery(BaseModel):
+    kind: Literal["visual"]
+    id: AgentQueryId
+    text: AgentText
+    video_ids: list[VideoId] | None = Field(default=None, max_length=50)
+    limit: int = Field(default=100, ge=1, le=AGENT_RESULT_LIMIT)
+
+
+class AgentSimilarQuery(BaseModel):
+    kind: Literal["similar"]
+    id: AgentQueryId
+    video_id: VideoId
+    frame_idx: int = Field(ge=0)
+    video_ids: list[VideoId] | None = Field(default=None, max_length=50)
+    limit: int = Field(default=100, ge=1, le=AGENT_RESULT_LIMIT)
+
+
+class AgentAudioQuery(BaseModel):
+    kind: Literal["audio"]
+    id: AgentQueryId
+    text: AgentText
+    method: Literal["semantic", "keyword"] = "keyword"
+    limit: int = Field(default=100, ge=1, le=AGENT_RESULT_LIMIT)
+
+
+class AgentOcrQuery(BaseModel):
+    kind: Literal["ocr"]
+    id: AgentQueryId
+    text: AgentText
+    limit: int = Field(default=100, ge=1, le=AGENT_RESULT_LIMIT)
+
+
+class AgentTemporalQuery(BaseModel):
+    kind: Literal["temporal"]
+    id: AgentQueryId
+    events: list[AgentText] = Field(min_length=2, max_length=6)
+    audio_text: str | None = Field(default=None, max_length=2000)
+    max_gap_seconds: int = Field(default=120, ge=1, le=600)
+    limit: int = Field(default=20, ge=1, le=AGENT_TEMPORAL_VIDEO_LIMIT)
+
+
+AgentQuery = Annotated[
+    Union[AgentVisualQuery, AgentSimilarQuery, AgentAudioQuery, AgentOcrQuery, AgentTemporalQuery],
+    Field(discriminator="kind"),
+]
+
+
+class AgentBatchReq(BaseModel):
+    queries: list[AgentQuery] = Field(min_length=1, max_length=AGENT_BATCH_MAX_QUERIES)
+    profile: Literal["l2026"] = "l2026"
+
+    @field_validator("queries")
+    @classmethod
+    def require_unique_ids(cls, queries):
+        ids = [query.id for query in queries]
+        if len(ids) != len(set(ids)):
+            raise ValueError("agent query ids must be unique")
+        return queries
 
 
 class ShotLabelChange(BaseModel):
@@ -272,6 +345,7 @@ async def lifespan(app):
         core.close_text_batcher()
         audio_search.close_audio_text_batcher()
         _SEARCH_FANOUT_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+        _AGENT_BATCH_EXECUTOR.shutdown(wait=False, cancel_futures=True)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -514,20 +588,25 @@ def load_temporal_config():
         config = json.loads(path.read_text())
         candidate_k = int(config["candidate_k"])
         scoring_method = config["scoring_method"]
+        min_gap_seconds = float(config.get("min_gap_seconds", 0.0))
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(503, "temporal search benchmark config is unavailable") from exc
-    if candidate_k not in {500, 1000, 2000, 5000} or scoring_method not in SCORING_METHODS:
+    if (
+        candidate_k not in {500, 1000, 2000, 5000}
+        or scoring_method not in SCORING_METHODS
+        or not 0 <= min_gap_seconds < 60
+    ):
         raise HTTPException(503, "temporal search benchmark config is invalid")
-    return candidate_k, scoring_method
+    return candidate_k, scoring_method, min_gap_seconds
 
 
 @app.post("/search/temporal")
 async def temporal_search_endpoint(req: TemporalSearchReq, request: Request):
-    candidate_k, scoring_method = load_temporal_config()
+    candidate_k, scoring_method, min_gap_seconds = load_temporal_config()
     response = await request.app.state.search_coordinator.run(
         request.state.login,
         lambda: run_in_threadpool(
-            temporal_search_response, req, candidate_k, scoring_method
+            temporal_search_response, req, candidate_k, scoring_method, min_gap_seconds
         ),
     )
     return request.app.state.temporal_snapshots.create(request.state.login, response)
@@ -607,7 +686,7 @@ def visual_vector_search(req: SearchReq, q, exclude_global_id=None, started=None
 
 
 def temporal_visual_paths(req: TemporalSearchReq, candidate_k, scoring_method, beam_size=1,
-                          candidate_pool_k=None, dedup_seconds=0):
+                          candidate_pool_k=None, dedup_seconds=0, min_gap_seconds=0.0):
     total_start = time.perf_counter()
     profile = req.profile or core.default_profile()
     queries = core.encode_texts(req.events)
@@ -651,7 +730,8 @@ def temporal_visual_paths(req: TemporalSearchReq, candidate_k, scoring_method, b
         )
 
     paths = build_sequences(
-        candidates, req.max_gap_seconds, scoring_method, candidate_k, beam_size
+        candidates, req.max_gap_seconds, scoring_method, candidate_k, beam_size,
+        min_gap_seconds=min_gap_seconds,
     )
     return {
         "paths": paths,
@@ -720,8 +800,11 @@ def finalize_temporal_response(paths, metadata, scoring_method, candidate_k, aud
     }
 
 
-def temporal_visual_search(req: TemporalSearchReq, candidate_k, scoring_method):
-    visual = temporal_visual_paths(req, candidate_k, scoring_method)
+def temporal_visual_search(req: TemporalSearchReq, candidate_k, scoring_method,
+                           min_gap_seconds=0.0):
+    visual = temporal_visual_paths(
+        req, candidate_k, scoring_method, min_gap_seconds=min_gap_seconds
+    )
     return finalize_temporal_response(
         visual["paths"], visual, scoring_method, candidate_k
     )
@@ -753,14 +836,16 @@ def _temporal_audio_hits(text, method):
     ]
 
 
-def temporal_search_response(req: TemporalSearchReq, candidate_k, scoring_method):
+def temporal_search_response(req: TemporalSearchReq, candidate_k, scoring_method,
+                             min_gap_seconds=0.0):
     audio_text = (req.audio_text or "").strip()
     if not audio_text:
-        return temporal_visual_search(req, candidate_k, scoring_method)
+        return temporal_visual_search(req, candidate_k, scoring_method, min_gap_seconds)
 
     executor = _SEARCH_FANOUT_EXECUTOR
     visual_future = executor.submit(
-        temporal_visual_paths, req, candidate_k, scoring_method
+        temporal_visual_paths, req, candidate_k, scoring_method,
+        min_gap_seconds=min_gap_seconds,
     )
     audio_future = executor.submit(_temporal_audio_hits, audio_text, req.audio_method)
     visual = visual_future.result()
@@ -1057,6 +1142,181 @@ async def compare_endpoint(req: CompareReq, request: Request):
         request.state.login,
         lambda: run_in_threadpool(compare, req),
         exclusive=True,
+    )
+
+
+def _snippet(text):
+    text = " ".join((text or "").split())
+    return text if len(text) <= AGENT_SNIPPET_CHARS else text[:AGENT_SNIPPET_CHARS - 1] + "…"
+
+
+def _agent_visual_hits(vector, profile, limit, video_ids=None, exclude_global_id=None):
+    """Top keyframes for one query vector, optionally scored only inside `video_ids`.
+
+    Scoping reconstructs the named videos' rows from the Flat index and scores them
+    directly, so a within-video search sees every keyframe of those videos instead of
+    whatever survives a corpus-wide top-k.
+    """
+    index = core.get_index("flat", profile)
+    id_video, id_frame, video_meta, lookup = core.load_meta(profile)
+    times = core.load_times(profile)
+    vector = np.asarray(vector, dtype="float32").reshape(1, -1)
+    if video_ids:
+        wanted = [int(lookup[video_id]["video_idx"]) for video_id in video_ids if video_id in lookup]
+        global_ids = np.flatnonzero(np.isin(id_video, wanted))
+        if exclude_global_id is not None:
+            global_ids = global_ids[global_ids != exclude_global_id]
+        if not len(global_ids):
+            return []
+        scores = index.reconstruct_batch(global_ids) @ vector[0]
+        order = np.argsort(-scores, kind="stable")[:limit]
+        pairs = [(float(scores[i]), int(global_ids[i])) for i in order]
+    else:
+        distances, indexes = index.search(vector, limit + (exclude_global_id is not None))
+        pairs = [
+            (float(distance), int(global_id))
+            for distance, global_id in zip(distances[0], indexes[0])
+            if global_id >= 0 and global_id != exclude_global_id
+        ][:limit]
+    return [
+        {
+            "rank": rank,
+            "video_id": video_meta[int(id_video[global_id])]["video_id"],
+            "frame_idx": int(id_frame[global_id]),
+            "time": round(float(times[global_id]), 3),
+            "score": round(score, 4),
+        }
+        for rank, (score, global_id) in enumerate(pairs, 1)
+    ]
+
+
+def _agent_audio_hits(query, profile):
+    search_fn = (audio_search.search_audio_semantic if query.method == "semantic"
+                 else audio_search.search_audio_keyword)
+    meta = core.load_meta(profile)
+    hits = []
+    for hit in search_fn(query.text, query.limit):
+        if hit.video_id not in meta[3]:
+            continue
+        hits.append({
+            "rank": len(hits) + 1,
+            "video_id": hit.video_id,
+            "frame_idx": core.nearest_frame(hit.video_id, hit.anchor_sec, profile, meta=meta),
+            "time": round(hit.anchor_sec, 3),
+            "start": round(hit.start_sec, 3),
+            "end": round(hit.end_sec, 3),
+            "score": round(hit.score, 6),
+            "text": _snippet(hit.text),
+            "matched_keywords": list(hit.matched_keywords),
+        })
+    return hits
+
+
+def _agent_ocr_hits(query, profile):
+    lookup = core.load_meta(profile)[3]
+    hits = []
+    for hit in ocr_search.search_ocr_keyword(query.text, query.limit):
+        if hit.video_id not in lookup:
+            continue
+        hits.append({
+            "rank": len(hits) + 1,
+            "video_id": hit.video_id,
+            "frame_idx": hit.frame_idx,
+            "time": round(hit.anchor_sec, 3),
+            "start": round(hit.start_sec, 3),
+            "end": round(hit.end_sec, 3),
+            "score": round(hit.score, 6),
+            "text": _snippet(hit.text),
+            "exact": ocr_search.contains_folded_phrase(query.text, hit.text),
+            "matched_keywords": list(hit.matched_keywords),
+        })
+    return hits
+
+
+def _agent_temporal_hits(query, profile):
+    candidate_k, scoring_method, min_gap_seconds = load_temporal_config()
+    request = TemporalSearchReq(
+        events=query.events, audio_text=query.audio_text, audio_method="keyword",
+        max_gap_seconds=query.max_gap_seconds, profile=profile,
+    )
+    response = temporal_search_response(request, candidate_k, scoring_method, min_gap_seconds)
+    videos = []
+    for group in response["videos"][:query.limit]:
+        sequences = sorted(group["sequences"], key=lambda sequence: sequence["rank"])[:3]
+        videos.append({
+            "rank": len(videos) + 1,
+            "video_id": group["video_id"],
+            "score": group["best_score"],
+            "sequences": [
+                {
+                    "score": sequence["score"],
+                    "events": [
+                        {"frame_idx": event["frame_idx"], "time": round(event["time"], 3),
+                         "score": round(event["score"], 4)}
+                        for event in sequence["events"]
+                    ],
+                }
+                for sequence in sequences
+            ],
+        })
+    return videos
+
+
+def _run_agent_query(query, profile):
+    started = time.perf_counter()
+    if query.kind == "visual":
+        hits = _agent_visual_hits(core.encode_text(query.text), profile, query.limit, query.video_ids)
+    elif query.kind == "similar":
+        vector, global_id = core.indexed_frame_embedding(
+            "flat", query.video_id, query.frame_idx, profile
+        )
+        hits = _agent_visual_hits(vector, profile, query.limit, query.video_ids, global_id)
+    elif query.kind == "audio":
+        hits = _agent_audio_hits(query, profile)
+    elif query.kind == "ocr":
+        hits = _agent_ocr_hits(query, profile)
+    else:
+        hits = _agent_temporal_hits(query, profile)
+    return hits, round((time.perf_counter() - started) * 1000, 1)
+
+
+def agent_search(req: AgentBatchReq):
+    """Run every sub-query of one agent step in parallel.
+
+    A failing sub-query reports its own error instead of failing the batch: the
+    agent can still act on the modalities that answered.
+    """
+    started = time.perf_counter()
+    futures = [
+        (query, _AGENT_BATCH_EXECUTOR.submit(_run_agent_query, query, req.profile))
+        for query in req.queries
+    ]
+    results = {}
+    for query, future in futures:
+        try:
+            hits, latency_ms = future.result()
+        except HTTPException as exc:
+            results[query.id] = {"kind": query.kind, "error": str(exc.detail)}
+            continue
+        except Exception as exc:
+            results[query.id] = {"kind": query.kind, "error": f"{type(exc).__name__}: {exc}"}
+            continue
+        results[query.id] = {"kind": query.kind, "hits": hits, "latency_ms": latency_ms}
+    return {
+        "results": results,
+        "profile": req.profile,
+        "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+    }
+
+
+@app.post("/agent/search")
+async def agent_search_endpoint(req: AgentBatchReq, request: Request):
+    # A separate coordinator identity: the agent runs under a teammate's login, and
+    # sharing that login's latest-wins slot would let the agent and the human's own
+    # searches supersede each other with 409s.
+    return await request.app.state.search_coordinator.run(
+        f"{request.state.login}#agent",
+        lambda: run_in_threadpool(agent_search, req),
     )
 
 
