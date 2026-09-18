@@ -101,7 +101,7 @@ class AgentSearchTests(unittest.TestCase):
             AudioHit("K01_V001", 0.0, 5.0, 2.0, "outside the profile", 2.0, bm25_rank=2),
         ]
         with (
-            patch("backend.app.core.encode_text", return_value=np.array([[1.0, 0.0]], dtype="float32")),
+            patch("backend.app.core.encode_texts", return_value=np.array([[1.0, 0.0]], dtype="float32")),
             patch("backend.app.core.get_index", return_value=flat_index()),
             patch("backend.app.core.load_meta", return_value=META),
             patch("backend.app.core.load_times", return_value=TIMES),
@@ -118,6 +118,27 @@ class AgentSearchTests(unittest.TestCase):
         self.assertEqual(results["a"]["hits"][0]["frame_idx"], 15)
         self.assertEqual(results["a"]["hits"][0]["text"], "con cá nhám rất lớn")
         self.assertEqual(results["o"], {"kind": "ocr", "error": "RuntimeError: es down"})
+
+    def test_paraphrases_fuse_into_one_vector_with_the_caption_at_half_weight(self):
+        request = AgentBatchReq(queries=[{
+            "kind": "visual", "id": "v", "text": "caption", "paraphrases": ["p1", "p2"], "limit": 1,
+        }])
+        vectors = np.array([[1.0, 0.0], [0.0, 1.0], [0.0, 1.0]], dtype="float32")
+        index = flat_index()
+        with (
+            patch("backend.app.core.encode_texts", return_value=vectors) as encode,
+            patch("backend.app.core.get_index", return_value=index),
+            patch("backend.app.core.load_meta", return_value=META),
+            patch("backend.app.core.load_times", return_value=TIMES),
+        ):
+            agent_search(request)
+
+        encode.assert_called_once_with(["caption", "p1", "p2"])
+        query = index.search.call_args.args[0]
+        np.testing.assert_allclose(query, [[2 ** -0.5, 2 ** -0.5]], rtol=1e-6)
+        with self.assertRaises(ValidationError):
+            AgentBatchReq(queries=[{"kind": "visual", "id": "v", "text": "c",
+                                    "paraphrases": ["p"] * 5}])
 
     def test_ocr_hits_flag_exact_phrase_matches(self):
         request = AgentBatchReq(queries=[{"kind": "ocr", "id": "o", "text": "Nà Ní"}])

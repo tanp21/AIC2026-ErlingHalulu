@@ -1,6 +1,6 @@
 import unittest
 
-from agent.plan import BATCH_LIMIT, initial_queries, parse_plan, transcript_variants
+from agent.plan import BATCH_LIMIT, initial_queries, parse_plan, transcript_text
 from agent.pool import CandidatePool, Verdict
 from agent.tasks import task_from_text
 
@@ -52,13 +52,13 @@ class InitialQueriesTests(unittest.TestCase):
     def test_target_scene_first_then_temporal_speech_text_and_other_scenes(self):
         queries = initial_queries(parse_plan(plan_data(), KIS), KIS)
         ids = [query["id"] for query in queries]
-        self.assertEqual(ids[:2], ["r1.s1v0", "r1.s1v1"])
-        self.assertEqual(ids[2], "r1.t")
-        self.assertEqual(queries[2]["events"], ["a map with dams", "aerial view of a dam"])
-        self.assertIn("r1.o0", ids)
-        self.assertLess(ids.index("r1.s0v0"), ids.index("r1.s0v1"))
+        self.assertEqual(ids[:2], ["r1.s1", "r1.t"])
+        self.assertEqual((queries[0]["text"], queries[0]["paraphrases"]), ("aerial view of a dam", ["dam in rain"]))
+        self.assertEqual(queries[1]["events"], ["a map with dams", "aerial view of a dam"])
+        self.assertLess(ids.index("r1.o0"), ids.index("r1.s0"))
+        self.assertEqual(queries[-1]["paraphrases"], ["map", "dam map"])
         spoken = [q for q in queries if q["kind"] == "audio"]
-        self.assertEqual(spoken[0]["text"], "con đập hai trăm mười một mét")
+        self.assertEqual(spoken[0]["text"], "con đập 211 mét")
         self.assertEqual([q["method"] for q in spoken], ["keyword", "semantic", "keyword"])
         self.assertLessEqual(len(queries), BATCH_LIMIT)
         self.assertEqual(len(ids), len(set(ids)))
@@ -68,18 +68,25 @@ class InitialQueriesTests(unittest.TestCase):
                                     events_en=["e1", "e2", "e3"]), TRAKE)
         temporal = next(q for q in initial_queries(plan, TRAKE) if q["kind"] == "temporal")
         self.assertEqual(temporal["events"], ["e1", "e2", "e3"])
-        self.assertEqual(temporal["audio_text"], "con đập hai trăm mười một mét")
+        self.assertEqual(temporal["audio_text"], "con đập 211 mét")
 
-    def test_caps_the_batch_at_the_server_limit(self):
-        scenes = [{"visual_en": [f"s{i}v{j}" for j in range(3)]} for i in range(4)]
+    def test_one_query_per_scene_carrying_at_most_four_paraphrases(self):
+        scenes = [{"visual_en": [f"s{i}v{j}" for j in range(6)]} for i in range(4)]
         queries = initial_queries(parse_plan(plan_data(scenes=scenes, target_scene=0), KIS), KIS)
-        self.assertEqual(len(queries), BATCH_LIMIT)
-        # every scene keeps at least its first caption
-        self.assertTrue({"r1.s1v0", "r1.s2v0", "r1.s3v0"} <= {q["id"] for q in queries})
+        visual = [q for q in queries if q["kind"] == "visual"]
+        self.assertEqual([q["id"] for q in visual], ["r1.s0", "r1.s1", "r1.s2", "r1.s3"])
+        self.assertEqual(visual[0]["paraphrases"], ["s0v1", "s0v2", "s0v3", "s0v4"])
+        self.assertLessEqual(len(queries), BATCH_LIMIT)
+        single = parse_plan(plan_data(scenes=[{"visual_en": ["only caption"]}], target_scene=0), KIS)
+        self.assertNotIn("paraphrases", initial_queries(single, KIS)[0])
 
-    def test_transcript_variants_keep_the_written_form(self):
-        self.assertEqual(transcript_variants("năm 2024"), ["năm hai ngàn không trăm hai mươi tư", "năm 2024"])
-        self.assertEqual(transcript_variants("không số"), ["không số"])
+    def test_transcript_numbers_stay_digits_unless_the_index_spells_them(self):
+        self.assertEqual(transcript_text("năm 2024"), "năm 2024")
+        self.assertEqual(transcript_text("năm 2024", spoken_numbers=True),
+                         "năm hai ngàn không trăm hai mươi tư")
+        queries = initial_queries(parse_plan(plan_data(), KIS), KIS, spoken_numbers=True)
+        self.assertEqual(next(q for q in queries if q["kind"] == "audio")["text"],
+                         "con đập hai trăm mười một mét")
 
 
 def hit(video, frame, time, rank, **extra):

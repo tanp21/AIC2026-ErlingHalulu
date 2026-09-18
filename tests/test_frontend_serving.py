@@ -23,6 +23,10 @@ class FrontendServingTests(unittest.TestCase):
         self.assertIn("backend/temporal_search.py", dockerfile)
         self.assertIn("benchmarks/temporal/temporal_config.json", dockerfile)
 
+    def test_container_includes_the_paraphrase_fusion_module(self):
+        # /agent/search imports it for embedding-mean paraphrase fusion.
+        self.assertIn("backend/subquery_fusion.py", Path("Dockerfile").read_text())
+
     def test_container_includes_the_clip_export_module(self):
         self.assertIn("backend/shots.py", Path("Dockerfile").read_text())
 

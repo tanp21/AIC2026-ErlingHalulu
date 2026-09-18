@@ -72,13 +72,49 @@ def _gold_row(kind, fields):
     return GoldRow(video_id, frames if kind == "trake" else frames[:1])
 
 
+def _benchmark_answers(path, round_name):
+    """Gold frames from a team visual benchmark (`benchmarks/visual/*.json`).
+
+    Case ids look like `Round 2 - 2026/query-p2-21-trake:2`; the suffix is the
+    event number for TRAKE. Q&A answer strings are not recorded there.
+    """
+    import json
+
+    cases = json.loads(Path(path).read_text(encoding="utf-8"))["cases"]
+    events: dict[str, dict[int, list]] = {}
+    for case in cases:
+        prefix, _, rest = case["id"].partition("/")
+        if prefix != round_name:
+            continue
+        query_id, _, event = rest.partition(":")
+        events.setdefault(query_id, {})[int(event or 1)] = case["targets"]
+    answers = {}
+    for query_id, by_event in events.items():
+        if task_from_text(query_id, "").kind == "trake":
+            ordered = [by_event[index] for index in sorted(by_event)]
+            shared = set.intersection(*({video for video, _ in targets} for targets in ordered))
+            video_id = next((video for video, _ in ordered[0] if video in shared), None)
+            if video_id is None:
+                continue  # no single video carries every event: not a usable TRAKE key
+            answers[query_id] = [GoldRow(video_id, tuple(
+                next(frame for video, frame in targets if video == video_id) for targets in ordered
+            ))]
+        else:
+            answers[query_id] = [GoldRow(video, (frame,)) for video, frame in by_event[1]]
+    return answers
+
+
 def load_answers(path) -> dict[str, list[GoldRow]]:
     """Answer keys as `{query_id: [GoldRow, ...]}`.
 
-    Accepts the single-CSV form (`query-id,video,frame,...`) or a zip of
+    Accepts the single-CSV form (`query-id,video,frame,...`), a zip of
     `submission/<query-id>.csv` files, where several KIS rows list the accepted
-    frames of one clip.
+    frames of one clip, or `<benchmark>.json::<round>` for the team's visual
+    benchmarks, e.g. `benchmarks/visual/visual_embedding_benchmark_2026_en.json::Round 2 - 2026`.
     """
+    path, _, round_name = str(path).partition("::")
+    if round_name:
+        return _benchmark_answers(path, round_name)
     path = Path(path)
     answers: dict[str, list[GoldRow]] = {}
     if path.suffix.lower() == ".zip":

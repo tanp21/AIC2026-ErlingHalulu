@@ -20,7 +20,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from starlette.background import BackgroundTask
 
-from . import core, thumb, shots, shot_labels, audio_search, ocr_search, frame_maps
+from . import core, thumb, shots, shot_labels, audio_search, ocr_search, frame_maps, subquery_fusion
 from .temporal_search import (
     SCORING_METHODS, build_sequences, deduplicate_candidates, fuse_audio, temporal_nms,
 )
@@ -116,6 +116,9 @@ class AgentVisualQuery(BaseModel):
     kind: Literal["visual"]
     id: AgentQueryId
     text: AgentText
+    # Same-meaning rewordings of `text`, fused into one query vector (see
+    # _agent_query_vector).
+    paraphrases: list[AgentText] = Field(default_factory=list, max_length=4)
     video_ids: list[VideoId] | None = Field(default=None, max_length=50)
     limit: int = Field(default=100, ge=1, le=AGENT_RESULT_LIMIT)
 
@@ -1190,6 +1193,21 @@ def _agent_visual_hits(vector, profile, limit, video_ids=None, exclude_global_id
     ]
 
 
+def _agent_query_vector(query):
+    """The caption alone, or caption + paraphrases fused by weighted embedding mean.
+
+    Frozen `B*` config of docs/reports/visual-holistic-paraphrase-benchmark-2026.md:
+    caption weight 0.5, the rest split evenly. Embedding mean beat rank fusion of the
+    same texts on both dev and holdout; rank fusion got worse with every paraphrase.
+    """
+    texts = [query.text, *query.paraphrases]
+    vectors = core.encode_texts(texts)
+    if len(texts) == 1:
+        return vectors
+    weights = [0.5] + [0.5 / len(query.paraphrases)] * len(query.paraphrases)
+    return subquery_fusion.combine_vectors(vectors, weights).reshape(1, -1)
+
+
 def _agent_audio_hits(query, profile):
     search_fn = (audio_search.search_audio_semantic if query.method == "semantic"
                  else audio_search.search_audio_keyword)
@@ -1265,7 +1283,7 @@ def _agent_temporal_hits(query, profile):
 def _run_agent_query(query, profile):
     started = time.perf_counter()
     if query.kind == "visual":
-        hits = _agent_visual_hits(core.encode_text(query.text), profile, query.limit, query.video_ids)
+        hits = _agent_visual_hits(_agent_query_vector(query), profile, query.limit, query.video_ids)
     elif query.kind == "similar":
         vector, global_id = core.indexed_frame_embedding(
             "flat", query.video_id, query.frame_idx, profile

@@ -39,7 +39,8 @@ def build_agent(settings, options):
 
 def options_from(args, settings):
     return AgentOptions(max_steps=args.max_steps, time_budget=args.time_budget,
-                        plan_thinking=settings.deepseek_plan_thinking)
+                        plan_thinking=settings.deepseek_plan_thinking,
+                        spoken_numbers=settings.spoken_numbers)
 
 
 def save_run(results, directory, server_url, usage=None):
@@ -105,7 +106,7 @@ def command_plan(args, settings):
                 print(f"   ERROR {error}")
                 continue
             print(json.dumps(plan.to_dict(), ensure_ascii=False, indent=1))
-            for query in initial_queries(plan, task):
+            for query in initial_queries(plan, task, settings.spoken_numbers):
                 print(f"   -> {query['id']:9} {query['kind']:8} "
                       f"{query.get('text') or query.get('events')}")
     print(f"\nusage: {deepseek.usage.as_dict()}")
@@ -146,7 +147,7 @@ def report_scores(results, answers, tolerance, directory=None):
     for score in scores:
         print(f"  {score.query_id:24} hit@{score.hit_rank} video@{score.video_rank}"
               + (f" answer={'OK' if score.answer_ok else 'WRONG'} "
-                 f"({score.answer!r} vs {score.gold_answer!r})" if score.kind == "qa" else ""))
+                 f"({score.answer!r} vs {score.gold_answer!r})" if score.answer_ok is not None else ""))
     summary = summarize(scores)
     print(json.dumps(summary, indent=2))
     if directory is not None:

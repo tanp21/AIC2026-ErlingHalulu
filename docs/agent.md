@@ -11,9 +11,9 @@ calls the server over HTTP and never ships in the production image.
 
 ```text
 query ──► DeepSeek plan ──► round 1: one /agent/search batch ──► Gemini verifies top 12
-            (JSON)            visual (EN captions, 2-3 per scene)         │
+            (JSON)            visual (EN caption + paraphrases/scene)       │
                               temporal (multi-scene / TRAKE)              │ best ≥ 9 (and, for Q&A,
-                              transcript (VI, numbers spelled out)        │ an answer read)? ── yes ──► finalize
+                              transcript (VI)                            │ an answer read)? ── yes ──► finalize
                               OCR (distinctive on-screen strings)         │ no
             Gemini + Google Search for names the query only describes     ▼
                                                               DeepSeek tool loop (≤ 6 steps, ≤ 300 s)
@@ -21,7 +21,7 @@ query ──► DeepSeek plan ──► round 1: one /agent/search batch ──�
                                                               read_transcript · web_search · finish
                                                                           │
 finalize: ranking (verified matches first) · Q&A answer read from the frame/speech ·
-          TRAKE: each event moved to the first neighbouring keyframe that shows it
+          TRAKE: top 6 paths checked event by event, best 2 moved to each event's first keyframe
 ```
 
 - **Round 1 is deterministic** after the plan: `agent/plan.py` turns the plan into one
@@ -34,7 +34,14 @@ finalize: ranking (verified matches first) · Q&A answer read from the frame/spe
   original Vietnamese query, reads Q&A answers, and picks exact TRAKE frames. DeepSeek
   plans, rewrites queries and chooses tools. Neither model is the source of a Q&A answer
   on its own: answers are read from the video, and web search only resolves names or
-  cross-checks.
+  cross-checks. A loop that spends its budget without calling `finish` gets one last
+  finish-only turn, so what it learned (a name found on the web, its own ranking) is not
+  lost. For Q&A the final answer then comes from `finish`, or else from a dedicated
+  reading of the top moment (full frame, neighbours, transcript, and web notes as hints).
+- **TRAKE paths are judged per event.** Verification scores a frame against the whole
+  query, where an intro shot the query mentions for context can outscore the events
+  themselves. Each of the server's top paths is therefore sent to Gemini as E1..En and
+  scored against its own events before the best ones are refined.
 
 ### Why this shape
 
@@ -51,8 +58,17 @@ Drawn from agents built for the same kind of competition:
   inspecting and repeating queries. Hence the step and time budgets and the
   duplicate-query guard.
 - RAPID (AIC 2024), QUEST and MADTempo (AIC 2025). Parallel query variants, and
-  resolving out-of-knowledge entities before searching. Hence 2-3 caption variants per
-  scene and the lookup step.
+  resolving out-of-knowledge entities before searching. Hence the lookup step.
+- The team's own benchmarks (`docs/reports/visual-holistic-paraphrase-benchmark-2026.md`,
+  `visual-query-expansion-benchmark-2026.md`). Faithful paraphrases fused by *embedding
+  mean* (caption weight 0.5) beat the single caption on dev and holdout. Rank fusion of
+  the same paraphrases got worse with every one added, and shortened "aspect" captions
+  lost outright. Hence one visual query per scene: the caption plus up to 4 faithful
+  paraphrases, fused server-side.
+- The deployed transcript index is built from cleaned transcripts that write numbers as
+  digits. On the live server "130.000" found its video and "một trăm ba mươi ngàn" did
+  not, so transcript queries keep digits (`AIC_AGENT_SPOKEN_NUMBERS=1` spells them out
+  for a raw-ASR index).
 
 ## Server side: `POST /agent/search`
 
@@ -61,7 +77,8 @@ own `error` instead of failing the batch.
 
 ```json
 {"queries": [
-  {"kind": "visual",   "id": "v0", "text": "red boat on a river", "limit": 200, "video_ids": ["L22_V001"]},
+  {"kind": "visual",   "id": "v0", "text": "red boat on a river", "paraphrases": ["a river with a red boat on it"],
+                       "limit": 200, "video_ids": ["L22_V001"]},
   {"kind": "similar",  "id": "s0", "video_id": "L22_V001", "frame_idx": 1234},
   {"kind": "audio",    "id": "a0", "text": "cá nhám", "method": "keyword"},
   {"kind": "ocr",      "id": "o0", "text": "Nà Ní"},
@@ -69,6 +86,8 @@ own `error` instead of failing the batch.
 ]}
 ```
 
+- `paraphrases` (up to 4) are encoded with `text` and fused into one query vector by
+  `backend.subquery_fusion.combine_vectors` (the frozen `B*` weights), then searched once.
 - `video_ids` scores *every* keyframe of those videos: it reconstructs their Flat index
   rows instead of filtering a corpus-wide top-k.
 - Hits are compact: `video_id`, `frame_idx`, `time`, `score`, `rank`, plus `text`,
@@ -77,6 +96,20 @@ own `error` instead of failing the batch.
 - It runs under the coordinator identity `<login>#agent`. The agent can therefore share
   a teammate's login without the two cancelling each other's searches (latest-wins
   answers 409 when one login overlaps itself). The agent serializes its own batches.
+
+### Servers without `/agent/search`
+
+With `AIC_AGENT_SEARCH_API=auto` (the default), the first 404 from `/agent/search`
+switches the client to `agent/compat.py`. That module maps every sub-query onto the
+public `/search`, `/search/image` and `/search/temporal` routes, paging `/search/next`
+for video-scoped queries. The agent runs unchanged, with three costs:
+
+- Sub-queries run one at a time. Each audio query pools its full 10k-result snapshot,
+  about 5-10 s on the team server.
+- Paraphrases are dropped: the public routes take one text, and rank-fusing paraphrases
+  measured worse than the caption alone.
+- Searches run under the caller's own login, so a teammate searching in the UI with
+  that login can supersede them. The client retries 409s.
 
 ## Setup
 
@@ -90,13 +123,15 @@ Configuration comes from the environment, falling back to the repository `.env`
 | Variable | Default | |
 | --- | --- | --- |
 | `DEEPSEEK_API_KEY`, `GEMINI_API_KEY` | required | |
-| `AIC_AGENT_URL` | `http://127.0.0.1:8000` | The team server (HAProxy) URL |
-| `AIC_AGENT_USER`, `AIC_AGENT_PASSWORD` | unset | HAProxy Basic Auth login |
+| `AIC_AGENT_URL` | `http://127.0.0.1:8000` | The team server, e.g. its `https://<host>.<tailnet>.ts.net` name |
+| `AIC_AGENT_USER`, `AIC_AGENT_PASSWORD` | unset | Basic Auth, only for a deployment that still uses it. Over Tailscale, `tailscale serve` identifies you and no credentials are needed |
 | `AIC_AGENT_TRUSTED_USER` | unset | Direct-to-uvicorn development only: sent as `X-AIC-User` |
 | `DEEPSEEK_MODEL` / `GEMINI_MODEL` | `deepseek-flash` / `gemini-3.8-flash` | |
 | `DEEPSEEK_THINKING` | `enabled` | Thinking mode for tool-loop turns |
 | `DEEPSEEK_PLAN_THINKING` | `disabled` | Planning takes 2-3 s without thinking and 12-28 s with it, and plan quality was comparable |
 | `GEMINI_THINKING_LEVEL` | `low` | |
+| `AIC_AGENT_SEARCH_API` | `auto` | `batch` requires `/agent/search`; `compat` always uses the public routes |
+| `AIC_AGENT_SPOKEN_NUMBERS` | `0` | `1` spells digits out in transcript queries (raw-ASR index only) |
 
 ## Commands
 
@@ -105,7 +140,7 @@ python -m agent check                                    # server, DeepSeek and 
 python -m agent plan queries/SOTUYEN2-bo-de-thi.zip      # plans + round-1 queries only; no server needed
 python -m agent ask "Nhiều con rùa nhỏ đang ăn rau cải" --kind kis
 python -m agent run queries/SOTUYEN1-bo-de-thi.zip --answers queries/Round12026_answer.zip
-python -m agent eval artifacts/agent/<run> --answers queries/Round12026_answer.zip --tolerance 50
+python -m agent eval artifacts/agent/<run> --answers queries/Round12026_answer.zip --tolerance 250
 ```
 
 `run` and `ask` write `artifacts/agent/<timestamp>/`:
@@ -118,9 +153,17 @@ python -m agent eval artifacts/agent/<run> --answers queries/Round12026_answer.z
 - `usage.json`: token counts per model. With `--answers`, also `scores.json`.
 
 Labelled data for evaluation: `queries/round1-2025.csv` (answers to
-`queries/query-p1-groupA`) and `queries/Round12026_answer.zip` (answers to
-`SOTUYEN1-bo-de-thi.zip`). The organisers do not publish a frame tolerance, so
-`eval` counts a frame within `--tolerance` frames of the gold clip as a hit. Use its
+`queries/query-p1-groupA`), `queries/Round12026_answer.zip` (answers to
+`SOTUYEN1-bo-de-thi.zip`), and the team's visual benchmark for later rounds, which
+carries gold frames but no Q&A answer strings:
+
+```bash
+python -m agent run queries/SOTUYEN2-bo-de-thi.zip   --answers "benchmarks/visual/visual_embedding_benchmark_2026_en.json::Round 2 - 2026"
+```
+ The organisers do not publish a frame tolerance, so
+`eval` counts a frame within `--tolerance` frames (default 250, about the 10 s the team's
+visual benchmarks use) of any gold frame as a hit, or anywhere between the two frames
+of an organiser key that marks a clip by its first and last frame. Use its
 numbers to compare agent versions, not to predict the leaderboard.
 
 ## Tuning

@@ -32,6 +32,21 @@ class SearchClientTests(unittest.TestCase):
         with self.assertRaisesRegex(SearchError, "bad query"):
             client.search([])
 
+    def test_image_retries_transient_ffmpeg_failures_but_search_does_not(self):
+        replies = iter([httpx.Response(500, json={"detail": "ffmpeg failed"}),
+                        httpx.Response(200, content=b"jpeg")])
+        self.assertEqual(search_client(lambda request: next(replies)).image("L01_V001", 5), b"jpeg")
+
+        calls = []
+
+        def failing(request):
+            calls.append(request.url.path)
+            return httpx.Response(500, json={"detail": "boom"})
+
+        with self.assertRaises(SearchError):
+            search_client(failing, api="batch").search([])
+        self.assertEqual(calls, ["/agent/search"])
+
     def test_image_width_snaps_to_an_allowed_thumbnail_size(self):
         seen = []
 
@@ -43,6 +58,84 @@ class SearchClientTests(unittest.TestCase):
         self.assertEqual(client.image("L01_V001", 5, 600), b"jpeg")
         client.image("L01_V001", 5, 0)
         self.assertEqual(seen, ["http://server/thumb/L01_V001/5?w=640", "http://server/frame/L01_V001/5"])
+
+
+def item(video, frame, **extra):
+    return {"video_id": video, "frame_idx": frame, "time": frame / 25, "score": 0.5, **extra}
+
+
+class CompatServer:
+    """The public routes of a server that predates /agent/search."""
+
+    def __init__(self):
+        self.paths = []
+
+    def __call__(self, request):
+        self.paths.append(request.url.path)
+        path = request.url.path
+        if path == "/agent/search":
+            return httpx.Response(404, json={"detail": "Not Found"})
+        if path == "/search/next":
+            return httpx.Response(200, json={"results": [item("L01_V002", 7), item("L01_V003", 1)],
+                                             "next_cursor": None})
+        if path == "/search/temporal":
+            event = {"frame_idx": 10, "time": 0.4, "score": 0.9, "rank": 0}
+            return httpx.Response(200, json={"videos": [{"video_id": "L01_V001", "best_score": 0.9,
+                "sequences": [{"rank": 1, "score": 0.5, "events": [event, event]},
+                              {"rank": 0, "score": 0.9, "events": [event, event]}]}]})
+        if path == "/search/image":
+            payload = json.loads(dict(httpx.QueryParams(request.content.decode()))["payload"])
+            self.image_payload = payload
+            return httpx.Response(200, json={"results": [item("L01_V004", 3)], "next_cursor": None})
+        body = json.loads(request.content)
+        if body["mode"] == "audio":
+            return httpx.Response(200, json={"results": [item(
+                "L01_V001", 50, transcript_snippet="cá nhám", transcript_start=1.0,
+                transcript_end=9.0, matched_keywords=["cá"])], "next_cursor": None})
+        if body["mode"] == "ocr":
+            return httpx.Response(200, json={"results": [
+                item("L01_V001", 60, ocr_snippet="Mèo NÀ NÍ", ocr_start=2.0, ocr_end=3.0),
+                item("L01_V002", 60, ocr_snippet="Na Nhi", ocr_start=2.0, ocr_end=3.0)],
+                "next_cursor": None})
+        return httpx.Response(200, json={"results": [item("L01_V001", 5), item("L01_V002", 6)],
+                                         "next_cursor": "page2"})
+
+
+class CompatTests(unittest.TestCase):
+    def test_falls_back_once_and_maps_every_kind(self):
+        server = CompatServer()
+        client = search_client(server)
+        with self.assertLogs("agent", "WARNING"):
+            results = client.search([
+                {"kind": "visual", "id": "v", "text": "boat", "limit": 150},
+                {"kind": "visual", "id": "scoped", "text": "boat", "video_ids": ["L01_V002"]},
+                {"kind": "visual", "id": "short", "text": "boat", "limit": 1},
+                {"kind": "audio", "id": "a", "text": "cá nhám", "method": "semantic"},
+                {"kind": "ocr", "id": "o", "text": "Nà Ní"},
+                {"kind": "temporal", "id": "t", "events": ["a", "b"]},
+                {"kind": "similar", "id": "s", "video_id": "L01_V009", "frame_idx": 4},
+            ])
+
+        # limit 150 needs a second page of 100; limit 1 stops inside the first
+        self.assertEqual([(h["video_id"], h["frame_idx"], h["rank"]) for h in results["v"]["hits"]],
+                         [("L01_V001", 5, 1), ("L01_V002", 6, 2), ("L01_V002", 7, 3), ("L01_V003", 1, 4)])
+        self.assertEqual(len(results["short"]["hits"]), 1)
+        self.assertEqual([h["frame_idx"] for h in results["scoped"]["hits"]], [6, 7])
+        self.assertEqual(results["a"]["hits"][0]["text"], "cá nhám")
+        self.assertEqual((results["a"]["hits"][0]["start"], results["a"]["hits"][0]["end"]), (1.0, 9.0))
+        self.assertEqual([h["exact"] for h in results["o"]["hits"]], [True, False])
+        self.assertEqual(results["t"]["hits"][0]["sequences"][0]["score"], 0.9)
+        self.assertEqual(server.image_payload["reference"], {"video_id": "L01_V009", "frame_idx": 4})
+        self.assertEqual(client.api, "compat")
+
+        server.paths.clear()
+        client.search([{"kind": "ocr", "id": "o", "text": "x"}])
+        self.assertEqual(server.paths, ["/search"])
+
+    def test_batch_mode_does_not_fall_back(self):
+        client = search_client(CompatServer(), api="batch")
+        with self.assertRaises(SearchError):
+            client.search([{"kind": "visual", "id": "v", "text": "boat"}])
 
 
 def deepseek(handler):

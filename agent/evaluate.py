@@ -13,7 +13,9 @@ import unicodedata
 
 from .submission import result_rows
 
-DEFAULT_TOLERANCE = 50
+# ~10 s at 25 fps: the tolerance of the team's visual benchmarks
+# (benchmarks/visual/*.json, "tolerance_seconds": 10), so numbers are comparable.
+DEFAULT_TOLERANCE = 250
 CUTOFFS = (1, 5, 20, 100)
 
 
@@ -35,7 +37,14 @@ def normalize_answer(text: str | None) -> str:
 
 
 def _frame_ok(frame, gold_frames, tolerance):
-    return min(gold_frames) - tolerance <= frame <= max(gold_frames) + tolerance
+    """Near any accepted frame; two frames of one video also accept everything between.
+
+    The organisers' keys mark a clip by its first and last frame (two rows), while
+    the team's benchmark lists every accepted frame, possibly far apart.
+    """
+    if any(abs(frame - gold) <= tolerance for gold in gold_frames):
+        return True
+    return len(gold_frames) == 2 and min(gold_frames) <= frame <= max(gold_frames)
 
 
 def score_result(result: dict, gold_rows, tolerance: int = DEFAULT_TOLERANCE) -> QueryScore:
@@ -64,7 +73,8 @@ def score_result(result: dict, gold_rows, tolerance: int = DEFAULT_TOLERANCE) ->
     answer_ok = gold_answer = None
     if kind == "qa":
         gold_answer = next((gold.answer for gold in gold_rows if gold.answer), None)
-        answer_ok = normalize_answer(result.get("answer")) == normalize_answer(gold_answer)
+        if gold_answer is not None:
+            answer_ok = normalize_answer(result.get("answer")) == normalize_answer(gold_answer)
     return QueryScore(result["query_id"], kind, hit_rank, video_rank, answer_ok,
                       result.get("answer"), gold_answer)
 

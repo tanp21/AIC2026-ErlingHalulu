@@ -17,7 +17,7 @@ import re
 import time
 
 from .llm import LLMError
-from .plan import Plan, analysis_messages, expected_events, initial_queries, parse_plan, transcript_variants
+from .plan import Plan, analysis_messages, expected_events, initial_queries, parse_plan, transcript_text
 from .pool import VERIFIED_MATCH, Candidate, CandidatePool, Sequence
 from .prompts import AGENT_SYSTEM, LOOKUP_PROMPT
 from .tasks import Task
@@ -35,10 +35,12 @@ class AgentOptions:
     verify_top: int = 12
     verify_per_step: int = 8
     early_stop_score: float = 9.0
+    trake_check: int = 6
     trake_refine: int = 2
     neighbour_radius: int = 6
     max_rows: int = 100
     plan_thinking: bool = False
+    spoken_numbers: bool = False
 
 
 @dataclass
@@ -88,6 +90,8 @@ TOOLS = [
                 "text": {"type": "string", "description": (
                     "visual: English caption of one frame; audio: Vietnamese spoken phrase; "
                     "ocr: exact on-screen text")},
+                "paraphrases": {"type": "array", "items": {"type": "string"},
+                                "description": "visual only: up to 4 same-meaning rewordings of text"},
                 "method": {"type": "string", "enum": ["keyword", "semantic"],
                            "description": "audio only; keyword (BM25) by default"},
                 "events": {"type": "array", "items": {"type": "string"},
@@ -144,6 +148,9 @@ TOOLS = [
         }, "required": ["ranking"]},
     }},
 ]
+
+
+FINISH_TOOL = next(tool for tool in TOOLS if tool["function"]["name"] == "finish")
 
 
 class Agent:
@@ -222,7 +229,7 @@ class _Run:
                  f"{len(self.plan.lookups)} lookups", started)
 
     def _round_one(self):
-        queries = initial_queries(self.plan, self.task)
+        queries = initial_queries(self.plan, self.task, self.options.spoken_numbers)
         with ThreadPoolExecutor(max_workers=3) as pool:
             lookups = [pool.submit(self._lookup, question) for question in self.plan.lookups]
             self._run_search(queries, "round1")
@@ -295,7 +302,8 @@ class _Run:
             candidate.verdict = verdict
         best = max((v.score for v in verdicts.values()), default=None)
         self.log("verify", {"ids": [c.cid for c in candidates], "question": question},
-                 f"{len(verdicts)} verdicts, best={best}, errors={len(errors)}", started)
+                 f"{len(verdicts)} verdicts, best={best}"
+                 + (f", errors={[e[:120] for e in errors]}" if errors else ""), started)
 
     def _server_query(self, raw, index):
         kind = raw.get("kind")
@@ -304,12 +312,16 @@ class _Run:
         text = " ".join(str(raw.get("text") or "").split())[:300]
         if kind == "visual" and text:
             query = {"kind": "visual", "id": qid, "text": text, "limit": 100 if video_ids else 200}
+            paraphrases = [" ".join(str(p).split())[:300] for p in raw.get("paraphrases") or []
+                           if str(p).strip()][:4]
+            if paraphrases:
+                query["paraphrases"] = paraphrases
             if video_ids:
                 query["video_ids"] = video_ids
             return query
         if kind == "audio" and text:
             method = raw.get("method") if raw.get("method") in ("keyword", "semantic") else "keyword"
-            return {"kind": "audio", "id": qid, "text": transcript_variants(text)[0],
+            return {"kind": "audio", "id": qid, "text": transcript_text(text, self.options.spoken_numbers),
                     "method": method, "limit": 100}
         if kind == "ocr" and text:
             return {"kind": "ocr", "id": qid, "text": text, "limit": 50}
@@ -319,7 +331,7 @@ class _Run:
                 query = {"kind": "temporal", "id": qid, "events": events, "limit": 20,
                          "max_gap_seconds": 300}
                 if raw.get("audio_text"):
-                    query["audio_text"] = transcript_variants(str(raw["audio_text"]))[0][:300]
+                    query["audio_text"] = transcript_text(str(raw["audio_text"]), self.options.spoken_numbers)[:300]
                 return query
         if kind == "similar":
             candidate = self.pool.get(str(raw.get("candidate_id", "")))
@@ -457,11 +469,37 @@ class _Run:
                     content = handler(args) if handler else f"Unknown tool {name}."
                 except Exception as exc:  # a tool failure is an observation, not a crash
                     content = f"Tool error: {type(exc).__name__}: {exc}"
-                if name not in ("search",):
+                if name not in ("search", "web_search"):  # these log themselves
                     self.log(name, args, content[:160], call_started)
                 if name != "finish":
                     content = f"{content}\n\n{self.observation()}"
                 messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": content})
+        if self.finished is None and self.step:
+            self._wrap_up(messages)
+
+    def _wrap_up(self, messages):
+        """Out of budget without finish: one last turn that may only finish.
+
+        Without it, what the loop learned but never committed (a name found by
+        web_search, the model's own ranking) would be lost to the fallback ordering.
+        """
+        started = self.agent.clock()
+        request = "The budget is spent. Call finish now with your best ranking"
+        if self.task.kind == "qa":
+            request += " and the literal answer"
+        messages.append({"role": "user", "content": request + "."})
+        try:
+            message = self.agent.deepseek.chat(messages, tools=[FINISH_TOOL])
+        except LLMError as exc:
+            self.log("wrap_up", {}, f"failed: {exc}", started)
+            return
+        for call in message.get("tool_calls") or []:
+            if call.get("function", {}).get("name") == "finish":
+                try:
+                    self.finished = json.loads(call["function"].get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    continue
+        self.log("wrap_up", {}, "finished" if self.finished else "no finish call", started)
 
     # -- final answer ------------------------------------------------------------------
     def _finalize(self):
@@ -482,40 +520,70 @@ class _Run:
             self._finalize_sequences()
 
     def _finalize_answer(self):
+        """Agent's committed answer, else a dedicated reading of the top moment.
+
+        A verdict's `answer` field is only a last resort: verification judges the
+        whole query, and on a live run Gemini filled it with a visible detail
+        ("can màu xanh lá") instead of the asked-for pass name.
+        """
         answer = str((self.finished or {}).get("answer") or "").strip()
-        evidence = "agent"
-        if not answer:
-            top = next((c for c in self.result.ranking if c.verdict and c.verdict.answer), None)
-            if top is not None:
-                answer, evidence = top.verdict.answer, f"verdict on {top.cid}"
+        evidence = "agent (finish)"
         if not answer and self.result.ranking:
             top = self.result.ranking[0]
             started = self.agent.clock()
             try:
                 neighbours = self.agent.search.neighbours(top.video_id, top.frame_idx, 3)
                 cues = self.cues.get(top.video_id) or self.agent.search.transcript(top.video_id)
+                hints = "\n".join(
+                    f"- {entry['question']}: {entry['answer'][:300]}"
+                    for entry in self.result.lookups if entry.get("answer")
+                )
                 reply = self.agent.inspector.answer(
-                    self.task, self.plan.question_vi or self.task.text, top, neighbours, cues,
+                    self.task, self.plan.question_vi or self.task.text, top, neighbours, cues, hints,
                 )
                 answer = str(reply.get("answer") or "").strip()
-                evidence = str(reply.get("evidence") or "")
+                evidence = f"read from {top.cid}: {reply.get('evidence') or ''}"
             except Exception as exc:
                 evidence = f"answer step failed: {exc}"
             self.log("answer", {"candidate": top.cid}, f"{answer!r} ({evidence})", started)
+        if not answer:
+            top = next((c for c in self.result.ranking if c.verdict and c.verdict.answer), None)
+            if top is not None:
+                answer, evidence = top.verdict.answer, f"verdict on {top.cid} (unconfirmed)"
         self.result.answer = answer[:100] or None
         self.result.answer_evidence = evidence
 
     def _finalize_sequences(self):
+        """Check the server's best paths event by event, then pin the best ones' frames."""
         count = expected_events(self.plan, self.task)
-        sequences = [s for s in self.pool.sequences if len(s.frames) == count]
+        unique = {}
+        for sequence in sorted(self.pool.sequences, key=lambda s: s.rank):
+            if len(sequence.frames) == count:
+                unique.setdefault((sequence.video_id, tuple(sequence.frames)), sequence)
+        sequences = list(unique.values())
+        events = (self.plan.events_en or [scene.visual_en[0] for scene in self.plan.scenes])[:count]
+        events += [""] * (count - len(events))
 
-        def strength(sequence):
-            scores = [self.pool.get(cid).verdict.score if self.pool.get(cid).verdict else 5.0
-                      for cid in sequence.candidate_ids]
-            return (-sum(scores) / len(scores), sequence.rank)
+        started = self.agent.clock()
+        checked, errors = sequences[:self.options.trake_check], []
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [(s, pool.submit(self.agent.inspector.check_sequence,
+                                       self.task, events, s.video_id, s.frames)) for s in checked]
+            for sequence, future in futures:
+                try:
+                    sequence.event_scores = future.result()
+                except Exception as exc:  # an unchecked path keeps its server rank
+                    errors.append(str(exc)[:120])
 
-        sequences.sort(key=strength)
-        events = self.plan.events_en or [scene.visual_en[0] for scene in self.plan.scenes]
+        def key(sequence):
+            if sequence.event_scores is None:
+                return (1, 0.0, sequence.rank)
+            return (0, -sum(sequence.event_scores) / len(sequence.event_scores), sequence.rank)
+
+        sequences.sort(key=key)
+        self.log("check_sequences", {"checked": len(checked)},
+                 "; ".join(f"{s.video_id}={s.event_scores}" for s in sequences[:3])
+                 + (f" errors={errors}" if errors else ""), started)
         for sequence in sequences[:self.options.trake_refine]:
             if self.over_budget():
                 break

@@ -5,7 +5,7 @@ import unittest
 from agent.llm import GroundedAnswer, LLMError
 from agent.orchestrator import Agent, AgentOptions
 from agent.tasks import task_from_text
-from agent.vision import ANSWER_SCHEMA, PICK_SCHEMA
+from agent.vision import ANSWER_SCHEMA, PICK_SCHEMA, SEQUENCE_SCHEMA
 
 PLAN = {
     "summary_vi": "tìm cảnh",
@@ -21,6 +21,7 @@ class FakeDeepSeek:
         self.plan = plan
         self.turns = list(turns)
         self.chats = []
+        self.tool_names = []
 
     def chat_json(self, messages, **_):
         if isinstance(self.plan, Exception):
@@ -29,6 +30,7 @@ class FakeDeepSeek:
 
     def chat(self, messages, tools=None, **_):
         self.chats.append([dict(m) for m in messages])
+        self.tool_names.append([tool["function"]["name"] for tool in tools or []])
         if not self.turns:
             return {"role": "assistant", "content": "done"}
         return self.turns.pop(0)
@@ -44,8 +46,10 @@ def tool_call(name, **args):
 class FakeGemini:
     """Scores candidates from `scores` keyed by (video, frame); everything else 2."""
 
-    def __init__(self, scores=None, answers=None, pick="F2"):
+    def __init__(self, scores=None, answers=None, pick="F2", reading="42", event_scores=None):
         self.scores = scores or {}
+        self.event_scores = event_scores or {}
+        self.reading = reading
         self.answers = answers or {}
         self.pick = pick
         self.judged = []
@@ -54,10 +58,16 @@ class FakeGemini:
     def judge(self, images, prompt, schema, **_):
         if schema is PICK_SCHEMA:
             return {"id": self.pick, "confidence": 8, "reason": "bắt đầu"}
+        if schema is SEQUENCE_SCHEMA:
+            video = re.match(r"\[E1\] (\S+) ", images[0][0]).group(1)
+            score = self.event_scores.get(video, 5)
+            return {"events": [{"id": f"E{i + 1}", "score": score} for i in range(len(images))]}
         if schema is ANSWER_SCHEMA:
             self.answer_calls += 1
-            return {"answer": "42", "confidence": 7, "evidence": "trên bảng"}
-        follow_up = "Question to answer" in prompt and "q-kis" not in prompt
+            self.answer_prompt = prompt
+            return {"answer": self.reading, "confidence": 7, "evidence": "trên bảng"}
+        # the follow-up question asked via `inspect` in the neighbours test
+        follow_up = "Chữ trên biển" in prompt
         verdicts = []
         for label, _ in images:
             cid, video = re.match(r"\[(C\d+)\] (\S+) ", label).group(1, 2)
@@ -134,11 +144,28 @@ class AgentRunTests(unittest.TestCase):
         self.assertEqual([entry["tool"] for entry in result.trace], ["plan", "search", "verify"])
         self.assertEqual({q["kind"] for q in search.batches[0]}, {"visual", "audio"})
 
+    def test_a_frame_the_server_cannot_cut_stays_unverified_alone(self):
+        search = FakeSearch(HITS)
+        original = search.image
+
+        def image(video_id, frame_idx, width=640):
+            if video_id == "L01_V001":
+                raise RuntimeError("HTTP 500 ffmpeg failed")
+            return original(video_id, frame_idx, width)
+
+        search.image = image
+        gemini = FakeGemini({("L01_V002", 200): 9})
+        result = make_agent(FakeDeepSeek(), gemini, search).run(task_from_text("q-kis", "x"))
+
+        verdicts = {c.video_id: c.verdict for c in result.ranking}
+        self.assertIsNone(verdicts["L01_V001"])
+        self.assertEqual(verdicts["L01_V002"].score, 9)
+
     def test_weak_round_one_hands_over_to_deepseek_tools(self):
         deepseek = FakeDeepSeek(turns=[
             tool_call("search", queries=[
                 {"kind": "visual", "text": "boat interior", "video_ids": ["L01_V003", "bad id"]},
-                {"kind": "visual", "text": "a red boat"},  # already run in round 1
+                {"kind": "visual", "text": "a red boat", "paraphrases": ["boat"]},  # round 1 ran it
                 {"kind": "nonsense"},
             ]),
             tool_call("finish", ranking=["C3", "C999"], notes="chắc chắn"),
@@ -176,16 +203,34 @@ class AgentRunTests(unittest.TestCase):
         self.assertEqual(
             {c.frame_idx for c in result.ranking if c.video_id == "L01_V001"}, {80, 90, 100, 110, 120})
 
-    def test_qa_answer_comes_from_the_verdict_or_a_dedicated_reading(self):
+    def test_qa_answer_prefers_a_dedicated_reading_over_verdict_answers(self):
         task = task_from_text("q-qa", "Con số trên cân là bao nhiêu?")
-        plan = {**PLAN, "question_vi": "Con số trên cân?", "answer_source": "on_screen_text"}
-        gemini = FakeGemini({("L01_V001", 100): 9}, answers={("L01_V001", 100): "5"})
+        plan = {**PLAN, "question_vi": "Con số trên cân?", "answer_source": "on_screen_text",
+                "lookups": ["Cân này là của chợ nào?"]}
+        gemini = FakeGemini({("L01_V001", 100): 9}, answers={("L01_V001", 100): "can màu xanh"})
         result = make_agent(FakeDeepSeek(plan), gemini, FakeSearch(HITS)).run(task)
-        self.assertEqual((result.answer, gemini.answer_calls), ("5", 0))
-
-        gemini = FakeGemini({("L01_V001", 100): 7})
-        result = make_agent(FakeDeepSeek(plan), gemini, FakeSearch(HITS), max_steps=0).run(task)
         self.assertEqual((result.answer, gemini.answer_calls), ("42", 1))
+        self.assertIn("cá mập", gemini.answer_prompt)  # web lookups reach the reading as hints
+
+        gemini = FakeGemini({("L01_V001", 100): 9}, answers={("L01_V001", 100): "5"}, reading="")
+        result = make_agent(FakeDeepSeek(plan), gemini, FakeSearch(HITS)).run(task)
+        self.assertEqual(result.answer, "5")
+        self.assertIn("unconfirmed", result.answer_evidence)
+
+    def test_spent_budget_gets_one_finish_only_turn(self):
+        task = task_from_text("q-qa", "Tên của con đèo là gì?")
+        plan = {**PLAN, "question_vi": "Tên con đèo?", "answer_source": "speech"}
+        deepseek = FakeDeepSeek(plan, turns=[
+            tool_call("web_search", question="đèo nào sạt lở?"),
+            tool_call("finish", ranking=["C2"], answer="Đèo Tà Pứa"),
+        ])
+        gemini = FakeGemini({("L01_V002", 200): 7})
+        result = make_agent(deepseek, gemini, FakeSearch(HITS), max_steps=1).run(task)
+
+        self.assertEqual(deepseek.tool_names[-1], ["finish"])
+        self.assertEqual((result.answer, gemini.answer_calls), ("Đèo Tà Pứa", 0))
+        self.assertEqual(result.ranking[0].cid, "C2")
+        self.assertEqual([e["tool"] for e in result.trace].count("web_search"), 1)
 
     def test_trake_refines_each_event_forward_in_time(self):
         task = task_from_text("q-trake", "E1: a\nE2: b")
@@ -203,6 +248,24 @@ class AgentRunTests(unittest.TestCase):
         self.assertTrue(sequence.refined)
         times = sequence.times
         self.assertEqual(times, sorted(times))
+
+    def test_trake_paths_are_reordered_by_per_event_checks(self):
+        task = task_from_text("q-trake", "E1: a\nE2: b")
+        plan = {**PLAN, "events_en": ["start", "end"]}
+
+        def path(rank, video, first):
+            return {"rank": rank, "video_id": video, "score": 1 / rank, "sequences": [{
+                "score": 1 / rank, "events": [{"frame_idx": first, "time": first / 10, "score": 0.5},
+                                              {"frame_idx": first + 300, "time": first / 10 + 30, "score": 0.5}]}]}
+
+        temporal = [path(1, "L01_V005", 100), path(2, "L01_V006", 100), path(3, "L01_V007", 100)]
+        gemini = FakeGemini(event_scores={"L01_V005": 2, "L01_V006": 9})
+        result = make_agent(FakeDeepSeek(plan), gemini, FakeSearch(HITS, temporal),
+                            max_steps=0, trake_check=2, trake_refine=1).run(task)
+
+        self.assertEqual([s.video_id for s in result.sequences], ["L01_V006", "L01_V005", "L01_V007"])
+        self.assertEqual([s.event_scores for s in result.sequences], [[9, 9], [2, 2], None])
+        self.assertEqual([s.refined for s in result.sequences], [True, False, False])
 
     def test_planning_failure_is_reported_not_raised(self):
         with self.assertLogs("agent", "ERROR"):

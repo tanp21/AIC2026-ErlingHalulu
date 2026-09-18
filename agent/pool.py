@@ -71,6 +71,8 @@ class Sequence:
     score: float
     candidate_ids: list[str]
     refined: bool = False
+    # Gemini's per-event 0-10 check of `frames` (before any refinement), if run.
+    event_scores: list[float] | None = None
 
 
 def _weight(evidence: Evidence) -> float:

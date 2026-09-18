@@ -18,12 +18,13 @@ event."""
 CHANNELS = """Search channels:
 1. visual — CLIP text-to-image over keyframes, ENGLISH only. Write what ONE frame shows: \
 subjects, counts up to ~4, colours, clothing, objects, setting, camera view, slide/graphic \
-layout. Put the most distinctive content first; at most 25 words; no negations, no \
+layout. Put the most distinctive content first; at most 30 words; no negations, no \
 "the video shows", no intentions or causes. Name a thing only if it is visibly \
-recognisable (a famous landmark or person, a well-known animal or dish).
-2. transcript — Vietnamese speech (ASR: lowercase, no punctuation, numbers spelled as \
-words, e.g. "hai trăm mười một ký", "tám mươi tám phần trăm"). Use it for what a narrator \
-or interviewee would SAY: topic, place/person/organisation names, dish and ingredient names \
+recognisable (a famous landmark or person, a well-known animal or dish). A caption may \
+carry up to 4 paraphrases, fused with it into one query vector.
+2. transcript — Vietnamese speech (cleaned ASR with punctuation; numbers written as \
+digits, e.g. "211 ký", "88%", "130.000 đồng"). Use it for what a narrator or interviewee \
+would SAY: topic, place/person/organisation names, dish and ingredient names \
 in cooking shows, quantities. 2-8 word phrases. Never visual-only details like clothing colours.
 3. ocr — text physically written on screen: signs, banners, slide titles, captions, labels, \
 prices. Only strings the query quotes or clearly implies, 1-5 words each.
@@ -49,7 +50,7 @@ Reply with one JSON object and nothing else:
   "summary_vi": "one line: what must be found",
   "scenes": [
     {{"description_vi": "the scene in short Vietnamese",
-      "visual_en": ["detailed English caption", "short caption with the 2-3 most distinctive elements", "alternative wording or resolved name"]}}
+      "visual_en": ["English caption", "paraphrase 1", "paraphrase 2", "paraphrase 3"]}}
   ],
   "target_scene": 0,
   "events_en": [],
@@ -61,8 +62,11 @@ Reply with one JSON object and nothing else:
 }}
 
 Rules:
-- scenes: one entry per visually distinct scene, in time order (usually 1-3); 2-3 visual_en \
-variants each.
+- scenes: one entry per visually distinct scene, in time order (usually 1-3).
+- visual_en: the caption first, then 3-4 paraphrases of THAT caption which keep every \
+detail (same counts, colours, clothing, quoted text, names) and change only word order, \
+synonyms or grammar. Never shorten to a subset of the details and never add details: \
+shortened "aspect" captions hurt retrieval in benchmarks, faithful paraphrases helped.
 - target_scene: index of the scene whose frame should be submitted — the scene the query asks \
 to find exactly, otherwise the first scene.
 - events_en: trake only — exactly one English caption per listed event, in order, each \
@@ -93,8 +97,9 @@ once inspected, a Gemini verdict 0-10 (10 = exact match with distinctive details
 confirmed, 6+ = likely match, 3 or less = contradicted).
 
 Strategy that works in this competition:
-- Rewrite, do not repeat: if the verified top is weak, change wording, split the scene \
-into its most distinctive visual element, switch channel (transcript for spoken topics, \
+- Rewrite, do not repeat: if the verified top is weak, change wording (pass faithful \
+paraphrases with a visual caption), focus on the scene's most distinctive visual element, \
+switch channel (transcript for spoken topics, \
 ocr for written text), or resolve the entity with web_search.
 - A single frame shows one scene. For multi-scene clips, find the video first (temporal \
 search, or agreeing channels), then search INSIDE it with video_ids to pin the target scene.
@@ -142,12 +147,29 @@ Which labelled frame is the FIRST one where this event is visible or begins? If 
 it, answer "none". Reply as JSON: {{"id": "<label or none>", "confidence": 0-10, \
 "reason": "<at most 15 Vietnamese words>"}}"""
 
-QA_PROMPT = """Answer a question about a video moment from its frames and speech transcript.
+SEQUENCE_PROMPT = """These keyframes are one candidate answer to a TRAKE query: one frame per \
+event, in time order, all from the same video.
+
+Query (Vietnamese): {query}
+Events, in order:
+{events}
+
+For each labelled frame, score 0-10 how well it shows the START of its own event (10 = \
+clearly the first moment of that event; 5 = the event is under way or only partly visible; \
+0 = a different action or scene). Be strict about the objects and actions each event names. \
+Reply as JSON: {{"events": [{{"id": "E1", "score": 0-10, "reason": "<at most 12 Vietnamese \
+words>"}}, ...]}}"""
+
+QA_PROMPT ="""Answer a question about a video moment from its frames and speech transcript.
 
 Query (Vietnamese): {query}
 Question: {question}
 Transcript around this moment:
 {transcript}
+
+Web-search notes (may be wrong; use one only if the video agrees with it or shows \
+nothing that contradicts it):
+{hints}
 
 Answer with the exact text, number or name as it appears in the video (on screen or \
 spoken), at most 100 characters, in the language it appears. Reply as JSON: \

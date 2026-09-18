@@ -1,10 +1,11 @@
+import json
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 
 from agent.config import AgentSettings, read_dotenv
-from agent.tasks import load_answers, load_tasks, task_from_text
+from agent.tasks import GoldRow, load_answers, load_tasks, task_from_text
 from agent.vi_numbers import spell_integer, spell_numbers
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +60,21 @@ class TaskTests(unittest.TestCase):
         self.assertEqual([row.frames[0] for row in zipped["query-p1-2-kis"]], [3123, 3225])
         self.assertEqual(zipped["query-p1-17-qa"][0].answer, "Đèo Tà Pứa")
         self.assertEqual(zipped["query-p1-16-trake"][0].frames, (9784, 10132, 10191))
+
+    def test_loads_a_round_from_the_team_visual_benchmark(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bench.json"
+            path.write_text(json.dumps({"cases": [
+                {"id": "Round 2 - 2026/query-p2-3-kis:1", "targets": [["L01_V001", 5], ["L01_V009", 7]]},
+                {"id": "Round 2 - 2026/query-p2-8-trake:2", "targets": [["L01_V002", 90]]},
+                {"id": "Round 2 - 2026/query-p2-8-trake:1", "targets": [["L01_V007", 1], ["L01_V002", 10]]},
+                {"id": "Round 1 - 2026/query-p1-1-kis:1", "targets": [["L01_V003", 1]]},
+            ]}), encoding="utf-8")
+            answers = load_answers(f"{path}::Round 2 - 2026")
+        self.assertEqual(sorted(answers), ["query-p2-3-kis", "query-p2-8-trake"])
+        self.assertEqual(answers["query-p2-3-kis"], [GoldRow("L01_V001", (5,)), GoldRow("L01_V009", (7,))])
+        # events in order, from the one video that carries all of them
+        self.assertEqual(answers["query-p2-8-trake"], [GoldRow("L01_V002", (10, 90))])
 
 
 class SettingsTests(unittest.TestCase):

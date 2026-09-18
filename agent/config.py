@@ -47,6 +47,10 @@ class AgentSettings:
     gemini_api_key: str
     gemini_model: str
     gemini_thinking_level: str
+    # Only for a server whose transcript index is raw ASR (numbers spelled out).
+    spoken_numbers: bool = False
+    # auto | batch | compat -- see SearchClient.
+    search_api: str = "auto"
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None, dotenv: Path = ROOT / ".env"):
@@ -71,4 +75,6 @@ class AgentSettings:
             gemini_api_key=required("GEMINI_API_KEY"),
             gemini_model=merged.get("GEMINI_MODEL", "gemini-3.8-flash"),
             gemini_thinking_level=merged.get("GEMINI_THINKING_LEVEL", "low"),
+            spoken_numbers=merged.get("AIC_AGENT_SPOKEN_NUMBERS", "0").lower() in ("1", "true", "yes"),
+            search_api=merged.get("AIC_AGENT_SEARCH_API", "auto"),
         )

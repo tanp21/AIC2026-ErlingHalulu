@@ -13,7 +13,7 @@ from .prompts import ANALYZE_SYSTEM
 from .vi_numbers import spell_numbers
 
 MAX_SCENES = 4
-MAX_VARIANTS = 3
+MAX_VARIANTS = 5  # caption + up to 4 paraphrases
 MAX_PHRASES = 3
 MAX_TEXT = 300
 BATCH_LIMIT = 12
@@ -111,26 +111,32 @@ def parse_plan(data, task) -> Plan:
     )
 
 
-def transcript_variants(phrase: str) -> list[str]:
-    """The phrase as written, plus with digits spelled out when it has any."""
-    spoken = spell_numbers(phrase)
-    return [phrase] if spoken == phrase else [spoken, phrase]
+def transcript_text(phrase: str, spoken_numbers: bool = False) -> str:
+    """A transcript query as the index spells numbers.
+
+    The deployed index is built from cleaned transcripts, which write numbers as
+    digits ("130.000" matches, "một trăm ba mươi ngàn" does not). Raw ASR output
+    spells them out; `spoken_numbers` is for a server indexing that instead.
+    """
+    return spell_numbers(phrase) if spoken_numbers else phrase
 
 
-def initial_queries(plan: Plan, task) -> list[dict]:
+def initial_queries(plan: Plan, task, spoken_numbers: bool = False) -> list[dict]:
     """Round-1 batch: every channel the plan names, capped at the server's batch size.
 
-    Built in priority order and truncated: the target scene's captions first, then
-    temporal structure, then transcript and OCR, then the remaining scenes.
+    Built in priority order and truncated: the target scene first, then temporal
+    structure, then transcript and OCR, then the remaining scenes. Each scene is one
+    visual query whose paraphrases the server fuses into the caption's vector.
     """
-    ordered_scenes = [plan.target_scene] + [
-        index for index in range(len(plan.scenes)) if index != plan.target_scene
-    ]
-    first, rest = [], []
-    for position, index in enumerate(ordered_scenes):
-        for variant, caption in enumerate(plan.scenes[index].visual_en):
-            query = {"kind": "visual", "id": f"r1.s{index}v{variant}", "text": caption, "limit": 200}
-            (first if position == 0 else rest).append(query)
+    def visual(index):
+        caption, *paraphrases = plan.scenes[index].visual_en
+        query = {"kind": "visual", "id": f"r1.s{index}", "text": caption, "limit": 200}
+        if paraphrases:
+            query["paraphrases"] = paraphrases[:4]
+        return query
+
+    first = [visual(plan.target_scene)]
+    rest = [visual(index) for index in range(len(plan.scenes)) if index != plan.target_scene]
 
     temporal = []
     events = plan.events_en if task.kind == "trake" else [
@@ -143,11 +149,11 @@ def initial_queries(plan: Plan, task) -> list[dict]:
             "limit": 30,
         })
         if task.kind == "trake" and plan.transcript_vi:
-            temporal[0]["audio_text"] = transcript_variants(plan.transcript_vi[0])[0]
+            temporal[0]["audio_text"] = transcript_text(plan.transcript_vi[0], spoken_numbers)
 
     spoken = []
     for index, phrase in enumerate(plan.transcript_vi):
-        variant = transcript_variants(phrase)[0]
+        variant = transcript_text(phrase, spoken_numbers)
         spoken.append({"kind": "audio", "id": f"r1.a{index}", "text": variant,
                        "method": "keyword", "limit": 100})
         if index == 0:
@@ -157,11 +163,7 @@ def initial_queries(plan: Plan, task) -> list[dict]:
         {"kind": "ocr", "id": f"r1.o{index}", "text": text, "limit": 50}
         for index, text in enumerate(plan.ocr)
     ]
-    # At least one caption per extra scene before the lower-priority variants.
-    rest_heads = [query for query in rest if query["id"].endswith("v0")]
-    rest_tails = [query for query in rest if not query["id"].endswith("v0")]
-    batch = first + temporal + spoken + written + rest_heads + rest_tails
-    return batch[:BATCH_LIMIT]
+    return (first + temporal + spoken + written + rest)[:BATCH_LIMIT]
 
 
 def expected_events(plan: Plan, task) -> int:

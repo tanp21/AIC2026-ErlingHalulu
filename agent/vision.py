@@ -7,7 +7,9 @@ import threading
 from .llm import LLMError
 from .plan import describe_scenes
 from .pool import Verdict
-from .prompts import PICK_FRAME_PROMPT, QA_ANSWER_RULE, QA_PROMPT, SCENE_RULE, VERIFY_PROMPT
+from .prompts import (
+    PICK_FRAME_PROMPT, QA_ANSWER_RULE, QA_PROMPT, SCENE_RULE, SEQUENCE_PROMPT, VERIFY_PROMPT,
+)
 
 VERIFY_SCHEMA = {
     "type": "object",
@@ -37,6 +39,24 @@ PICK_SCHEMA = {
         "reason": {"type": "string"},
     },
     "required": ["id", "confidence"],
+}
+SEQUENCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "events": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "score": {"type": "integer", "minimum": 0, "maximum": 10},
+                    "reason": {"type": "string"},
+                },
+                "required": ["id", "score"],
+            },
+        }
+    },
+    "required": ["events"],
 }
 ANSWER_SCHEMA = {
     "type": "object",
@@ -91,9 +111,17 @@ class Inspector:
         return data
 
     def images(self, frames, width=None):
+        """JPEG bytes per (video, frame), or None for a frame the server could not cut."""
         width = self.image_width if width is None else width
+
+        def fetch(frame):
+            try:
+                return self._image(frame[0], frame[1], width)
+            except Exception:
+                return None
+
         with ThreadPoolExecutor(self._workers) as pool:
-            return list(pool.map(lambda frame: self._image(frame[0], frame[1], width), frames))
+            return list(pool.map(fetch, frames))
 
     def verify(self, task, plan, candidates, question=None) -> tuple[dict[str, Verdict], list[str]]:
         """Judge candidates in chunks; returns verdicts by id and any chunk errors."""
@@ -111,7 +139,10 @@ class Inspector:
 
         def judge(chunk):
             data = self.images([(c.video_id, c.frame_idx) for c in chunk])
-            labelled = [(candidate_label(c), image) for c, image in zip(chunk, data)]
+            # A candidate without an image stays unverified instead of failing its chunk.
+            labelled = [(candidate_label(c), image) for c, image in zip(chunk, data) if image]
+            if not labelled:
+                raise RuntimeError("no candidate image could be fetched")
             return self.gemini.judge(labelled, prompt, VERIFY_SCHEMA)
 
         verdicts, errors = {}, []
@@ -143,7 +174,9 @@ class Inspector:
         labels = [f"F{index}" for index in range(len(frames))]
         data = self.images([(f["video_id"], f["frame_idx"]) for f in frames], width=320)
         labelled = [(f"[{label}] t={frame['time']:.1f}s", image)
-                    for label, frame, image in zip(labels, frames, data)]
+                    for label, frame, image in zip(labels, frames, data) if image]
+        if not labelled:
+            return None, 0, "no frame image could be fetched"
         try:
             reply = self.gemini.judge(
                 labelled, PICK_FRAME_PROMPT.format(query=query, event=event), PICK_SCHEMA,
@@ -156,16 +189,39 @@ class Inspector:
             return None, int(reply.get("confidence", 0) or 0), str(reply.get("reason", ""))
         return frames[labels.index(label)], int(reply.get("confidence", 0) or 0), str(reply.get("reason", ""))
 
-    def answer(self, task, question, candidate, neighbours, cues):
+    def check_sequence(self, task, events, video_id, frames):
+        """Per-event scores (0-10, one per frame) for one TRAKE path.
+
+        Each frame is judged against its own event, unlike `verify`, which scores a
+        keyframe against the whole query -- where an intro shot the query mentions
+        for context outscores the events themselves.
+        """
+        data = self.images([(video_id, frame) for frame in frames])
+        if not all(data):
+            raise RuntimeError("an event frame image could not be fetched")
+        labelled = [(f"[E{index + 1}] {video_id} frame {frame}", image)
+                    for index, (frame, image) in enumerate(zip(frames, data))]
+        listing = "\n".join(f"E{index + 1}: {event}" for index, event in enumerate(events))
+        reply = self.gemini.judge(
+            labelled, SEQUENCE_PROMPT.format(query=task.text, events=listing), SEQUENCE_SCHEMA,
+            max_output_tokens=2048,
+        )
+        scores = {str(item.get("id", "")).strip("[] "): float(item.get("score", 0) or 0)
+                  for item in reply.get("events", [])}
+        return [min(max(scores.get(f"E{index + 1}", 0.0), 0.0), 10.0) for index in range(len(frames))]
+
+    def answer(self, task, question, candidate, neighbours, cues, hints=""):
         """Read a QA answer from one moment: its full frame, neighbours, and speech."""
         frames = [(candidate.video_id, candidate.frame_idx)]
         frames += [(f["video_id"], f["frame_idx"]) for f in neighbours
                    if f["frame_idx"] != candidate.frame_idx][:6]
         data = [self._image(candidate.video_id, candidate.frame_idx, 0)]
         data += self.images(frames[1:])
-        labelled = [(f"[{video}:{frame}]", image) for (video, frame), image in zip(frames, data)]
+        labelled = [(f"[{video}:{frame}]", image)
+                    for (video, frame), image in zip(frames, data) if image]
         prompt = QA_PROMPT.format(
             query=task.text, question=question,
             transcript=transcript_window(cues, candidate.time),
+            hints=hints or "(none)",
         )
         return self.gemini.judge(labelled, prompt, ANSWER_SCHEMA, max_output_tokens=1024)
