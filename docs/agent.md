@@ -38,6 +38,12 @@ finalize: ranking (verified matches first) · Q&A answer read from the frame/spe
   finish-only turn, so what it learned (a name found on the web, its own ranking) is not
   lost. For Q&A the final answer then comes from `finish`, or else from a dedicated
   reading of the top moment (full frame, neighbours, transcript, and web notes as hints).
+- **An early stop must survive a falsifier.** Before round 1 is accepted, Gemini sees
+  the top candidate with its neighbouring keyframes and tries to contradict each detail
+  of the query. A rejection demotes the candidate to 5/10 and hands the run to the
+  loop. On the first live run, 2 of 13 early stops were confident wrong matches.
+- **Q&A answers are read at up to 3 moments** of the top video and decided by majority
+  (ties to confidence): one keyframe can hide what is being counted or read.
 - **TRAKE paths are judged per event.** Verification scores a frame against the whole
   query, where an intro shot the query mentions for context can outscore the events
   themselves. Each of the server's top paths is therefore sent to Gemini as E1..En and
@@ -165,6 +171,34 @@ python -m agent run queries/SOTUYEN2-bo-de-thi.zip   --answers "benchmarks/visua
 visual benchmarks use) of any gold frame as a hit, or anywhere between the two frames
 of an organiser key that marks a clip by its first and last frame. Use its
 numbers to compare agent versions, not to predict the leaderboard.
+
+## Results so far (2026-09-18, team server, compat mode)
+
+Same 10 s tolerance as `benchmarks/visual/visual_embedding_benchmark_2026_en.json`. The
+PE-Core row is that benchmark's single human-approved caption per case. Its case sets
+differ slightly (it scores TRAKE events separately), so read the comparison as
+direction, not exact margin.
+
+| Round (queries) | Method | R@1 | R@5 | MRR | Video@1 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Round 1 (25) | PE-Core caption | 22.2% | 37.0% | 0.31 | |
+| Round 1 (25) | agent v2 / v3 | 56% / 52% | 76% / 72% | 0.63 / 0.61 | 84% / 72% |
+| Round 2 (30) | PE-Core caption | 38.9% | 63.9% | 0.50 | |
+| Round 2 (30) | agent v3 | 66.7% | 73.3% | 0.70 | 86.7% |
+
+- Round 2 was never used while tuning the agent. Round 1 was.
+- One query is 3-4 points, and LLM plans and verdicts vary between runs. The v2 and v3
+  swings on Round 1 are mostly queries that did not touch the changed code, so treat a
+  few points as noise.
+- Q&A answers: 3/4 correct on Round 1 v3. The team benchmark has no answer strings for
+  Round 2.
+- Time per query: median 29 s (Round 1) and 99 s (Round 2), maximum about 6 min. Most of
+  it is Gemini verification and loop turns; compat-mode audio search adds 5-10 s per
+  transcript query.
+- Remaining failure types: right video but wrong frame in long lecture shots;
+  confident look-alikes among same-genre videos (lion dances, lecture sets); VLM
+  counting; and TRAKE, where the gold video is often outside the server's top temporal
+  paths.
 
 ## Tuning
 

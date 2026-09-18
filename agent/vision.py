@@ -8,7 +8,8 @@ from .llm import LLMError
 from .plan import describe_scenes
 from .pool import Verdict
 from .prompts import (
-    PICK_FRAME_PROMPT, QA_ANSWER_RULE, QA_PROMPT, SCENE_RULE, SEQUENCE_PROMPT, VERIFY_PROMPT,
+    FALSIFY_PROMPT, PICK_FRAME_PROMPT, QA_ANSWER_RULE, QA_PROMPT, SCENE_RULE, SEQUENCE_PROMPT,
+    VERIFY_PROMPT,
 )
 
 VERIFY_SCHEMA = {
@@ -57,6 +58,25 @@ SEQUENCE_SCHEMA = {
         }
     },
     "required": ["events"],
+}
+FALSIFY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "details": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "detail": {"type": "string"},
+                    "status": {"type": "string", "enum": ["confirmed", "contradicted", "not_visible"]},
+                },
+                "required": ["detail", "status"],
+            },
+        },
+        "verdict": {"type": "string", "enum": ["accept", "reject"]},
+        "reason": {"type": "string"},
+    },
+    "required": ["details", "verdict"],
 }
 ANSWER_SCHEMA = {
     "type": "object",
@@ -180,7 +200,7 @@ class Inspector:
         try:
             reply = self.gemini.judge(
                 labelled, PICK_FRAME_PROMPT.format(query=query, event=event), PICK_SCHEMA,
-                max_output_tokens=1024,
+                max_output_tokens=4096,
             )
         except LLMError as exc:
             return None, 0, str(exc)
@@ -188,6 +208,26 @@ class Inspector:
         if label not in labels:
             return None, int(reply.get("confidence", 0) or 0), str(reply.get("reason", ""))
         return frames[labels.index(label)], int(reply.get("confidence", 0) or 0), str(reply.get("reason", ""))
+
+    def falsify(self, task, candidate, neighbours):
+        """A skeptical second look before committing: (rejected, reason, contradicted).
+
+        Uses the neighbouring keyframes too, since one keyframe can miss a detail the
+        next one shows.
+        """
+        frames = sorted({(f["video_id"], f["frame_idx"]) for f in neighbours}
+                        | {(candidate.video_id, candidate.frame_idx)}, key=lambda item: item[1])
+        data = self.images(frames)
+        labelled = [
+            ("[CANDIDATE]" if frame == candidate.frame_idx else f"[frame {frame}]", image)
+            for (_, frame), image in zip(frames, data) if image
+        ]
+        reply = self.gemini.judge(labelled, FALSIFY_PROMPT.format(query=task.text), FALSIFY_SCHEMA,
+                                  max_output_tokens=4096)
+        contradicted = [str(item.get("detail", "")) for item in reply.get("details", [])
+                        if item.get("status") == "contradicted"]
+        rejected = reply.get("verdict") == "reject" or bool(contradicted)
+        return rejected, str(reply.get("reason", ""))[:200], contradicted
 
     def check_sequence(self, task, events, video_id, frames):
         """Per-event scores (0-10, one per frame) for one TRAKE path.
@@ -204,7 +244,7 @@ class Inspector:
         listing = "\n".join(f"E{index + 1}: {event}" for index, event in enumerate(events))
         reply = self.gemini.judge(
             labelled, SEQUENCE_PROMPT.format(query=task.text, events=listing), SEQUENCE_SCHEMA,
-            max_output_tokens=2048,
+            max_output_tokens=4096,
         )
         scores = {str(item.get("id", "")).strip("[] "): float(item.get("score", 0) or 0)
                   for item in reply.get("events", [])}
@@ -224,4 +264,4 @@ class Inspector:
             transcript=transcript_window(cues, candidate.time),
             hints=hints or "(none)",
         )
-        return self.gemini.judge(labelled, prompt, ANSWER_SCHEMA, max_output_tokens=1024)
+        return self.gemini.judge(labelled, prompt, ANSWER_SCHEMA, max_output_tokens=4096)

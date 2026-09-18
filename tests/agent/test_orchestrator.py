@@ -5,7 +5,7 @@ import unittest
 from agent.llm import GroundedAnswer, LLMError
 from agent.orchestrator import Agent, AgentOptions
 from agent.tasks import task_from_text
-from agent.vision import ANSWER_SCHEMA, PICK_SCHEMA, SEQUENCE_SCHEMA
+from agent.vision import ANSWER_SCHEMA, FALSIFY_SCHEMA, PICK_SCHEMA, SEQUENCE_SCHEMA
 
 PLAN = {
     "summary_vi": "tìm cảnh",
@@ -46,8 +46,11 @@ def tool_call(name, **args):
 class FakeGemini:
     """Scores candidates from `scores` keyed by (video, frame); everything else 2."""
 
-    def __init__(self, scores=None, answers=None, pick="F2", reading="42", event_scores=None):
+    def __init__(self, scores=None, answers=None, pick="F2", reading="42", event_scores=None,
+                 reject=()):
         self.scores = scores or {}
+        self.reject = set(reject)  # videos the falsifier contradicts
+        self.falsified = []
         self.event_scores = event_scores or {}
         self.reading = reading
         self.answers = answers or {}
@@ -58,6 +61,13 @@ class FakeGemini:
     def judge(self, images, prompt, schema, **_):
         if schema is PICK_SCHEMA:
             return {"id": self.pick, "confidence": 8, "reason": "bắt đầu"}
+        if schema is FALSIFY_SCHEMA:
+            video = self.frame_video
+            self.falsified.append(video)
+            if video in self.reject:
+                return {"details": [{"detail": "sai màu áo", "status": "contradicted"}],
+                        "verdict": "reject", "reason": "áo xanh chứ không phải đỏ"}
+            return {"details": [{"detail": "thuyền đỏ", "status": "confirmed"}], "verdict": "accept"}
         if schema is SEQUENCE_SCHEMA:
             video = re.match(r"\[E1\] (\S+) ", images[0][0]).group(1)
             score = self.event_scores.get(video, 5)
@@ -65,6 +75,10 @@ class FakeGemini:
         if schema is ANSWER_SCHEMA:
             self.answer_calls += 1
             self.answer_prompt = prompt
+            if isinstance(self.reading, dict):  # frame -> (answer, confidence)
+                frame = int(re.match(r"\[\S+:(\d+)\]", images[0][0]).group(1))
+                text, confidence = self.reading[frame]
+                return {"answer": text, "confidence": confidence, "evidence": "đếm"}
             return {"answer": self.reading, "confidence": 7, "evidence": "trên bảng"}
         # the follow-up question asked via `inspect` in the neighbours test
         follow_up = "Chữ trên biển" in prompt
@@ -125,6 +139,13 @@ def make_agent(deepseek, gemini, search, **options):
         return original(task, plan, candidates, question)
 
     agent.inspector.verify = verify
+    original_falsify = agent.inspector.falsify
+
+    def falsify(task, candidate, neighbours):
+        gemini.frame_video = candidate.video_id
+        return original_falsify(task, candidate, neighbours)
+
+    agent.inspector.falsify = falsify
     return agent
 
 
@@ -141,8 +162,20 @@ class AgentRunTests(unittest.TestCase):
         self.assertIsNone(result.error)
         self.assertEqual(deepseek.chats, [])
         self.assertEqual((result.ranking[0].video_id, result.ranking[0].frame_idx), ("L01_V002", 200))
-        self.assertEqual([entry["tool"] for entry in result.trace], ["plan", "search", "verify"])
+        self.assertEqual([entry["tool"] for entry in result.trace], ["plan", "search", "verify", "falsify"])
         self.assertEqual({q["kind"] for q in search.batches[0]}, {"visual", "audio"})
+
+    def test_a_falsified_confident_match_does_not_stop_the_run(self):
+        deepseek = FakeDeepSeek(turns=[tool_call("finish", ranking=["C3"])])
+        gemini = FakeGemini({("L01_V002", 200): 10, ("L01_V003", 300): 8}, reject={"L01_V002"})
+        result = make_agent(deepseek, gemini, FakeSearch(HITS)).run(task_from_text("q-kis", "thuyền đỏ"))
+
+        self.assertEqual(gemini.falsified, ["L01_V002"])
+        self.assertEqual(len(deepseek.chats), 1)  # the loop ran
+        rejected = next(c for c in result.ranking if c.video_id == "L01_V002")
+        self.assertEqual(rejected.verdict.score, 10.0)  # an objection never demotes
+        self.assertIn("Phản biện: sai màu áo", rejected.verdict.reason)
+        self.assertEqual(result.ranking[0].video_id, "L01_V003")  # the loop's finish decides
 
     def test_a_frame_the_server_cannot_cut_stays_unverified_alone(self):
         search = FakeSearch(HITS)
@@ -216,6 +249,19 @@ class AgentRunTests(unittest.TestCase):
         result = make_agent(FakeDeepSeek(plan), gemini, FakeSearch(HITS)).run(task)
         self.assertEqual(result.answer, "5")
         self.assertIn("unconfirmed", result.answer_evidence)
+
+    def test_answer_readings_across_moments_vote(self):
+        task = task_from_text("q-qa", "Có bao nhiêu vị trí động đất cấp 4?")
+        plan = {**PLAN, "question_vi": "Bao nhiêu vị trí?", "answer_source": "visual_count"}
+        hits = [("L01_V001", 100, 10.0), ("L01_V001", 300, 30.0), ("L01_V001", 500, 50.0)]
+        gemini = FakeGemini({("L01_V001", 100): 9, ("L01_V001", 300): 8, ("L01_V001", 500): 7},
+                            reading={100: ("8", 9), 300: ("12", 7), 500: ("12", 6)})
+        result = make_agent(FakeDeepSeek(plan), gemini, FakeSearch(hits)).run(task)
+
+        self.assertEqual(gemini.answer_calls, 3)
+        self.assertEqual(result.answer, "12")
+        answer_step = next(entry for entry in result.trace if entry["tool"] == "answer")
+        self.assertIn("2/3 readings agree", answer_step["summary"])
 
     def test_spent_budget_gets_one_finish_only_turn(self):
         task = task_from_text("q-qa", "Tên của con đèo là gì?")

@@ -147,7 +147,23 @@ Which labelled frame is the FIRST one where this event is visible or begins? If 
 it, answer "none". Reply as JSON: {{"id": "<label or none>", "confidence": 0-10, \
 "reason": "<at most 15 Vietnamese words>"}}"""
 
-SEQUENCE_PROMPT = """These keyframes are one candidate answer to a TRAKE query: one frame per \
+FALSIFY_PROMPT = """A search agent believes the moment in these consecutive keyframes (time \
+order, the candidate is labelled CANDIDATE) is the one described by the query below. Your job \
+is to try to prove it wrong.
+
+Query (Vietnamese): {query}
+
+List every concrete, checkable detail the query states (people and their clothing, counts, \
+colours, objects, on-screen text, actions, setting). For each, decide from the frames: \
+"confirmed", "contradicted" (a frame clearly shows something incompatible) or "not_visible" \
+(these frames cannot show it, e.g. it belongs to another scene of the clip). Order of \
+events, who finishes first, what happens before or after, and anything outside these few \
+seconds are never "contradicted" from these frames alone: mark them "not_visible". Verdict \
+"reject" if any detail is contradicted, otherwise "accept". Reply as JSON: {{"details": \
+[{{"detail": "<short Vietnamese>", "status": "confirmed|contradicted|not_visible"}}], \
+"verdict": "accept|reject", "reason": "<at most 20 Vietnamese words>"}}"""
+
+SEQUENCE_PROMPT ="""These keyframes are one candidate answer to a TRAKE query: one frame per \
 event, in time order, all from the same video.
 
 Query (Vietnamese): {query}

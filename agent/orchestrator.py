@@ -16,6 +16,7 @@ import logging
 import re
 import time
 
+from .evaluate import normalize_answer
 from .llm import LLMError
 from .plan import Plan, analysis_messages, expected_events, initial_queries, parse_plan, transcript_text
 from .pool import VERIFIED_MATCH, Candidate, CandidatePool, Sequence
@@ -35,6 +36,8 @@ class AgentOptions:
     verify_top: int = 12
     verify_per_step: int = 8
     early_stop_score: float = 9.0
+    falsify: bool = True
+    answer_moments: int = 3
     trake_check: int = 6
     trake_refine: int = 2
     neighbour_radius: int = 6
@@ -256,7 +259,39 @@ class _Run:
             return False
         if self.task.kind == "qa" and not best.verdict.answer:
             return False
-        return self.task.kind != "trake"
+        if self.task.kind == "trake":
+            return False
+        return not self._falsified(best)
+
+    def _falsified(self, candidate):
+        """Skeptical re-check before stopping early; a rejection sends the run to the loop.
+
+        On the first live round-1 run, 2 of 13 early stops were confident wrong
+        matches (a different lion dance, a different bridge). A separate falsifier
+        caught a third of wrong submissions in the VBS agent study. Its first live
+        run here rejected two correct matches over details a few keyframes cannot
+        show (finishing order), hence the prompt's not_visible rule and a rejection
+        that never lowers the score.
+        """
+        if not self.options.falsify:
+            return False
+        started = self.agent.clock()
+        try:
+            neighbours = self.agent.search.neighbours(candidate.video_id, candidate.frame_idx, 2)
+            rejected, reason, contradicted = self.agent.inspector.falsify(
+                self.task, candidate, neighbours)
+        except Exception as exc:  # no second opinion is not a rejection
+            self.log("falsify", {"candidate": candidate.cid}, f"failed: {exc}", started)
+            return False
+        if rejected:
+            # Keep the score: on the live round-1 run both rejections hit correct matches
+            # (a finish order no single keyframe can show). A rejection only denies the
+            # early stop; the objection rides along for the loop and the human to weigh.
+            objection = "; ".join(contradicted) or reason
+            candidate.verdict.reason = f"{candidate.verdict.reason} | Phản biện: {objection}"[:300]
+        self.log("falsify", {"candidate": candidate.cid},
+                 f"{'reject' if rejected else 'accept'}: {contradicted or reason}", started)
+        return rejected
 
     # -- tools -----------------------------------------------------------------------
     def _run_search(self, queries, label):
@@ -529,29 +564,60 @@ class _Run:
         answer = str((self.finished or {}).get("answer") or "").strip()
         evidence = "agent (finish)"
         if not answer and self.result.ranking:
-            top = self.result.ranking[0]
-            started = self.agent.clock()
-            try:
-                neighbours = self.agent.search.neighbours(top.video_id, top.frame_idx, 3)
-                cues = self.cues.get(top.video_id) or self.agent.search.transcript(top.video_id)
-                hints = "\n".join(
-                    f"- {entry['question']}: {entry['answer'][:300]}"
-                    for entry in self.result.lookups if entry.get("answer")
-                )
-                reply = self.agent.inspector.answer(
-                    self.task, self.plan.question_vi or self.task.text, top, neighbours, cues, hints,
-                )
-                answer = str(reply.get("answer") or "").strip()
-                evidence = f"read from {top.cid}: {reply.get('evidence') or ''}"
-            except Exception as exc:
-                evidence = f"answer step failed: {exc}"
-            self.log("answer", {"candidate": top.cid}, f"{answer!r} ({evidence})", started)
+            answer, evidence = self._read_answer()
         if not answer:
             top = next((c for c in self.result.ranking if c.verdict and c.verdict.answer), None)
             if top is not None:
                 answer, evidence = top.verdict.answer, f"verdict on {top.cid} (unconfirmed)"
         self.result.answer = answer[:100] or None
         self.result.answer_evidence = evidence
+
+    def _read_answer(self):
+        """Read the answer at up to `answer_moments` moments of the top video.
+
+        One keyframe can hide what is asked (a pointer over the map, a legend cut
+        off); the answer most readings agree on wins, ties going to confidence.
+        """
+        top_video = self.result.ranking[0].video_id
+        moments = [c for c in self.result.ranking if c.video_id == top_video][:self.options.answer_moments]
+        started = self.agent.clock()
+        try:
+            cues = self.cues.get(top_video) or self.agent.search.transcript(top_video)
+        except Exception:
+            cues = []
+        hints = "\n".join(f"- {entry['question']}: {entry['answer'][:300]}"
+                          for entry in self.result.lookups if entry.get("answer"))
+        question = self.plan.question_vi or self.task.text
+
+        def read(candidate):
+            neighbours = self.agent.search.neighbours(candidate.video_id, candidate.frame_idx, 3)
+            return self.agent.inspector.answer(self.task, question, candidate, neighbours, cues, hints)
+
+        readings, errors = [], []
+        with ThreadPoolExecutor(max_workers=len(moments)) as pool:
+            for candidate, future in [(c, pool.submit(read, c)) for c in moments]:
+                try:
+                    reply = future.result()
+                except Exception as exc:
+                    errors.append(str(exc)[:120])
+                    continue
+                text = str(reply.get("answer") or "").strip()
+                if text:
+                    readings.append((text, float(reply.get("confidence") or 0), candidate.cid,
+                                     str(reply.get("evidence") or "")))
+        if not readings:
+            self.log("answer", {"moments": [c.cid for c in moments]}, f"no reading; errors={errors}", started)
+            return "", "no reading"
+        votes = {}
+        for text, confidence, _, _ in readings:
+            key = normalize_answer(text)
+            count, best = votes.get(key, (0, 0.0))
+            votes[key] = (count + 1, max(best, confidence))
+        winner = max(readings, key=lambda r: (*votes[normalize_answer(r[0])], r[1]))
+        text, confidence, cid, evidence = winner
+        summary = f"{text!r} from {cid} ({votes[normalize_answer(text)][0]}/{len(readings)} readings agree)"
+        self.log("answer", {"readings": [(r[0], r[1], r[2]) for r in readings]}, summary, started)
+        return text, f"read from {cid}: {evidence}"
 
     def _finalize_sequences(self):
         """Check the server's best paths event by event, then pin the best ones' frames."""
