@@ -1,0 +1,56 @@
+{
+  "kind": "emb",
+  "include_caption": true,
+  "n_para": 4,
+  "weights": [
+    0.5,
+    0.125,
+    0.125,
+    0.125,
+    0.125
+  ],
+  "weights_scheme": "cap50",
+  "k": 10,
+  "paraphrase_file_hash": null,
+  "prompt_hash": "9c0365bdcabc4c13",
+  "prompt_version": "v1",
+  "accepted_on_dev": true,
+  "configs_tried": 18,
+  "frozen_at": "2026-09-17T00:52:05Z",
+  "holdout_roster": [
+    {
+      "name": "caption_approved",
+      "kind": "caption",
+      "n_para": 0
+    },
+    {
+      "name": "caption_approved_shotdedup",
+      "kind": "shotdedup",
+      "n_para": 0
+    },
+    {
+      "name": "3paraphrases_rrf_equal_k10",
+      "kind": "rrf",
+      "include_caption": false,
+      "n_para": 3,
+      "weights_scheme": "equal",
+      "k": 10
+    },
+    {
+      "name": "caption+2paraphrases_rrf_cap50_k10",
+      "kind": "rrf",
+      "include_caption": true,
+      "n_para": 2,
+      "weights_scheme": "cap50",
+      "k": 10
+    },
+    {
+      "name": "B*",
+      "kind": "emb",
+      "include_caption": true,
+      "n_para": 4,
+      "weights_scheme": "cap50",
+      "k": 10
+    }
+  ]
+}
