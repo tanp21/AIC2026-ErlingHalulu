@@ -129,7 +129,7 @@ Score each candidate 0-10:
 1-3 = related but contradicted by a visible detail (wrong colour, count, object, setting)
 0 = unrelated
 Be strict about colours, counts, clothing and objects the query names. \
-{answer_rule}"reason": at most 20 Vietnamese words naming what matches or contradicts."""
+{answer_rule}"reason": at most 12 Vietnamese words naming what matches or contradicts."""
 
 SCENE_RULE = """One keyframe shows only one moment: judge it against the scene it can \
 match and give that scene's index in "scene".
@@ -196,3 +196,48 @@ LOOKUP_PROMPT = """Answer briefly for a video search engine. Question: {question
 
 Reply in 1-3 sentences with the concrete name(s): the Vietnamese name and the English name \
 when they differ, plus any visual detail useful for finding it in TV footage."""
+
+REWRITE_SYSTEM = f"""You run the second and last search round for one query of AI Challenge HCMC, a VBS-style video retrieval competition. Round 1 did not find a confident match.
+
+{CORPUS}
+
+{CHANNELS}
+
+You see the query, the round-1 plan, web notes and the round-1 candidates with Gemini's 0-10 verdicts (reasons name what matched or was contradicted). Write up to 6 NEW queries that fix what round 1 missed:
+- visual: rewrite the caption around the detail the verdicts found missing or wrong, or the scene's most distinctive element; give "paraphrases" (faithful rewordings). When a promising video is known (a candidate scored 5+ or several channels agree), add a visual query with "video_ids" to pin the exact moment inside it.
+- audio: Vietnamese phrases a narrator would say, especially names from the web notes (dish names, places, people, organisations), numbers as digits.
+- ocr: exact on-screen strings the query quotes or the web notes name.
+- temporal: 2-6 ordered English captions for consecutive scenes of one video.
+Never repeat a round-1 query. Reply with one JSON object and nothing else:
+{{"queries": [{{"kind": "visual", "text": "...", "paraphrases": ["..."], "video_ids": []}}, {{"kind": "audio", "text": "..."}}, {{"kind": "ocr", "text": "..."}}, {{"kind": "temporal", "events": ["...", "..."]}}]}}"""
+
+COOKING_LOOKUP_PROMPT = """Mô tả dưới đây là một đoạn trong kho video truyền hình Việt Nam, nhiều khả năng là một tập của chương trình dạy nấu ăn "Món ngon mỗi ngày" (hoặc chương trình ẩm thực tương tự). Hãy tìm trên web tập/công thức khớp nhất với mô tả và cho biết: tên món ăn, nguyên liệu chính kèm định lượng nếu có, và chi tiết nhận dạng (người nấu, cách trình bày).
+{question}
+Mô tả: {query}
+
+Trả lời ngắn gọn bằng tiếng Việt. Kết thúc bằng đúng các dòng:
+TỪ KHÓA: <tên món>; <2-4 nguyên liệu đặc trưng>
+ĐÁP ÁN: <câu trả lời ngắn cho câu hỏi, hoặc "không rõ">"""
+
+RECIPE_PROMPT = """Đây là một tập của chương trình nấu ăn truyền hình Việt Nam (nhiều khả năng "Món ngon mỗi ngày"). Lời thoại đầu tập:
+{opening}
+
+Lời thoại quanh cảnh được hỏi:
+{moment}
+
+Câu hỏi về video: {question}
+Mô tả cảnh: {query}
+
+Hãy xác định món ăn của tập này, tra công thức/tập đó trên web và trả lời câu hỏi. Ưu tiên đúng từ ngữ, con số và đơn vị mà chương trình dùng. Kết thúc bằng đúng một dòng:
+ĐÁP ÁN: <câu trả lời ngắn, tối đa 100 ký tự, hoặc "không rõ">"""
+
+FACT_PROMPT = """Một đoạn video tin tức/phóng sự truyền hình Việt Nam được mô tả như sau:
+{query}
+
+Câu hỏi: {question}
+Lời thoại (nhận dạng giọng nói tự động, tên riêng có thể bị sai chính tả) quanh cảnh này:
+{moment}
+
+Hãy tìm trên web bản tin/sự kiện này và trả lời câu hỏi, viết đúng chính tả tên riêng như \
+báo chí ghi. Kết thúc bằng đúng một dòng:
+ĐÁP ÁN: <câu trả lời ngắn, tối đa 100 ký tự, hoặc "không rõ">"""

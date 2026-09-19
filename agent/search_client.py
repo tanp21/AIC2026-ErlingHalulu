@@ -17,6 +17,14 @@ IMAGE_RETRYABLE_STATUS = RETRYABLE_STATUS | {500}
 THUMB_WIDTHS = (160, 320, 640)
 # Across all queries this process runs; the server bounds ffmpeg work per user too.
 MAX_IMAGE_REQUESTS = 6
+# A thumbnail normally takes 0.2-1 s, but over the tailnet about one request in 50
+# stalls for ~30 s while an immediate retry of the same frame takes 0.3 s; a short
+# timeout plus a retry keeps that stall out of the agent's 20 s budget.
+IMAGE_TIMEOUT = 5.0
+FRAME_TIMEOUT = 10.0
+LOOKUP_TIMEOUT = 8.0  # /context, /transcript
+# A batch takes 0.3-4 s; a retry supersedes a stalled one under latest-wins.
+BATCH_TIMEOUT = 20.0
 
 
 class SearchError(RuntimeError):
@@ -91,7 +99,8 @@ class SearchClient:
         with self._batch_lock:
             if self.api != "compat":
                 try:
-                    response = self._request("POST", "/agent/search", json={"queries": queries})
+                    response = self._request("POST", "/agent/search", json={"queries": queries},
+                                             timeout=BATCH_TIMEOUT)
                     return response.json()["results"]
                 except SearchError as exc:
                     if exc.status != 404 or self.api == "batch":
@@ -105,15 +114,16 @@ class SearchClient:
         with self._image_slots:
             if width == 0:
                 return self._request("GET", f"/frame/{video_id}/{frame_idx}",
-                                     retryable=IMAGE_RETRYABLE_STATUS).content
+                                     retryable=IMAGE_RETRYABLE_STATUS, timeout=FRAME_TIMEOUT).content
             width = min(THUMB_WIDTHS, key=lambda allowed: abs(allowed - width))
             return self._request("GET", f"/thumb/{video_id}/{frame_idx}", params={"w": width},
-                                 retryable=IMAGE_RETRYABLE_STATUS).content
+                                 retryable=IMAGE_RETRYABLE_STATUS, timeout=IMAGE_TIMEOUT).content
 
     def neighbours(self, video_id: str, frame_idx: int, radius: int = 6) -> list[dict]:
         """Indexed keyframes around one frame, in time order."""
         response = self._request(
-            "GET", f"/context/{video_id}/{frame_idx}", params={"radius": radius}
+            "GET", f"/context/{video_id}/{frame_idx}", params={"radius": radius},
+            timeout=LOOKUP_TIMEOUT,
         )
         return [
             {"video_id": frame["video_id"], "frame_idx": frame["frame_idx"], "time": frame["time"]}
@@ -122,7 +132,7 @@ class SearchClient:
 
     def transcript(self, video_id: str) -> list[dict]:
         """`[{"start", "end", "text"}]` cues for the whole video."""
-        return self._request("GET", f"/transcript/{video_id}").json()["cues"]
+        return self._request("GET", f"/transcript/{video_id}", timeout=LOOKUP_TIMEOUT).json()["cues"]
 
 
 def _detail(response):

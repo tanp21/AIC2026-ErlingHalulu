@@ -130,7 +130,7 @@ class FakeSearch:
 
 
 def make_agent(deepseek, gemini, search, **options):
-    agent = Agent(deepseek, gemini, search, AgentOptions(**options))
+    agent = Agent(deepseek, gemini, search, AgentOptions.for_mode(options.pop("mode", "deep"), **options))
     # the fake gemini needs each candidate's frame to look up its scripted score
     original = agent.inspector.verify
 

@@ -58,7 +58,7 @@ The retrieval agent is a separate HTTP client of the server (`uv sync --group ag
 
 ```bash
 uv run python -m agent plan queries/SOTUYEN1-bo-de-thi.zip        # planning only, no server needed
-uv run python -m agent run queries/SOTUYEN1-bo-de-thi.zip --answers queries/Round12026_answer.zip
+uv run python -m agent run queries/SOTUYEN1-bo-de-thi.zip --answers queries/Round12026_answer.zip   # fast, ~20 s/query; --mode auto|deep spend more
 ```
 
 Once per clone: `git config core.hooksPath .githooks` — the pre-commit hook is a fail-closed Gitleaks scan.

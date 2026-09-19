@@ -167,7 +167,7 @@ class Inspector:
 
         verdicts, errors = {}, []
         known = {candidate.cid for candidate in candidates}
-        with ThreadPoolExecutor(min(3, len(chunks))) as pool:
+        with ThreadPoolExecutor(min(4, len(chunks))) as pool:
             futures = [pool.submit(judge, chunk) for chunk in chunks]
             for future in futures:
                 try:
@@ -237,10 +237,12 @@ class Inspector:
         for context outscores the events themselves.
         """
         data = self.images([(video_id, frame) for frame in frames])
-        if not all(data):
-            raise RuntimeError("an event frame image could not be fetched")
+        if not any(data):
+            raise RuntimeError("no event frame image could be fetched")
+        # An event whose frame the server could not cut is scored 5 (unknown) below
+        # rather than failing the whole path.
         labelled = [(f"[E{index + 1}] {video_id} frame {frame}", image)
-                    for index, (frame, image) in enumerate(zip(frames, data))]
+                    for index, (frame, image) in enumerate(zip(frames, data)) if image]
         listing = "\n".join(f"E{index + 1}: {event}" for index, event in enumerate(events))
         reply = self.gemini.judge(
             labelled, SEQUENCE_PROMPT.format(query=task.text, events=listing), SEQUENCE_SCHEMA,
@@ -248,7 +250,8 @@ class Inspector:
         )
         scores = {str(item.get("id", "")).strip("[] "): float(item.get("score", 0) or 0)
                   for item in reply.get("events", [])}
-        return [min(max(scores.get(f"E{index + 1}", 0.0), 0.0), 10.0) for index in range(len(frames))]
+        return [min(max(scores.get(f"E{index + 1}", 0.0), 0.0), 10.0) if image else 5.0
+                for index, image in enumerate(data)]
 
     def answer(self, task, question, candidate, neighbours, cues, hints=""):
         """Read a QA answer from one moment: its full frame, neighbours, and speech."""

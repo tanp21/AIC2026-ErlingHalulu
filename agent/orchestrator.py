@@ -1,4 +1,11 @@
-"""One query, end to end: plan -> fan-out -> verify -> agent loop -> final ranking.
+"""One query, end to end: plan -> fan-out -> verify -> (rewrite | agent loop) -> ranking.
+
+Three modes share every step. `fast` (the default, ~10-20 s a query) runs round 1,
+at most one DeepSeek rewrite round without thinking, and does every Gemini call it
+can in parallel, with web lookups in the background. `deep` hands a weak round 1 to
+the multi-step DeepSeek tool loop below (70-90 s on average, several minutes on the
+hardest queries) for when there is time to spare. `auto` is fast, then the deep loop
+only for a query fast mode left unsure.
 
 Round 1 is deterministic (the plan's channels, run as one server batch, then the top
 candidates verified by Gemini) because it is where most queries are won and it must
@@ -9,8 +16,8 @@ videos, verify before committing).
 """
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor, wait
+from dataclasses import dataclass, field, replace
 import json
 import logging
 import re
@@ -18,23 +25,35 @@ import time
 
 from .evaluate import normalize_answer
 from .llm import LLMError
-from .plan import Plan, analysis_messages, expected_events, initial_queries, parse_plan, transcript_text
-from .pool import VERIFIED_MATCH, Candidate, CandidatePool, Sequence
-from .prompts import AGENT_SYSTEM, LOOKUP_PROMPT
+from .plan import (
+    TRAKE_TIGHT_GAP, Plan, analysis_messages, expected_events, initial_queries, parse_plan,
+    transcript_text,
+)
+from .pool import VERIFIED_MATCH, Candidate, CandidatePool, Sequence, local_path
+from .prompts import AGENT_SYSTEM, LOOKUP_PROMPT, REWRITE_SYSTEM
 from .tasks import Task
 from .vision import Inspector, transcript_window
+from .web import cooking_lookup, fact_lookup, is_cooking, recipe_lookup, similar, tagged
 
 logger = logging.getLogger("agent")
 VIDEO_ID = re.compile(r"^[A-Z]\d{2}_V\d{3}$")
 OBSERVE_TOP = 12
+# A reading whose evidence is the narration: its names went through ASR.
+SPOKEN_EVIDENCE = re.compile(r"lời|thoại|nói|phát thanh|thuyết minh|giọng|transcript|speech", re.IGNORECASE)
 
 
 @dataclass
 class AgentOptions:
+    mode: str = "fast"  # fast | deep | auto
     max_steps: int = 6
     time_budget: float = 300.0
     verify_top: int = 12
+    verify_chunk: int = 8
     verify_per_step: int = 8
+    accept_score: float = 9.0  # fast: a verified match this good skips the rewrite round
+    auto_web: bool = True  # background web searches for cooking queries and Q&A answers
+    escalate_below: float = 7.0  # auto: a best verdict under this goes on to the deep loop
+    escalate_budget: float = 120.0  # auto: total seconds allowed once escalated
     early_stop_score: float = 9.0
     falsify: bool = True
     answer_moments: int = 3
@@ -44,6 +63,23 @@ class AgentOptions:
     max_rows: int = 100
     plan_thinking: bool = False
     spoken_numbers: bool = False
+
+    @classmethod
+    def for_mode(cls, mode="fast", **overrides):
+        """Defaults tuned per mode; explicit overrides win.
+
+        One Gemini call takes ~4 s whether it judges 2 or 8 frames, so fast mode
+        splits work into more, smaller calls run side by side instead of fewer
+        large ones run in turn.
+        """
+        defaults = FAST_DEFAULTS if mode in ("fast", "auto") else {}
+        return cls(mode=mode, **{**defaults, **overrides})
+
+
+FAST_DEFAULTS = dict(
+    time_budget=20.0, verify_top=15, verify_chunk=5,
+    answer_moments=2, trake_check=8, trake_refine=1,
+)
 
 
 @dataclass
@@ -163,7 +199,7 @@ class Agent:
         self.gemini = gemini
         self.search = search
         self.options = options or AgentOptions()
-        self.inspector = Inspector(gemini, search)
+        self.inspector = Inspector(gemini, search, chunk_size=self.options.verify_chunk)
         self.clock = clock
 
     def run(self, task: Task) -> AgentResult:
@@ -183,13 +219,20 @@ class _Run:
         self.cues: dict[str, list] = {}
         self.finished: dict | None = None
         self.step = 0
+        self.cooking = agent.options.auto_web and is_cooking(task.text)
+        self.background = ThreadPoolExecutor(max_workers=3)
+        self.pending: list = []
+        self.budget = agent.options.time_budget
 
     # -- bookkeeping ---------------------------------------------------------------
     def elapsed(self):
         return self.agent.clock() - self.started
 
     def over_budget(self):
-        return self.elapsed() > self.options.time_budget
+        return self.elapsed() > self.budget
+
+    def remaining(self):
+        return self.budget - self.elapsed()
 
     def log(self, tool, args, summary, started):
         entry = {"step": self.step, "tool": tool, "args": args, "summary": summary,
@@ -200,18 +243,130 @@ class _Run:
     # -- main flow -----------------------------------------------------------------
     def execute(self) -> AgentResult:
         try:
-            self._plan()
-            self._round_one()
-            if not self._confident():
-                self._loop()
+            if self.options.mode in ("fast", "auto"):
+                self._fast()
+                if (self.options.mode == "auto" and self.task.kind != "trake"
+                        and self._best_score() < self.options.escalate_below):
+                    self.budget = self.options.escalate_budget
+                    self.log("escalate", {}, f"best={self._best_score():.0f} -> deep loop", self.agent.clock())
+                    self._loop()
+            else:
+                self._plan()
+                self._round_one()
+                if not self._confident():
+                    self._loop()
             self._finalize()
         except Exception as exc:
             logger.exception("%s failed", self.task.query_id)
             self.result.error = f"{type(exc).__name__}: {exc}"
             if self.result.plan is not None and not self.result.ranking:
                 self.result.ranking = self.pool.ordered()
+        finally:
+            # Lookups still running are dropped, not waited for: they only ever add hints.
+            self._collect_lookups(0)
+            self.background.shutdown(wait=False, cancel_futures=True)
         self.result.elapsed = self.elapsed()
         return self.result
+
+    # -- fast mode -----------------------------------------------------------------
+    def _fast(self):
+        """Plan, one batch, parallel verification, and one rewrite only if needed.
+
+        Web lookups (the plan's, and for cooking queries a recipe search from the
+        raw description, started before planning) run in the background and are
+        waited for only where their result is used.
+        """
+        if self.cooking:
+            self._lookup_later(cooking_lookup(self.task.text, None), "món ăn (Món ngon mỗi ngày)")
+        self._plan()
+        for question in self.plan.lookups:
+            self._lookup_later(LOOKUP_PROMPT.format(question=question), question)
+        self._run_search(initial_queries(self.plan, self.task, self.options.spoken_numbers), "round1")
+        if self.task.kind == "trake":
+            return  # paths are checked event by event in _finalize_sequences
+        self._verify(self.pool.to_verify(self.options.verify_top))
+        best = next((c for c in self.pool.ordered() if c.verdict), None)
+        # A 9-10 must survive the falsifier (~5 s): on round 2, fast mode's misses were
+        # mostly confident look-alikes it would have questioned. ~8 s is one DeepSeek
+        # call, one batch and one parallel verification.
+        confident = (best is not None and best.verdict.score >= self.options.accept_score
+                     and not self._falsified(best))
+        if not confident and self.remaining() > 8:
+            self._rewrite_round()
+
+    def _best_score(self):
+        return max((c.verdict.score for c in self.pool.candidates.values() if c.verdict), default=0.0)
+
+    def _lookup_later(self, prompt, label):
+        self.pending.append(self.background.submit(self._lookup, label, prompt))
+
+    def _collect_lookups(self, timeout):
+        """Move finished background lookups into the result, waiting up to `timeout` s."""
+        if not self.pending:
+            return
+        if timeout > 0:
+            wait(self.pending, timeout=timeout)
+        for future in [f for f in self.pending if f.done()]:
+            self.pending.remove(future)
+            if not future.cancelled() and future.exception() is None:
+                self.result.lookups.append(future.result())
+
+    def _web_notes(self):
+        return "\n".join(
+            f"- {entry['question']}: {entry.get('answer') or entry.get('error')}"
+            for entry in self.result.lookups
+        ) or "(none)"
+
+    def _rewrite_round(self):
+        """DeepSeek (no thinking, one call) rewrites what round 1 missed; runs and verifies it."""
+        self.step = 1
+        started = self.agent.clock()
+        # A cooking lookup started before planning is usually back by now; its dish
+        # name is what the transcript channel needs.
+        self._collect_lookups(min(3.0, max(0.0, self.remaining() - 10)))
+        messages = [
+            {"role": "system", "content": REWRITE_SYSTEM},
+            {"role": "user", "content": (
+                f"Task type: {self.task.kind}\nQuery:\n{self.task.text}\n\n"
+                f"Round-1 plan:\n{json.dumps(self.plan.to_dict(), ensure_ascii=False)}\n\n"
+                f"Web notes:\n{self._web_notes()}\n\nRound-1 result:\n{self.observation()}"
+            )},
+        ]
+        try:
+            data = self.agent.deepseek.chat_json(messages, thinking=False, max_tokens=2000)
+        except LLMError as exc:
+            data = {}
+            self.log("rewrite", {}, f"failed: {exc}", started)
+        raw_queries = data.get("queries") if isinstance(data, dict) else None
+        queries = [self._server_query(raw, index)
+                   for index, raw in enumerate((raw_queries or [])[:6]) if isinstance(raw, dict)]
+        queries = [query for query in queries if query]
+        # Right video, wrong moment is the commonest miss: look for the target scene
+        # inside the videos round 1 favoured.
+        caption, *paraphrases = self.plan.scenes[self.plan.target_scene].visual_en
+        scoped = {"kind": "visual", "id": "s1.scoped", "text": caption,
+                  "video_ids": self.pool.video_ranking()[:5], "limit": 100}
+        if paraphrases:
+            scoped["paraphrases"] = paraphrases[:4]
+        queries.append(scoped)
+        self.log("rewrite", {"queries": queries},
+                 "; ".join(str(q.get("text") or q.get("events"))[:60] for q in queries), started)
+        self._run_search(queries, "rewrite")
+        fresh = self._best_neighbours()
+        self._verify(fresh + self.pool.to_verify(self.options.verify_top - len(fresh)))
+
+    def _best_neighbours(self, radius=2):
+        """Unverified keyframes next to a promising-but-unsure match, for the exact moment."""
+        best = next((c for c in self.pool.ordered() if c.verdict), None)
+        if best is None or not 5 <= best.verdict.score < self.options.accept_score:
+            return []
+        try:
+            frames = self.agent.search.neighbours(best.video_id, best.frame_idx, radius)
+        except Exception:
+            return []
+        added = [self.pool.add_frame(f["video_id"], f["frame_idx"], f["time"], source=f"n.{best.cid}")
+                 for f in frames]
+        return [c for c in added if c.verdict is None][:4]
 
     def _plan(self):
         started = self.agent.clock()
@@ -238,12 +393,12 @@ class _Run:
             self._run_search(queries, "round1")
             for future in lookups:
                 self.result.lookups.append(future.result())
-        self._verify(self.pool.unverified(self.options.verify_top))
+        self._verify(self.pool.to_verify(self.options.verify_top))
 
-    def _lookup(self, question):
+    def _lookup(self, question, prompt=None):
         started = self.agent.clock()
         try:
-            answer = self.agent.gemini.web_search(LOOKUP_PROMPT.format(question=question))
+            answer = self.agent.gemini.web_search(prompt or LOOKUP_PROMPT.format(question=question))
         except LLMError as exc:
             entry = {"question": question, "error": str(exc)}
         else:
@@ -387,7 +542,7 @@ class _Run:
         if not queries:
             return f"No valid query. Rejected: {rejected}"
         note = self._run_search(queries, f"step{self.step}")
-        self._verify(self.pool.unverified(self.options.verify_per_step))
+        self._verify(self.pool.to_verify(self.options.verify_per_step))
         if rejected:
             note += f" Rejected invalid queries: {rejected}"
         return note
@@ -451,7 +606,7 @@ class _Run:
             lines.append("Temporal paths: " + "; ".join(
                 f"{s.video_id} frames={s.frames} candidates={s.candidate_ids}" for s in best))
         lines.append(f"Budget: step {self.step}/{self.options.max_steps}, "
-                     f"{self.elapsed():.0f}s/{self.options.time_budget:.0f}s used.")
+                     f"{self.elapsed():.0f}s/{self.budget:.0f}s used.")
         return "\n".join(lines)
 
     def _initial_message(self):
@@ -564,7 +719,10 @@ class _Run:
         answer = str((self.finished or {}).get("answer") or "").strip()
         evidence = "agent (finish)"
         if not answer and self.result.ranking:
-            answer, evidence = self._read_answer()
+            if self.options.mode != "deep":
+                answer, evidence = self._answer_with_web()
+            else:
+                answer, evidence, _ = self._read_answer()
         if not answer:
             top = next((c for c in self.result.ranking if c.verdict and c.verdict.answer), None)
             if top is not None:
@@ -607,7 +765,7 @@ class _Run:
                                      str(reply.get("evidence") or "")))
         if not readings:
             self.log("answer", {"moments": [c.cid for c in moments]}, f"no reading; errors={errors}", started)
-            return "", "no reading"
+            return "", "no reading", 0.0
         votes = {}
         for text, confidence, _, _ in readings:
             key = normalize_answer(text)
@@ -617,60 +775,191 @@ class _Run:
         text, confidence, cid, evidence = winner
         summary = f"{text!r} from {cid} ({votes[normalize_answer(text)][0]}/{len(readings)} readings agree)"
         self.log("answer", {"readings": [(r[0], r[1], r[2]) for r in readings]}, summary, started)
-        return text, f"read from {cid}: {evidence}"
+        return text, f"read from {cid}: {evidence}", confidence
+
+    def _answer_with_web(self):
+        """Read the answer from the video while the web answers the same question.
+
+        Cooking shows get a recipe search from the top video's own opening narration
+        (where the host names the dish); spoken and world-knowledge answers get a
+        news search from the narration around the moment, since ASR misspells names
+        ("Đèo Bứa" for "Đèo Tà Pứa"). Both run beside the reading, after round 1.
+        """
+        top = self.result.ranking[0]
+        question = self.plan.question_vi or self.task.text
+        recipe = None
+        # Every Q&A but a count: the planner's answer_source is a guess (the spoken pass
+        # name of p1-17 was planned as on_screen_text), and it runs beside the reading.
+        if self.cooking or (self.options.auto_web and self.plan.answer_source != "visual_count"):
+            try:
+                cues = self.cues.get(top.video_id) or self.agent.search.transcript(top.video_id)
+                self.cues[top.video_id] = cues
+            except Exception:
+                cues = []
+            if self.cooking:
+                label = f"công thức ({top.video_id})"
+                prompt = recipe_lookup(self.task.text, question, transcript_window(cues, 45.0, 45.0),
+                                       transcript_window(cues, top.time, 30.0))
+            else:
+                label = f"tra cứu đáp án ({top.video_id})"
+                prompt = fact_lookup(self.task.text, question, transcript_window(cues, top.time, 60.0))
+            recipe = self.background.submit(self._lookup, label, prompt)
+        # Earlier lookups are hints for the reading when they are back in time.
+        self._collect_lookups(min(3.0, max(0.0, self.remaining() - 8)))
+        video, evidence, confidence = self._read_answer()
+        web, web_source = None, None
+        if recipe is not None:
+            try:
+                entry = recipe.result(timeout=max(2.0, self.remaining() + 8))
+            except Exception:
+                entry = {}
+            if entry:
+                self.result.lookups.append(entry)
+                web, web_source = tagged(entry.get("answer", ""), "ĐÁP ÁN"), "recipe"
+        if web is None:
+            self._collect_lookups(0)
+            web = next((tagged(e.get("answer", ""), "ĐÁP ÁN") for e in self.result.lookups
+                        if tagged(e.get("answer", ""), "ĐÁP ÁN")), None)
+            web_source = "web" if web else None
+        spoken = (self.plan.answer_source == "speech"
+                  or bool(SPOKEN_EVIDENCE.search(evidence or "")))
+        return reconcile_answer(video, evidence, confidence, web, web_source, spoken=spoken)
 
     def _finalize_sequences(self):
-        """Check the server's best paths event by event, then pin the best ones' frames."""
+        """Check the best paths event by event, then pin the best ones' frames.
+
+        Paths come fused over the tight and loose temporal queries and the other
+        channels' support for their video; all checks and all per-event picks of a
+        path run side by side (one Gemini call is ~4 s whatever its size).
+        """
         count = expected_events(self.plan, self.task)
-        unique = {}
-        for sequence in sorted(self.pool.sequences, key=lambda s: s.rank):
-            if len(sequence.frames) == count:
-                unique.setdefault((sequence.video_id, tuple(sequence.frames)), sequence)
-        sequences = list(unique.values())
+        sequences = self.pool.ranked_sequences(count)
         events = (self.plan.events_en or [scene.visual_en[0] for scene in self.plan.scenes])[:count]
         events += [""] * (count - len(events))
+        sequences = self._local_sequences(sequences, events) + sequences
+        order = {id(s): index for index, s in enumerate(sequences)}
 
         started = self.agent.clock()
         checked, errors = sequences[:self.options.trake_check], []
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=max(1, len(checked))) as pool:
             futures = [(s, pool.submit(self.agent.inspector.check_sequence,
                                        self.task, events, s.video_id, s.frames)) for s in checked]
             for sequence, future in futures:
                 try:
                     sequence.event_scores = future.result()
-                except Exception as exc:  # an unchecked path keeps its server rank
+                except Exception as exc:  # an unchecked path keeps its fused rank
                     errors.append(str(exc)[:120])
 
         def key(sequence):
             if sequence.event_scores is None:
-                return (1, 0.0, sequence.rank)
-            return (0, -sum(sequence.event_scores) / len(sequence.event_scores), sequence.rank)
+                return (1, 0.0, order[id(sequence)])
+            return (0, -sum(sequence.event_scores) / len(sequence.event_scores), order[id(sequence)])
 
         sequences.sort(key=key)
         self.log("check_sequences", {"checked": len(checked)},
                  "; ".join(f"{s.video_id}={s.event_scores}" for s in sequences[:3])
                  + (f" errors={errors}" if errors else ""), started)
-        for sequence in sequences[:self.options.trake_refine]:
-            if self.over_budget():
-                break
-            self._refine(sequence, events)
-        self.result.sequences = sequences
+        final = []
+        for index, sequence in enumerate(sequences):
+            # Fast mode always refines: its picks run in parallel (~5 s) and a TRAKE row
+            # is only right if every event is.
+            if index < self.options.trake_refine and (self.options.mode != "deep" or not self.over_budget()):
+                original = replace(sequence, frames=list(sequence.frames), times=list(sequence.times))
+                self._refine(sequence, events)
+                final.append(sequence)
+                if original.frames != sequence.frames:
+                    final.append(original)  # the unrefined path is the next-best guess
+            else:
+                final.append(sequence)
+        self.result.sequences = final
+
+    def _local_sequences(self, sequences, events, videos=4):
+        """One tight path per leading video, from each event searched inside that video.
+
+        The server's DP ranks videos well but can take an event from minutes away
+        (p1-16 found the gold video with its first event 2 min early). Searching each
+        event within the video and keeping consecutive events <= 45 s apart puts the
+        path where the events actually happen together.
+        """
+        if not all(events):
+            return []
+        leading = []
+        for sequence in sequences:
+            if sequence.video_id not in leading:
+                leading.append(sequence.video_id)
+        leading = leading[:min(videos, 12 // len(events))]
+        if not leading:
+            return []
+        started = self.agent.clock()
+        queries = [{"kind": "visual", "id": f"lp{v}.{e}", "text": event, "video_ids": [video], "limit": 40}
+                   for v, video in enumerate(leading) for e, event in enumerate(events)]
+        try:
+            results = self.agent.search.search(queries)
+        except Exception as exc:
+            self.log("local_paths", {}, f"failed: {exc}", started)
+            return []
+        existing = {(s.video_id, tuple(s.frames)) for s in sequences}
+        found = []
+        for v, video in enumerate(leading):
+            hits = [results.get(f"lp{v}.{e}", {}).get("hits", []) for e in range(len(events))]
+            best = local_path(hits, TRAKE_TIGHT_GAP)
+            if best is None:
+                continue
+            value, path = best
+            frames = [hit["frame_idx"] for hit in path]
+            if (video, tuple(frames)) not in existing:
+                found.append(Sequence("local", v + 1, video, frames, [hit["time"] for hit in path], value, []))
+        self.log("local_paths", {"videos": leading},
+                 "; ".join(f"{s.video_id}={s.frames}" for s in found) or "none", started)
+        return found
 
     def _refine(self, sequence, events):
         """Move each event to the first neighbouring keyframe that shows it, in order."""
         started = self.agent.clock()
-        previous_time = -1.0
-        for index, (frame, time_) in enumerate(zip(list(sequence.frames), list(sequence.times))):
-            neighbours = self.agent.search.neighbours(sequence.video_id, frame, self.options.neighbour_radius)
-            neighbours = [f for f in neighbours if f["time"] > previous_time]
+
+        def pick(index):
+            neighbours = self.agent.search.neighbours(
+                sequence.video_id, sequence.frames[index], self.options.neighbour_radius)
             event = events[index] if index < len(events) else ""
             picked, confidence, _ = self.agent.inspector.pick_frame(self.task.text, event, neighbours)
-            if picked is None or confidence < 5:
-                # Keep the server's frame unless an earlier event moved past it; TRAKE
-                # rows must stay in time order.
-                picked = None if time_ > previous_time else (neighbours[0] if neighbours else None)
+            return neighbours, (picked if picked is not None and confidence >= 5 else None)
+
+        with ThreadPoolExecutor(max_workers=max(1, len(sequence.frames))) as pool:
+            picks = list(pool.map(pick, range(len(sequence.frames))))
+        previous_time = -1.0
+        for index, (neighbours, picked) in enumerate(picks):
+            # TRAKE rows must stay in time order: a pick at or before the previous event
+            # falls back to the server's frame, else to the first later neighbour.
+            if picked is None or picked["time"] <= previous_time:
+                picked = None if sequence.times[index] > previous_time else next(
+                    (f for f in neighbours if f["time"] > previous_time), None)
             if picked is not None:
                 sequence.frames[index], sequence.times[index] = picked["frame_idx"], picked["time"]
             previous_time = sequence.times[index]
         sequence.refined = True
         self.log("refine", {"video_id": sequence.video_id}, f"frames={sequence.frames}", started)
+
+
+def _same_answer(a, b):
+    """Equal ignoring case, punctuation and spacing ("300 g" is "300g"); "cá" is not "cá sòng"."""
+    a, b = normalize_answer(a).replace(" ", ""), normalize_answer(b).replace(" ", "")
+    return bool(a) and a == b
+
+
+def reconcile_answer(video, evidence, confidence, web, web_source, spoken=False):
+    """(answer, evidence) from the video reading and a web answer, for the human to weigh.
+
+    The answer key is what the video shows, so a confident reading wins; the web
+    decides only when the reading is empty or unsure (a recipe's quantity or dish
+    name the frames do not make legible), or, for a spoken answer, when it is the
+    same name spelled differently -- the reading heard it through ASR.
+    """
+    if video and web and _same_answer(video, web):
+        return video, f"{evidence}; {web_source} đồng ý"
+    if spoken and video and web and similar(video, web) >= 0.5:
+        return web, f"{web_source} sửa chính tả lời thoại: video đọc được {video!r}; {evidence}"
+    if video and (confidence >= 7 or not web):
+        return video, evidence + (f"; {web_source} nói: {web}" if web else "")
+    if web:
+        return web, f"{web_source}: {web}; video đọc được: {video or '-'} ({confidence:.0f}/10)"
+    return video, evidence
