@@ -1,0 +1,232 @@
+import json
+import unittest
+from types import SimpleNamespace
+
+import httpx
+
+from agent.llm import DeepSeekClient, GeminiClient, LLMError, parse_json
+from agent.search_client import SearchClient, SearchError
+
+
+def search_client(handler, **kwargs):
+    http = httpx.Client(base_url="http://server", transport=httpx.MockTransport(handler))
+    return SearchClient("http://server", http=http, sleep=lambda _: None, **kwargs)
+
+
+class SearchClientTests(unittest.TestCase):
+    def test_retries_a_superseded_batch_then_returns_results(self):
+        calls = []
+
+        def handler(request):
+            calls.append(json.loads(request.content))
+            if len(calls) == 1:
+                return httpx.Response(409, json={"detail": "superseded"})
+            return httpx.Response(200, json={"results": {"v": {"kind": "visual", "hits": []}}})
+
+        results = search_client(handler).search([{"kind": "visual", "id": "v", "text": "boat"}])
+        self.assertEqual(results, {"v": {"kind": "visual", "hits": []}})
+        self.assertEqual(len(calls), 2)
+
+    def test_non_retryable_errors_surface_the_server_detail(self):
+        client = search_client(lambda request: httpx.Response(422, json={"detail": "bad query"}))
+        with self.assertRaisesRegex(SearchError, "bad query"):
+            client.search([])
+
+    def test_image_retries_transient_ffmpeg_failures_but_search_does_not(self):
+        replies = iter([httpx.Response(500, json={"detail": "ffmpeg failed"}),
+                        httpx.Response(200, content=b"jpeg")])
+        self.assertEqual(search_client(lambda request: next(replies)).image("L01_V001", 5), b"jpeg")
+
+        calls = []
+
+        def failing(request):
+            calls.append(request.url.path)
+            return httpx.Response(500, json={"detail": "boom"})
+
+        with self.assertRaises(SearchError):
+            search_client(failing, api="batch").search([])
+        self.assertEqual(calls, ["/agent/search"])
+
+    def test_image_width_snaps_to_an_allowed_thumbnail_size(self):
+        seen = []
+
+        def handler(request):
+            seen.append(str(request.url))
+            return httpx.Response(200, content=b"jpeg")
+
+        client = search_client(handler)
+        self.assertEqual(client.image("L01_V001", 5, 600), b"jpeg")
+        client.image("L01_V001", 5, 0)
+        self.assertEqual(seen, ["http://server/thumb/L01_V001/5?w=640", "http://server/frame/L01_V001/5"])
+
+
+def item(video, frame, **extra):
+    return {"video_id": video, "frame_idx": frame, "time": frame / 25, "score": 0.5, **extra}
+
+
+class CompatServer:
+    """The public routes of a server that predates /agent/search."""
+
+    def __init__(self):
+        self.paths = []
+
+    def __call__(self, request):
+        self.paths.append(request.url.path)
+        path = request.url.path
+        if path == "/agent/search":
+            return httpx.Response(404, json={"detail": "Not Found"})
+        if path == "/search/next":
+            return httpx.Response(200, json={"results": [item("L01_V002", 7), item("L01_V003", 1)],
+                                             "next_cursor": None})
+        if path == "/search/temporal":
+            event = {"frame_idx": 10, "time": 0.4, "score": 0.9, "rank": 0}
+            return httpx.Response(200, json={"videos": [{"video_id": "L01_V001", "best_score": 0.9,
+                "sequences": [{"rank": 1, "score": 0.5, "events": [event, event]},
+                              {"rank": 0, "score": 0.9, "events": [event, event]}]}]})
+        if path == "/search/image":
+            payload = json.loads(dict(httpx.QueryParams(request.content.decode()))["payload"])
+            self.image_payload = payload
+            return httpx.Response(200, json={"results": [item("L01_V004", 3)], "next_cursor": None})
+        body = json.loads(request.content)
+        if body["mode"] == "audio":
+            return httpx.Response(200, json={"results": [item(
+                "L01_V001", 50, transcript_snippet="cá nhám", transcript_start=1.0,
+                transcript_end=9.0, matched_keywords=["cá"])], "next_cursor": None})
+        if body["mode"] == "ocr":
+            return httpx.Response(200, json={"results": [
+                item("L01_V001", 60, ocr_snippet="Mèo NÀ NÍ", ocr_start=2.0, ocr_end=3.0),
+                item("L01_V002", 60, ocr_snippet="Na Nhi", ocr_start=2.0, ocr_end=3.0)],
+                "next_cursor": None})
+        return httpx.Response(200, json={"results": [item("L01_V001", 5), item("L01_V002", 6)],
+                                         "next_cursor": "page2"})
+
+
+class CompatTests(unittest.TestCase):
+    def test_falls_back_once_and_maps_every_kind(self):
+        server = CompatServer()
+        client = search_client(server)
+        with self.assertLogs("agent", "WARNING"):
+            results = client.search([
+                {"kind": "visual", "id": "v", "text": "boat", "limit": 150},
+                {"kind": "visual", "id": "scoped", "text": "boat", "video_ids": ["L01_V002"]},
+                {"kind": "visual", "id": "short", "text": "boat", "limit": 1},
+                {"kind": "audio", "id": "a", "text": "cá nhám", "method": "semantic"},
+                {"kind": "ocr", "id": "o", "text": "Nà Ní"},
+                {"kind": "temporal", "id": "t", "events": ["a", "b"]},
+                {"kind": "similar", "id": "s", "video_id": "L01_V009", "frame_idx": 4},
+            ])
+
+        # limit 150 needs a second page of 100; limit 1 stops inside the first
+        self.assertEqual([(h["video_id"], h["frame_idx"], h["rank"]) for h in results["v"]["hits"]],
+                         [("L01_V001", 5, 1), ("L01_V002", 6, 2), ("L01_V002", 7, 3), ("L01_V003", 1, 4)])
+        self.assertEqual(len(results["short"]["hits"]), 1)
+        self.assertEqual([h["frame_idx"] for h in results["scoped"]["hits"]], [6, 7])
+        self.assertEqual(results["a"]["hits"][0]["text"], "cá nhám")
+        self.assertEqual((results["a"]["hits"][0]["start"], results["a"]["hits"][0]["end"]), (1.0, 9.0))
+        self.assertEqual([h["exact"] for h in results["o"]["hits"]], [True, False])
+        self.assertEqual(results["t"]["hits"][0]["sequences"][0]["score"], 0.9)
+        self.assertEqual(server.image_payload["reference"], {"video_id": "L01_V009", "frame_idx": 4})
+        self.assertEqual(client.api, "compat")
+
+        server.paths.clear()
+        client.search([{"kind": "ocr", "id": "o", "text": "x"}])
+        self.assertEqual(server.paths, ["/search"])
+
+    def test_batch_mode_does_not_fall_back(self):
+        client = search_client(CompatServer(), api="batch")
+        with self.assertRaises(SearchError):
+            client.search([{"kind": "visual", "id": "v", "text": "boat"}])
+
+
+def deepseek(handler):
+    http = httpx.Client(base_url="http://deepseek", transport=httpx.MockTransport(handler))
+    return DeepSeekClient("key", http=http, sleep=lambda _: None)
+
+
+def completion(content="", **message):
+    return httpx.Response(200, json={
+        "choices": [{"message": {"role": "assistant", "content": content, **message}}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    })
+
+
+class DeepSeekTests(unittest.TestCase):
+    def test_request_carries_thinking_tools_and_json_mode(self):
+        bodies = []
+
+        def handler(request):
+            bodies.append(json.loads(request.content))
+            return completion('{"ok": true}', reasoning_content="think")
+
+        client = deepseek(handler)
+        self.assertEqual(client.chat_json([{"role": "user", "content": "json"}]), {"ok": True})
+        message = client.chat([], tools=[{"type": "function"}], thinking=False)
+        self.assertEqual(message["reasoning_content"], "think")
+        self.assertEqual(bodies[0]["thinking"], {"type": "enabled"})
+        self.assertEqual(bodies[0]["response_format"], {"type": "json_object"})
+        self.assertNotIn("temperature", bodies[0])
+        self.assertEqual((bodies[1]["thinking"], bodies[1]["temperature"]), ({"type": "disabled"}, 0.3))
+        self.assertEqual(client.usage.deepseek_calls, 2)
+
+    def test_retries_empty_json_and_server_errors(self):
+        replies = iter([httpx.Response(503), completion(""), completion('```json\n{"a": 1}\n```')])
+        self.assertEqual(deepseek(lambda request: next(replies)).chat_json([]), {"a": 1})
+
+    def test_parse_json_tolerates_prose_around_the_object(self):
+        self.assertEqual(parse_json('Here: {"a": [1]} done'), {"a": [1]})
+        with self.assertRaises(ValueError):
+            parse_json("no json here")
+
+
+class FakeGenAI:
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.calls = []
+        self.models = self
+
+    def generate_content(self, model, contents, config):
+        self.calls.append((model, contents, config))
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+class GeminiTests(unittest.TestCase):
+    def test_judge_labels_images_and_retries_rate_limits(self):
+        limited = RuntimeError("429")
+        limited.code = 429
+        response = SimpleNamespace(text='{"candidates": []}', usage_metadata=SimpleNamespace(
+            prompt_token_count=100, candidates_token_count=7))
+        fake = FakeGenAI([limited, response])
+        gemini = GeminiClient("key", client=fake, sleep=lambda _: None)
+
+        reply = gemini.judge([("[C1] label", b"jpeg")], "prompt", {"type": "object"})
+
+        self.assertEqual(reply, {"candidates": []})
+        _, contents, config = fake.calls[-1]
+        self.assertEqual(contents[0], "[C1] label")
+        self.assertEqual(contents[-1], "prompt")
+        self.assertEqual(config["response_json_schema"], {"type": "object"})
+        self.assertEqual(gemini.usage.gemini_input, 100)
+
+    def test_non_retryable_errors_raise_llm_error(self):
+        denied = RuntimeError("bad key")
+        denied.code = 403
+        gemini = GeminiClient("key", client=FakeGenAI([denied]), sleep=lambda _: None)
+        with self.assertRaises(LLMError):
+            gemini.judge([], "prompt", {})
+
+    def test_web_search_returns_grounding_sources(self):
+        web = SimpleNamespace(web=SimpleNamespace(title="Wiki", uri="https://example.org"))
+        metadata = SimpleNamespace(grounding_chunks=[web], web_search_queries=["jaws 1975"])
+        response = SimpleNamespace(text=" Cá mập (shark) ", usage_metadata=None,
+                                   candidates=[SimpleNamespace(grounding_metadata=metadata)])
+        answer = GeminiClient("key", client=FakeGenAI([response])).web_search("q")
+        self.assertEqual(answer.text, "Cá mập (shark)")
+        self.assertEqual(answer.sources, (("Wiki", "https://example.org"),))
+        self.assertEqual(answer.queries, ("jaws 1975",))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -36,3 +36,9 @@ server = [
     "elasticsearch>=9.0.0,<10",
     "sentence-transformers>=5.0.0",
 ]
+# The retrieval agent (`python -m agent`) is an HTTP client of the server above; it
+# never ships in the production image.
+agent = [
+    "google-genai>=1.0.0",
+    "httpx>=0.27",
+]
