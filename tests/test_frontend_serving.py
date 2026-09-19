@@ -30,6 +30,18 @@ class FrontendServingTests(unittest.TestCase):
     def test_container_includes_the_clip_export_module(self):
         self.assertIn("backend/shots.py", Path("Dockerfile").read_text())
 
+    def test_container_includes_the_server_hosted_agent(self):
+        dockerfile = Path("Dockerfile").read_text()
+
+        self.assertIn("backend/agent_runner.py", dockerfile)
+        self.assertIn("COPY agent ./agent", dockerfile)
+
+    def test_app_registers_agent_run_routes(self):
+        paths = {route.path for route in app.routes}
+        self.assertIn("/api/agent/runs", paths)
+        self.assertIn("/api/agent/runs/{run_id}", paths)
+        self.assertIn("/api/agent/runs/{run_id}/submission.zip", paths)
+
     def test_app_registers_clip_export_routes(self):
         paths = {route.path for route in app.routes}
         self.assertIn("/videos", paths)

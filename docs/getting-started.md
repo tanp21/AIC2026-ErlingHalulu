@@ -138,6 +138,8 @@ UV_CACHE_DIR=/tmp/aic_uv_cache uv run uvicorn backend.app:app --host 127.0.0.1 -
 
 Protected routes still require the internal `X-AIC-User` header. Use the Docker/HAProxy path for realistic end-to-end access testing; HAProxy removes client-supplied copies and sets it after authentication.
 
+To develop against the owner's GPU/index host instead of a full local stack (no GPU, `data/`, `indexes/` or Elasticsearch needed), see [Split Development](split-development.md).
+
 ## Utility commands
 
 Run Python tools as modules from the repository root:

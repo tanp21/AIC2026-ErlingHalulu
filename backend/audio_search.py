@@ -12,6 +12,7 @@ import threading
 from typing import Callable, Hashable, Iterable, Sequence
 
 from .core import TextEmbeddingBatcher
+from . import search_core
 
 
 AUDIO_INDEX = os.environ.get("AIC_AUDIO_INDEX", "aic_audio_v1")
@@ -853,6 +854,8 @@ def parse_search_response(response: dict) -> list[AudioHit]:
 
 
 def get_client():
+    if search_core.remote():
+        return search_core.remote_elasticsearch()
     global _client
     if _client is None:
         from elasticsearch import Elasticsearch
@@ -912,7 +915,15 @@ def close_audio_text_batcher():
         _audio_text_batcher = None
 
 
+def encode_queries(texts) -> np.ndarray:
+    import numpy as np
+
+    return np.asarray(_get_audio_text_batcher().encode(list(texts)), dtype="float32")
+
+
 def encode_query(text: str) -> list[float]:
+    if search_core.remote():
+        return search_core.encode_qwen([text])[0].astype("float32").tolist()
     # Routed through the same coalescing-batcher pattern as backend.core's PE-Core
     # text encoding: 5 concurrent hybrid searches each calling Qwen.encode()
     # independently measured at ~4x slower under concurrency than one alone (no
@@ -938,6 +949,29 @@ def load_audio_flat():
 
 
 def search_audio_flat(query_vector: Sequence[float], k: int) -> list[AudioHit] | None:
+    if search_core.remote():
+        payload = search_core.audio_flat_search(query_vector, k)
+        if payload is None:
+            return None
+        return [
+            AudioHit(
+                video_id=hit["video_id"],
+                start_sec=hit["start_sec"],
+                end_sec=hit["end_sec"],
+                anchor_sec=hit["anchor_sec"],
+                text=hit["text"],
+                score=hit["score"],
+                bm25_rank=hit.get("bm25_rank"),
+                vector_rank=hit.get("vector_rank"),
+                passage_id=hit.get("passage_id"),
+                matched_keywords=tuple(hit.get("matched_keywords") or ()),
+            )
+            for hit in payload
+        ]
+    return search_audio_flat_local(query_vector, k)
+
+
+def search_audio_flat_local(query_vector: Sequence[float], k: int) -> list[AudioHit] | None:
     loaded = load_audio_flat()
     if loaded is None:
         return None

@@ -50,6 +50,18 @@ class RuntimeMountTests(unittest.TestCase):
         self.assertIn("mkdir /cache /workspace", dockerfile)
         self.assertIn("chown app:app /cache /workspace", dockerfile)
 
+    def test_agent_output_has_a_persistent_writable_mount(self):
+        compose = (ROOT / "compose.yaml").read_text()
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        self.assertIn("AIC_AGENT_OUT_DIR: /workspace/agent", compose)
+        self.assertIn("backend/agent_runner.py", dockerfile)
+
+    def test_agent_runs_have_an_egress_network(self):
+        compose = (ROOT / "compose.yaml").read_text()
+        app = compose.split("  app:\n", 1)[1].split("  ingress:\n", 1)[0]
+        self.assertIn("- aic-egress", app)
+        self.assertIn("aic-egress:", compose)
+
     def test_shot_labels_have_a_persistent_writable_mount(self):
         compose = (ROOT / "compose.yaml").read_text()
         dockerfile = (ROOT / "Dockerfile").read_text()
@@ -150,6 +162,25 @@ class ThumbnailConcurrencyTests(unittest.TestCase):
             run.side_effect = lambda command, **_: Path(command[-1]).write_bytes(b"jpeg")
             thumb.extract("video.mp4", 1, mapping)
         self.assertEqual(run.call_args.kwargs["timeout"], 30)
+
+    def test_thumbnail_cache_key_ignores_the_mount_prefix(self):
+        mapping = frame_maps.FrameMap(np.array([0, 10]), 1, 10)
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            thumb, "CACHE_DIR", Path(directory)
+        ), patch("backend.thumb.subprocess.run") as run:
+            run.side_effect = lambda command, **_: Path(command[-1]).write_bytes(b"jpeg")
+            host = thumb.extract("/home/user/AIC_HCMC/data/2026/videos/L22/L22_V024.mp4", 1, mapping)
+            container = thumb.extract("/data/2026/videos/L22/L22_V024.mp4", 1, mapping)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(host, container)
+
+    def test_ffmpeg_pins_filter_threads(self):
+        mapping = frame_maps.FrameMap(np.array([0, 10]), 1, 10)
+
+        command = thumb.ffmpeg_command("video.mp4", 1, mapping, "out.jpg", 320)
+
+        self.assertIn("-filter_threads", command)
+        self.assertIn("1", command[command.index("-filter_threads") + 1])
 
 
 if __name__ == "__main__":

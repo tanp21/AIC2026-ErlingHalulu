@@ -7,14 +7,18 @@ import type { FrameMap } from "./frameMap";
 import { formatTimestamp } from "./results";
 import type { KeyframeSource, Shot, ShotKeyframe, ShotLabelReason, TranscriptCue, VideoSummary } from "./types";
 
-export type AppTab = "search" | "queries" | "clips";
+export type AppTab = "search" | "queries" | "agent" | "clips";
+
+const TAB_LABELS: Record<AppTab, string> = {
+  search: "Search", queries: "Query management", agent: "Retrieval agent", clips: "Clip Studio",
+};
 
 export function AppTabs({ tab, onTab }: { tab: AppTab; onTab(next: AppTab): void }) {
   return <nav className="app-tabs" aria-label="Work mode">
-    {(["search", "queries", "clips"] as AppTab[]).map((name) => <button key={name}
+    {(["search", "queries", "agent", "clips"] as AppTab[]).map((name) => <button key={name}
       className={name === tab ? "active" : ""} aria-current={name === tab ? "page" : undefined}
       aria-label={name === "search" ? "Search tab" : undefined}
-      onClick={() => onTab(name)}>{name === "search" ? "Search" : name === "queries" ? "Query management" : "Clip Studio"}</button>)}
+      onClick={() => onTab(name)}>{TAB_LABELS[name]}</button>)}
   </nav>;
 }
 

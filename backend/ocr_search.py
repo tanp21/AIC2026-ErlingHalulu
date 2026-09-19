@@ -232,6 +232,10 @@ def parse_search_response(response: dict) -> list[OcrHit]:
 
 
 def get_client():
+    from . import search_core
+
+    if search_core.remote():
+        return search_core.remote_elasticsearch()
     global _client
     if _client is None:
         from elasticsearch import Elasticsearch

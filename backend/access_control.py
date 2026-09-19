@@ -17,6 +17,9 @@ T = TypeVar("T")
 MAX_BODY_BYTES = 16 * 1024
 MAX_ROUND_UPLOAD_BYTES = 1024 * 1024
 MAX_IMAGE_SEARCH_BYTES = 8 * 1024 * 1024
+MAX_CORE_BYTES = 4 * 1024 * 1024
+# A round-1 agent batch: 12 sub-queries of 300-char captions plus 4 paraphrases each.
+MAX_AGENT_BATCH_BYTES = 256 * 1024
 BODY_READ_TIMEOUT_SECONDS = 10
 logger = logging.getLogger("uvicorn.error")
 
@@ -114,6 +117,12 @@ class TrustedIngressAccessMiddleware:
 
             if path == "/search/image" and scope.get("method") == "POST":
                 body_limit = MAX_IMAGE_SEARCH_BYTES
+            elif path == "/core/encode/image" and scope.get("method") == "POST":
+                body_limit = MAX_IMAGE_SEARCH_BYTES
+            elif path.startswith("/core/") and scope.get("method") == "POST":
+                body_limit = MAX_CORE_BYTES
+            elif path == "/agent/search" and scope.get("method") == "POST":
+                body_limit = MAX_AGENT_BATCH_BYTES
             elif (
                 path == "/api/collab/rounds"
                 and scope.get("method") == "POST"

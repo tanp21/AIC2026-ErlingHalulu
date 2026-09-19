@@ -70,7 +70,14 @@ def ffmpeg_command(video_path, frame_idx, mapping, output, w=320):
         # factor of N (measured: load average >27 on a 12-thread host with only 8
         # concurrent ffmpeg calls), and throughput degrades over a long bulk run instead
         # of holding steady.
-        "ffmpeg", "-y", "-loglevel", "error", "-threads", "1", "-copyts", "-ss", f"{timestamp:.15f}",
+        # -filter_threads 1: -threads only pins the decoder; the scale filter still sizes
+        # its slice pool from the visible core count, so each concurrent extraction held
+        # ~12 extra threads. Against the container's pids.max=256 that exhausts the
+        # thread budget and pthread_create fails with EAGAIN, ffmpeg exits non-zero
+        # ("Resource temporarily unavailable"), and /thumb 500s for a large fraction of a
+        # cold results page.
+        "ffmpeg", "-y", "-loglevel", "error", "-threads", "1", "-filter_threads", "1",
+        "-copyts", "-ss", f"{timestamp:.15f}",
         "-i", str(video_path), "-an", "-vf", ",".join(filters),
         "-frames:v", "1", "-vsync", "0", "-q:v", "4", str(output),
     ]
@@ -79,8 +86,12 @@ def ffmpeg_command(video_path, frame_idx, mapping, output, w=320):
 def extract(video_path, frame_idx, mapping, w=320):
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     pts = int(mapping.pts[frame_idx])
+    # Keyed by file name, not the full path: the data disk is mounted at a different
+    # prefix per environment (host `.../AIC_HCMC/data`, container `/data`), and hashing
+    # the absolute path made `scripts.media.pregenerate_thumbnails` (host) write entries
+    # the container could never hit -- every live /thumb was a cold ffmpeg run.
     key = hashlib.sha1(
-        f"pts-v2:{video_path}:{pts}:{mapping.time_base_num}/{mapping.time_base_den}:{w}".encode()
+        f"pts-v3:{Path(video_path).name}:{pts}:{mapping.time_base_num}/{mapping.time_base_den}:{w}".encode()
     ).hexdigest()
     out = CACHE_DIR / f"{key}.jpg"
     with _key_lock(key):

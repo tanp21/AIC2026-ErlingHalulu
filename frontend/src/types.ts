@@ -259,3 +259,74 @@ export interface RoundSummary {
 }
 export interface RoundSnapshot extends RoundSummary { queries: CollabQuery[] }
 export interface ExportPreview { missing: string[]; invalid: string[]; unreviewed: string[] }
+
+export type AgentRunStatus = "running" | "done" | "error";
+export type AgentMode = "fast" | "auto" | "deep";
+export interface AgentRunRequest {
+  text: string;
+  kind: QueryKind;
+  mode: AgentMode;
+  deepseek_api_key: string;
+  gemini_api_key: string;
+  max_steps?: number;
+  time_budget?: number;
+  deepseek_model?: string;
+  gemini_model?: string;
+}
+export interface AgentVerdict { score: number; reason: string; answer?: string | null; scene?: number | null }
+export interface AgentEvidence {
+  source: string;
+  kind: string;
+  rank: number;
+  score: number;
+  text?: string | null;
+  start?: number | null;
+  end?: number | null;
+}
+export interface AgentCandidate {
+  id: string;
+  video_id: string;
+  frame_idx: number;
+  time: number;
+  fused: number;
+  verdict?: AgentVerdict | null;
+  evidence: AgentEvidence[];
+}
+export interface AgentSequence {
+  video_id: string;
+  frames: number[];
+  times?: number[];
+  score: number;
+  refined?: boolean;
+}
+export interface AgentRunResult {
+  query_id: string;
+  kind: QueryKind;
+  query: string;
+  answer: string | null;
+  answer_evidence: string | null;
+  ranking: AgentCandidate[];
+  sequences: AgentSequence[];
+  notes: string;
+  elapsed: number;
+  error: string | null;
+}
+export interface AgentUsage {
+  deepseek_calls: number;
+  deepseek_input: number;
+  deepseek_output: number;
+  gemini_calls: number;
+  gemini_input: number;
+  gemini_output: number;
+}
+export interface AgentRunResponse {
+  run_id: string;
+  status: AgentRunStatus;
+  query_id: string;
+  kind: QueryKind;
+  query: string;
+  elapsed: number;
+  result: AgentRunResult | null;
+  usage: AgentUsage | null;
+  error: string | null;
+}

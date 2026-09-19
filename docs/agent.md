@@ -4,8 +4,9 @@
 searches across every channel the server offers, checks candidates by looking at
 them, and writes a ranked, submission-ready answer for a teammate to confirm.
 
-The agent is a client of the search server: it runs anywhere (a laptop is fine),
-calls the server over HTTP and never ships in the production image.
+The agent is an HTTP client of the search server. It runs as a CLI on a laptop, or
+server-side from the **Retrieval agent** tab in the web UI, where each teammate
+supplies their own DeepSeek and Gemini keys for the run (see *Server-hosted runs*).
 
 ## How one query is answered
 
@@ -180,6 +181,19 @@ for video-scoped queries. The agent runs unchanged, with three costs:
 - Searches run under the caller's own login, so a teammate searching in the UI with
   that login can supersede them. The client retries 409s.
 
+## Server-hosted runs (the UI tab)
+
+The **Retrieval agent** tab posts the query, its kind, the `--mode` (default `fast`)
+and the teammate's own `DEEPSEEK_API_KEY`/`GEMINI_API_KEY` to `POST /api/agent/runs`;
+the server runs the same orchestrator in a bounded thread pool and the panel polls
+`GET /api/agent/runs/{run_id}`. One run per user at a time, 1 h TTL, and the keys
+live in memory for the run only — never written to disk or logs. The run's JSON,
+`report.html` and `submission.zip` land under `AIC_AGENT_OUT_DIR`
+(`/workspace/agent` in the container); `GET /api/agent/runs/{run_id}/submission.zip`
+serves the archive. The orchestrator reaches the server over loopback
+(`AIC_AGENT_INTERNAL_URL`, default `http://127.0.0.1:8000`) under the caller's own
+identity. `backend/agent_runner.py` implements this; see AGENTS.md for the wiring.
+
 ## Setup
 
 ```bash
@@ -187,7 +201,11 @@ uv sync --only-group server --only-group agent   # or add --group agent to your 
 ```
 
 Configuration comes from the environment, falling back to the repository `.env`
-(gitignored):
+(gitignored). UI runs need none of this on a teammate's machine — the keys are pasted
+into the tab and only the server needs the `AIC_AGENT_*` deployment settings. On a
+split-development workstation, point `AIC_AGENT_URL` (and `AIC_AGENT_TRUSTED_USER`)
+at your own app so runs use your local orchestrator; see
+[Split Development](split-development.md):
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -290,5 +308,5 @@ direction, not exact margin.
   image and search with `/search/image`.
 - **Group priors**: past answer keys show L26 is cooking, L25 lectures, L24 lion dance
   and L23 cycling. A team-maintained group description could bias the plan.
-- **UI integration**: pushing the ranking into the collaboration workspace instead of a
-  static report.
+- **Collaboration-workspace integration**: capture candidate frames into a round's
+  answers from the agent panel instead of copying video/frame by hand.

@@ -261,6 +261,18 @@ describe("competition search workspace", () => {
     expect(screen.getByRole("button", { name: "Upload round" })).toBeInTheDocument();
   });
 
+  it("opens the retrieval agent panel with per-teammate key fields", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retrieval agent" }));
+
+    expect(screen.getByLabelText("DeepSeek API key")).toBeInTheDocument();
+    expect(screen.getByLabelText("Gemini API key")).toBeInTheDocument();
+    expect(screen.getByLabelText("Agent query")).toBeInTheDocument();
+    expect(screen.getByLabelText("Agent mode")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run agent" })).toBeInTheDocument();
+  });
+
   it("keeps the search workspace when switching collaboration queries", async () => {
     const summary = {
       id: 1, name: "Round P1", active: true, revision: 0, created_by: "owner@example.com",

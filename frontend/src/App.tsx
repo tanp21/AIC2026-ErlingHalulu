@@ -1,6 +1,7 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { compareIndexes, fetchKeyframeContext, fetchSession, searchNextPage, searchTemporal, searchTemporalNextPage, searchVideos, searchVideosByImage } from "./api";
+import { AgentPanel } from "./agentPanel";
 import { fetchRound, fetchRounds, patchQuery } from "./collabApi";
 import { CollaborationPanels, QuickAddResult, TeamToolbar } from "./collab";
 import { AppTabs, ClipStudio } from "./clips";
@@ -1074,7 +1075,7 @@ export default function App() {
   return (
     <div className="app-shell workspace-mode">
       <header className="team-toolbar app-header">
-        <div className="team-brand"><span className="eyebrow">AIC HCMC</span><strong>{tab === "queries" ? "Query management" : "Search workspace"}</strong></div>
+        <div className="team-brand"><span className="eyebrow">AIC HCMC</span><strong>{tab === "queries" ? "Query management" : tab === "agent" ? "Retrieval agent" : "Search workspace"}</strong></div>
         {tabs}
         {tab === "search" && searchStatus && <div className="nav-search-status" aria-label="Search result status">{searchStatus}</div>}
         {tab === "search" && <div className="view-toggle" role="group" aria-label="Results view">
@@ -1097,6 +1098,9 @@ export default function App() {
           searchResults={response?.results ?? []}
           onSelect={selectCollabQuery} onQueryChange={updateCollabQuery} />
           : <div className="empty-state query-empty"><h3>No query round yet</h3><p>Upload a round to start assigning and managing answers.</p></div>}
+      </section>
+      <section className="agent-page" hidden={tab !== "agent"}>
+        <AgentPanel />
       </section>
       {openResult && !(activeRound && login) && <VideoDialog result={openResult} onClose={() => setOpenResult(null)} startPaused />}
     </div>

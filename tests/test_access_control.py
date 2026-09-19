@@ -61,6 +61,10 @@ class AccessMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         async def search_image(request: Request):
             return {"size": len(await request.body())}
 
+        @app.post("/agent/search")
+        async def agent_search(request: Request):
+            return {"size": len(await request.body())}
+
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
     async def asyncTearDown(self):
@@ -138,6 +142,18 @@ class AccessMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(allowed.json(), {"size": 6 * 1024 * 1024})
+        self.assertEqual(too_large.status_code, 413)
+
+    async def test_allows_a_bounded_agent_batch_for_every_teammate(self):
+        headers = {"X-AIC-User": "mate@example.com"}
+        allowed = await self.client.post(
+            "/agent/search", headers=headers, content=b"x" * (20 * 1024)
+        )
+        too_large = await self.client.post(
+            "/agent/search", headers=headers, content=b"x" * (256 * 1024 + 1)
+        )
+
+        self.assertEqual(allowed.json(), {"size": 20 * 1024})
         self.assertEqual(too_large.status_code, 413)
 
     async def test_times_out_a_slow_request_body(self):

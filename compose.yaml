@@ -34,6 +34,7 @@ services:
       AIC_THUMB_CACHE_DIR: /cache
       AIC_COLLAB_DB: /workspace/aic-collab.sqlite3
       AIC_SHOT_LABEL_DIR: /labels
+      AIC_AGENT_OUT_DIR: /workspace/agent
       ELASTICSEARCH_URL: http://elasticsearch:9200
       HF_HOME: /models
       HF_HUB_CACHE: /models/hub
@@ -62,6 +63,7 @@ services:
         condition: service_healthy
     networks:
       - aic-internal
+      - aic-egress
     user: "${AIC_UID:-1000}:${AIC_GID:-1000}"
     read_only: true
     cap_drop:
@@ -124,4 +126,6 @@ volumes:
 networks:
   aic-internal:
     internal: true
+  # Server-hosted agent runs call DeepSeek and Gemini; every other service stays internal.
+  aic-egress:
   aic-ingress:

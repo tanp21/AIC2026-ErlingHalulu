@@ -21,10 +21,12 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from starlette.background import BackgroundTask
 
 from . import core, thumb, shots, shot_labels, audio_search, ocr_search, frame_maps, subquery_fusion
+from . import core_service, search_core
 from .temporal_search import (
     SCORING_METHODS, build_sequences, deduplicate_candidates, fuse_audio, temporal_nms,
 )
 from .access_control import AccessConfig, LatestWinsCoordinator, install_access_control
+from .agent_runner import AgentRunStore, install_agent_routes, shutdown_agent_runs
 from .collaboration import CollaborationStore, install_collaboration_routes
 
 ROOT = core.ROOT
@@ -299,6 +301,23 @@ def warmup_search():
     mode = os.environ.get("AIC_WARMUP", "metadata").strip().lower()
     total_start = time.perf_counter()
 
+    if search_core.remote():
+        try:
+            status = search_core.healthz()
+        except Exception as exc:
+            logger.warning("core compute host is unreachable at warm-up: %s", exc)
+        else:
+            logger.info(
+                "warm-up remote core %s (api %s, warmup=%s)",
+                search_core.core_url(), status.get("api_version"), status.get("warmup"),
+            )
+            if status.get("api_version") != search_core.CORE_API_VERSION:
+                logger.warning(
+                    "core API version mismatch: client %s, host %s; pull/merge before trusting results",
+                    search_core.CORE_API_VERSION, status.get("api_version"),
+                )
+        return
+
     started = time.perf_counter()
     core.load_meta()
     logger.info("warm-up metadata: %.1f ms", (time.perf_counter() - started) * 1000)
@@ -339,6 +358,7 @@ async def lifespan(app):
     )
     app.state.search_snapshots = SearchSnapshotStore()
     app.state.temporal_snapshots = TemporalSnapshotStore()
+    app.state.agent_runs = AgentRunStore()
     core.start_text_batcher()
     audio_search.start_audio_text_batcher()
     try:
@@ -347,13 +367,17 @@ async def lifespan(app):
     finally:
         core.close_text_batcher()
         audio_search.close_audio_text_batcher()
+        search_core.close_client()
         _SEARCH_FANOUT_EXECUTOR.shutdown(wait=False, cancel_futures=True)
         _AGENT_BATCH_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+        shutdown_agent_runs()
 
 
 app = FastAPI(lifespan=lifespan)
+core_service.install_core_service(app)
 install_access_control(app)
 install_collaboration_routes(app)
+install_agent_routes(app)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.mount("/static", StaticFiles(directory=FRONTEND_DIST, check_dir=False), name="static")
 
@@ -505,30 +529,35 @@ def image_conditioned_search(req: ImageSearchReq, image_data=None):
     exclude_global_id = None
     if image_data is not None:
         try:
-            image_vector = core.encode_image(core.decode_query_image(image_data))
+            image_vector = search_core.encode_image(image_data)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
     else:
         reference = req.reference
-        try:
-            image_vector, exclude_global_id = core.indexed_frame_embedding(
+        if search_core.remote():
+            image_vector, exclude_global_id = search_core.frame_embedding(
                 req.index, reference.video_id, reference.frame_idx, req.profile
             )
-        except (KeyError, RuntimeError):
+        else:
             try:
-                row = resolve(reference.video_id)
-                data = thumb.extract(
-                    row["path"], reference.frame_idx, frame_maps.load(reference.video_id), w=0
+                image_vector, exclude_global_id = core.indexed_frame_embedding(
+                    req.index, reference.video_id, reference.frame_idx, req.profile
                 )
-                image_vector = core.encode_image(core.decode_query_image(data))
-            except (KeyError, IndexError) as exc:
-                raise HTTPException(404, "referenced keyframe is unavailable") from exc
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
-                raise HTTPException(503, "referenced keyframe could not be decoded") from exc
+            except (KeyError, RuntimeError):
+                try:
+                    row = resolve(reference.video_id)
+                    data = thumb.extract(
+                        row["path"], reference.frame_idx, frame_maps.load(reference.video_id), w=0
+                    )
+                    image_vector = core.encode_image(core.decode_query_image(data))
+                except (KeyError, IndexError) as exc:
+                    raise HTTPException(404, "referenced keyframe is unavailable") from exc
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
+                    raise HTTPException(503, "referenced keyframe could not be decoded") from exc
 
     visual_text = (req.visual_text or req.text or "").strip()
     text_vector = (
-        core.encode_text(visual_text)
+        search_core.encode_text(visual_text)
         if visual_text and req.image_weight < 1
         else None
     )
@@ -625,107 +654,84 @@ async def next_temporal_page(req: SearchPageReq, request: Request):
 
 def visual_search(req: SearchReq, text: str):
     total_start = time.perf_counter()
-    return visual_vector_search(req, core.encode_text(text), started=total_start)
+    return visual_vector_search(req, search_core.encode_text(text), started=total_start)
 
 
 def visual_vector_search(req: SearchReq, q, exclude_global_id=None, started=None):
-    profile = req.profile or core.default_profile()
+    profile = req.profile or search_core.default_profile()
     try:
-        indexes = core.available_indexes(profile)
+        result = search_core.visual_search(
+            req.index, profile, q, SEARCH_RESULT_LIMIT,
+            nprobe=req.nprobe, ef=req.ef,
+            exclude_global_id=exclude_global_id, with_pts=True,
+        )
     except KeyError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if req.index not in indexes:
-        raise HTTPException(400, f"unknown index {req.index} for profile {profile}")
     total_start = started if started is not None else time.perf_counter()
-    idx = core.get_index(req.index, profile)
-    cfg = core.index_info(req.index, profile)
-    if req.index == "ivf":
-        idx.nprobe = req.nprobe if req.nprobe > 0 else cfg.get("nprobe_default", 128)
-    if req.index == "hnsw":
-        idx.hnsw.efSearch = req.ef if req.ef > 0 else cfg.get("efSearch_default", 256)
-    t0 = time.perf_counter()
-    result_count = SEARCH_RESULT_LIMIT + (exclude_global_id is not None)
-    D, I = idx.search(q, result_count)
-    dt = time.perf_counter() - t0
-
-    id_video, id_frame, video_meta, _ = core.load_meta(profile)
-    metric = core.index_info(req.index, profile).get("metric", "ip")
     results = []
-    for d, gi in zip(D[0], I[0]):
-        if gi < 0 or gi == exclude_global_id:
-            continue
-        row = video_meta[int(id_video[gi])]
-        f = int(id_frame[gi])
-        mapping = frame_maps.load(row["video_id"])
-        score = float(d) if metric == "ip" else float(1.0 - d / 2.0)  # L2 metric returns squared distance
+    for hit in result["hits"]:
+        score = round(hit["score"], 4)
         results.append({
             "rank": len(results),
-            "score": round(score, 4),
-            "video_id": row["video_id"],
-            "frame_idx": f,
-            "pts": int(mapping.pts[f]),
-            "time": mapping.frame_time(f),
-            "thumb": f"/thumb/{row['video_id']}/{f}",
-            "frame": f"/frame/{row['video_id']}/{f}",
-            "video": f"/video/{row['video_id']}",
+            "score": score,
+            "video_id": hit["video_id"],
+            "frame_idx": hit["frame_idx"],
+            "pts": int(hit["pts"]),
+            "time": hit["time"],
+            "thumb": f"/thumb/{hit['video_id']}/{hit['frame_idx']}",
+            "frame": f"/frame/{hit['video_id']}/{hit['frame_idx']}",
+            "video": f"/video/{hit['video_id']}",
             "source": "visual",
             "scores": {
-                "visual_score": round(score, 4),
+                "visual_score": score,
                 "visual_rank": len(results) + 1,
                 "pe_core_rank": len(results) + 1,
             },
         })
-        if len(results) == SEARCH_RESULT_LIMIT:
-            break
     return {
         "results": results,
         "latency_ms": round((time.perf_counter() - total_start) * 1000, 1),
-        "faiss_latency_ms": round(dt * 1000, 1),
+        "faiss_latency_ms": round(result["faiss_latency_ms"], 1),
         "mode": "visual",
         "index": req.index,
-        "index_info": core.index_info(req.index, profile),
-        "profile": profile,
+        "index_info": result["index_info"],
+        "profile": result["profile"],
     }
 
 
 def temporal_visual_paths(req: TemporalSearchReq, candidate_k, scoring_method, beam_size=1,
                           candidate_pool_k=None, dedup_seconds=0, min_gap_seconds=0.0):
     total_start = time.perf_counter()
-    profile = req.profile or core.default_profile()
-    queries = core.encode_texts(req.events)
+    profile = req.profile or search_core.default_profile()
+    queries = search_core.encode_texts(req.events)
     try:
-        idx = core.get_index("flat", profile)
+        result = search_core.visual_search(
+            "flat", profile, queries, candidate_pool_k or candidate_k, with_pts=True
+        )
     except KeyError as exc:
         raise HTTPException(400, str(exc)) from exc
-    search_start = time.perf_counter()
-    distances, indexes = idx.search(queries, candidate_pool_k or candidate_k)
-    faiss_ms = (time.perf_counter() - search_start) * 1000
-    id_video, id_frame, video_meta, _ = core.load_meta(profile)
-    id_time = core.load_times(profile)
+    faiss_ms = round(result["faiss_latency_ms"], 1)
+    grouped = defaultdict(list)
+    for hit in result["hits"]:
+        grouped[hit["vector_index"]].append(hit)
     candidates = []
-    for event_index, (event_distances, event_indexes) in enumerate(zip(distances, indexes)):
+    for event_index in range(len(req.events)):
         event_hits = []
-        for event_rank, (distance, global_index) in enumerate(
-            zip(event_distances, event_indexes), 1
-        ):
-            if global_index < 0:
-                continue
-            row = video_meta[int(id_video[global_index])]
-            frame = int(id_frame[global_index])
-            score = float(distance)
+        for hit in grouped.get(event_index, ()):
             event_hits.append({
                 "event_index": event_index,
-                "event_rank": event_rank,
-                "rank": event_rank - 1,
-                "score": score,
-                "video_id": row["video_id"],
-                "frame_idx": frame,
-                "time": float(id_time[global_index]),
-                "thumb": f"/thumb/{row['video_id']}/{frame}",
-                "frame": f"/frame/{row['video_id']}/{frame}",
-                "video": f"/video/{row['video_id']}",
+                "event_rank": hit["rank"],
+                "rank": hit["rank"] - 1,
+                "score": hit["distance"],
+                "video_id": hit["video_id"],
+                "frame_idx": hit["frame_idx"],
+                "time": hit["time"],
+                "pts": int(hit["pts"]),
+                "thumb": f"/thumb/{hit['video_id']}/{hit['frame_idx']}",
+                "frame": f"/frame/{hit['video_id']}/{hit['frame_idx']}",
+                "video": f"/video/{hit['video_id']}",
                 "source": "visual",
-                "scores": {"visual_score": round(score, 4), "visual_rank": event_rank},
+                "scores": {"visual_score": round(hit["distance"], 4), "visual_rank": hit["rank"]},
             })
         candidates.append(
             deduplicate_candidates(event_hits, dedup_seconds, candidate_k)
@@ -739,7 +745,7 @@ def temporal_visual_paths(req: TemporalSearchReq, candidate_k, scoring_method, b
     return {
         "paths": paths,
         "latency_ms": round((time.perf_counter() - total_start) * 1000, 1),
-        "faiss_latency_ms": round(faiss_ms, 1),
+        "faiss_latency_ms": faiss_ms,
         "profile": profile,
     }
 
@@ -754,21 +760,16 @@ def finalize_temporal_response(paths, metadata, scoring_method, candidate_k, aud
         path["rank"] = rank
 
     grouped = {}
-    mappings = {}
     for path in paths:
         serialized_events = []
         if path["events"]:
-            mapping = mappings.get(path["video_id"])
-            if mapping is None:
-                mapping = frame_maps.load(path["video_id"])
-                mappings[path["video_id"]] = mapping
             serialized_events = [
                 {
                     **{
                         key: value for key, value in event.items()
                         if key not in {"normalized_score", "percentile_score", "event_rank"}
                     },
-                    "pts": int(mapping.pts[event["frame_idx"]]),
+                    "pts": int(event["pts"]),
                 }
                 for event in path["events"]
             ]
@@ -799,7 +800,7 @@ def finalize_temporal_response(paths, metadata, scoring_method, candidate_k, aud
         "candidate_k": candidate_k,
         "scoring_method": scoring_method,
         "truncated": truncated,
-        "profile": metadata.get("profile", core.default_profile()),
+        "profile": metadata.get("profile", search_core.default_profile()),
     }
 
 
@@ -867,24 +868,31 @@ def temporal_search_response(req: TemporalSearchReq, candidate_k, scoring_method
 
 def audio_search_response(req: SearchReq, text: str):
     t0 = time.perf_counter()
-    profile = req.profile or core.default_profile()
+    profile = req.profile or search_core.default_profile()
     hits = _audio_hits(text, req.audio_method)
-    meta = core.load_meta(profile)
-    lookup = meta[3]
+    known = search_core.known_videos(profile)
+    marks = iter(search_core.annotate(
+        [
+            {"video_id": hit.video_id, "time": hit.anchor_sec}
+            for hit in hits if hit.video_id in known
+        ],
+        profile,
+    ))
     results = []
     for rank, hit in enumerate(hits, 1):
-        row = lookup.get(hit.video_id)
-        if row is None:
+        if hit.video_id not in known:
             continue
-        frame = core.nearest_frame(hit.video_id, hit.anchor_sec, profile, meta=meta)
-        mapping = frame_maps.load(hit.video_id)
+        mark = next(marks)
+        if mark is None:
+            continue
+        frame = mark["frame_idx"]
         results.append({
             "rank": len(results),
             "score": round(hit.score, 6),
             "video_id": hit.video_id,
             "frame_idx": frame,
-            "pts": int(mapping.pts[frame]),
-            "time": mapping.frame_time(frame),
+            "pts": int(mark["pts"]),
+            "time": mark["time"],
             "thumb": f"/thumb/{hit.video_id}/{frame}",
             "frame": f"/frame/{hit.video_id}/{frame}",
             "video": f"/video/{hit.video_id}",
@@ -915,30 +923,35 @@ def audio_search_response(req: SearchReq, text: str):
 
 def ocr_search_response(req: SearchReq, text: str, *, strict=False, filter_mode=False):
     t0 = time.perf_counter()
-    profile = req.profile or core.default_profile()
+    profile = req.profile or search_core.default_profile()
     if filter_mode:
         hits = ocr_search.search_ocr_filter(text, SEARCH_RESULT_LIMIT)
     else:
         hits = ocr_search.search_ocr_keyword(text, SEARCH_RESULT_LIMIT, strict=strict)
         if strict:
             hits = [hit for hit in hits if ocr_search.contains_folded_phrase(text, hit.text)]
-    _, _, _, lookup = core.load_meta(profile)
+    known = search_core.known_videos(profile)
+    marks = iter(search_core.annotate(
+        [
+            {"video_id": hit.video_id, "frame_idx": hit.frame_idx}
+            for hit in hits if hit.video_id in known
+        ],
+        profile,
+    ))
     results = []
     for rank, hit in enumerate(hits, 1):
-        row = lookup.get(hit.video_id)
-        if row is None:
+        if hit.video_id not in known:
             continue
-        try:
-            mapping = frame_maps.load(hit.video_id)
-        except (OSError, FileNotFoundError):
+        mark = next(marks)
+        if mark is None:
             continue
         results.append({
             "rank": len(results),
             "score": round(hit.score, 6),
             "video_id": hit.video_id,
             "frame_idx": hit.frame_idx,
-            "pts": int(mapping.pts[hit.frame_idx]),
-            "time": mapping.frame_time(hit.frame_idx),
+            "pts": int(mark["pts"]),
+            "time": mark["time"],
             "thumb": f"/thumb/{hit.video_id}/{hit.frame_idx}",
             "frame": f"/frame/{hit.video_id}/{hit.frame_idx}",
             "video": f"/video/{hit.video_id}",
@@ -1113,6 +1126,8 @@ def fuse_search_results(visual, audio, k=100, max_time_delta=30.0, time_delta_ce
 
 
 def compare(req: CompareReq):
+    if search_core.remote():
+        raise HTTPException(503, "index comparison must run on the owner host")
     q = core.encode_text(req.text)
     k = req.k
     index_names = core.available_indexes()
@@ -1160,36 +1175,19 @@ def _agent_visual_hits(vector, profile, limit, video_ids=None, exclude_global_id
     directly, so a within-video search sees every keyframe of those videos instead of
     whatever survives a corpus-wide top-k.
     """
-    index = core.get_index("flat", profile)
-    id_video, id_frame, video_meta, lookup = core.load_meta(profile)
-    times = core.load_times(profile)
-    vector = np.asarray(vector, dtype="float32").reshape(1, -1)
-    if video_ids:
-        wanted = [int(lookup[video_id]["video_idx"]) for video_id in video_ids if video_id in lookup]
-        global_ids = np.flatnonzero(np.isin(id_video, wanted))
-        if exclude_global_id is not None:
-            global_ids = global_ids[global_ids != exclude_global_id]
-        if not len(global_ids):
-            return []
-        scores = index.reconstruct_batch(global_ids) @ vector[0]
-        order = np.argsort(-scores, kind="stable")[:limit]
-        pairs = [(float(scores[i]), int(global_ids[i])) for i in order]
-    else:
-        distances, indexes = index.search(vector, limit + (exclude_global_id is not None))
-        pairs = [
-            (float(distance), int(global_id))
-            for distance, global_id in zip(distances[0], indexes[0])
-            if global_id >= 0 and global_id != exclude_global_id
-        ][:limit]
+    result = search_core.visual_search(
+        "flat", profile, vector, limit,
+        video_ids=video_ids, exclude_global_id=exclude_global_id,
+    )
     return [
         {
-            "rank": rank,
-            "video_id": video_meta[int(id_video[global_id])]["video_id"],
-            "frame_idx": int(id_frame[global_id]),
-            "time": round(float(times[global_id]), 3),
-            "score": round(score, 4),
+            "rank": hit["rank"],
+            "video_id": hit["video_id"],
+            "frame_idx": hit["frame_idx"],
+            "time": round(hit["time"], 3),
+            "score": round(hit["distance"], 4),
         }
-        for rank, (score, global_id) in enumerate(pairs, 1)
+        for hit in result["hits"]
     ]
 
 
@@ -1201,7 +1199,7 @@ def _agent_query_vector(query):
     same texts on both dev and holdout; rank fusion got worse with every paraphrase.
     """
     texts = [query.text, *query.paraphrases]
-    vectors = core.encode_texts(texts)
+    vectors = search_core.encode_texts(texts)
     if len(texts) == 1:
         return vectors
     weights = [0.5] + [0.5 / len(query.paraphrases)] * len(query.paraphrases)
@@ -1211,15 +1209,21 @@ def _agent_query_vector(query):
 def _agent_audio_hits(query, profile):
     search_fn = (audio_search.search_audio_semantic if query.method == "semantic"
                  else audio_search.search_audio_keyword)
-    meta = core.load_meta(profile)
-    hits = []
-    for hit in search_fn(query.text, query.limit):
-        if hit.video_id not in meta[3]:
+    hits = [hit for hit in search_fn(query.text, query.limit)
+            if hit.video_id in search_core.known_videos(profile)]
+    marks = iter(search_core.annotate(
+        [{"video_id": hit.video_id, "time": hit.anchor_sec} for hit in hits],
+        profile, with_pts=False,
+    ))
+    results = []
+    for hit in hits:
+        mark = next(marks)
+        if mark is None:
             continue
-        hits.append({
-            "rank": len(hits) + 1,
+        results.append({
+            "rank": len(results) + 1,
             "video_id": hit.video_id,
-            "frame_idx": core.nearest_frame(hit.video_id, hit.anchor_sec, profile, meta=meta),
+            "frame_idx": mark["frame_idx"],
             "time": round(hit.anchor_sec, 3),
             "start": round(hit.start_sec, 3),
             "end": round(hit.end_sec, 3),
@@ -1227,11 +1231,11 @@ def _agent_audio_hits(query, profile):
             "text": _snippet(hit.text),
             "matched_keywords": list(hit.matched_keywords),
         })
-    return hits
+    return results
 
 
 def _agent_ocr_hits(query, profile):
-    lookup = core.load_meta(profile)[3]
+    lookup = search_core.known_videos(profile)
     hits = []
     for hit in ocr_search.search_ocr_keyword(query.text, query.limit):
         if hit.video_id not in lookup:
@@ -1285,7 +1289,7 @@ def _run_agent_query(query, profile):
     if query.kind == "visual":
         hits = _agent_visual_hits(_agent_query_vector(query), profile, query.limit, query.video_ids)
     elif query.kind == "similar":
-        vector, global_id = core.indexed_frame_embedding(
+        vector, global_id = search_core.frame_embedding(
             "flat", query.video_id, query.frame_idx, profile
         )
         hits = _agent_visual_hits(vector, profile, query.limit, query.video_ids, global_id)
