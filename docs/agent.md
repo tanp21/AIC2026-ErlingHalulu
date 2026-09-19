@@ -9,6 +9,45 @@ calls the server over HTTP and never ships in the production image.
 
 ## How one query is answered
 
+There are three modes. They share every step except what happens after round 1.
+
+**`--mode fast`** (the default) takes about 15-20 s per query (median; TRAKE ~30 s):
+
+```text
+t=0   cooking query? ──► Gemini + Google Search: which "Món ngon mỗi ngày" dish/episode (background)
+      DeepSeek plan, no thinking (~2 s) ──► plan lookups start in the background
+      round 1: one /agent/search batch (~0.5-1 s)
+      Gemini verifies 15 candidates as 3 parallel calls of 5 (~5 s): each query's best
+        hits round-robin, then the rest by fusion
+      best ≥ 9 and the falsifier (~5 s) accepts it? ── yes ──► done
+      otherwise ──► one DeepSeek rewrite (no thinking, sees verdicts + web notes)
+                    + the target scene searched inside the top 5 videos
+                    + neighbours of a 5-8 match ──► batch ──► parallel verification
+      Q&A: reading at the top 2 moments  ∥  a web answer (recipe for cooking shows,
+           a news/fact search otherwise, none for counts) ──► reconciled
+      TRAKE: no point verification; each event searched inside the 3-4 leading videos
+             and joined in order ≤ 45 s apart; those paths and the fused server paths
+             checked event by event in parallel; the best one's events re-picked in
+             parallel (the unrefined path is kept as the next row)
+```
+
+**`--mode auto`** is fast mode, then the deep tool loop (up to 120 s in total) only for
+a KIS/Q&A query whose best verdict is still under 7.
+
+Where the time went before (deep mode, round 1 of 2026): the multi-turn DeepSeek loop
+with thinking, sequential Gemini calls, and a few requests that stalled. Measured on the
+live server: one Gemini judge call takes ~4 s whether it looks at 2 or 8 frames, a
+DeepSeek call without thinking 1-3 s, a batch 0.3-4 s. Two tail fixes matter as much as
+the parallelism:
+
+- A Gemini call still pending after 8 s is **hedged**: a duplicate request races it and
+  the first answer wins (`GeminiClient(hedge_after=...)`).
+- About one thumbnail request in 50 stalls for ~30 s over the tailnet while an
+  immediate retry takes 0.3 s, so images time out after 5 s and are retried
+  (`agent/search_client.py`).
+
+**`--mode deep`** is the original multi-step tool loop, for when there is time:
+
 ```text
 query ──► DeepSeek plan ──► round 1: one /agent/search batch ──► Gemini verifies top 12
             (JSON)            visual (EN caption + paraphrases/scene)       │
@@ -30,6 +69,11 @@ finalize: ranking (verified matches first) · Q&A answer read from the frame/spe
   each other merge; transcript passages and OCR shots back every moment inside their
   span. Ranking is reciprocal-rank fusion plus a video-level term, then Gemini verdicts
   override it: verified matches (≥ 6) first, contradicted ones (≤ 3) last.
+- **What gets verified is not just the fused top.** Fusion favours moments that many
+  weak hits agree on, and on round 2 it left a caption's rank-1 keyframe (the gold frame
+  of p2-3) unverified at fused rank 32. `CandidatePool.to_verify` gives 60% of the
+  verification slots round-robin to each query's best unverified hits, then fills the
+  rest by fusion.
 - **Gemini looks, DeepSeek decides.** Gemini scores labelled keyframes 0-10 against the
   original Vietnamese query, reads Q&A answers, and picks exact TRAKE frames. DeepSeek
   plans, rewrites queries and chooses tools. Neither model is the source of a Q&A answer
@@ -40,11 +84,30 @@ finalize: ranking (verified matches first) · Q&A answer read from the frame/spe
   reading of the top moment (full frame, neighbours, transcript, and web notes as hints).
 - **An early stop must survive a falsifier.** Before round 1 is accepted, Gemini sees
   the top candidate with its neighbouring keyframes and tries to contradict each detail
-  of the query. A rejection demotes the candidate to 5/10 and hands the run to the
-  loop. On the first live run, 2 of 13 early stops were confident wrong matches.
+  of the query. A rejection keeps the score (its first live run rejected two correct
+  matches over details a few keyframes cannot show) but hands the run to the loop, with
+  the objection attached for the human. On the first live run, 2 of 13 early stops were
+  confident wrong matches. Deep mode only.
 - **Q&A answers are read at up to 3 moments** of the top video and decided by majority
   (ties to confidence): one keyframe can hide what is being counted or read.
-- **TRAKE paths are judged per event.** Verification scores a frame against the whole
+- **Web search is automatic where it pays** (`agent/web.py`). Cooking queries (15 of 55
+  in 2026 rounds 1-2, mostly "Món ngon mỗi ngày") get a Google-Search lookup of the dish
+  from the raw description before planning, so the rewrite round can search the
+  transcript for the dish name. For cooking Q&A, a second lookup starts from the top
+  video's opening narration (where the host names the dish) and asks for the published
+  recipe. Q&A whose answer is spoken or world knowledge gets a news lookup, because ASR
+  misspells names ("Đèo Bứa" for "Đèo Tà Pứa"). Web answers end in an `ĐÁP ÁN:` line;
+  `reconcile_answer` keeps a confident video reading, lets the web decide an unsure
+  one, and for spoken answers takes the web's spelling of the same name. `--no-web`
+  turns these off.
+- **TRAKE paths are fused, re-found inside the video, then judged per event.** Round 1
+  runs a tight temporal query (45 s maximum gap between events: every TRAKE key so far
+  spans under ~20 s) and a loose one (300 s). Paths are ranked by both, plus how
+  strongly the other channels support their video, since the query's context sentence
+  (an intro shot) is not an event. The server's DP picks videos well but can take one
+  event from minutes away, so each event is also searched inside the leading videos and
+  the hits are joined in order by a client-side DP (`pool.local_path`). On round 2 this
+  turned p2-8 from a miss (right video, last event 5 min late) into a hit. Verification scores a frame against the whole
   query, where an intro shot the query mentions for context can outscore the events
   themselves. Each of the server's top paths is therefore sent to Gemini as E1..En and
   scored against its own events before the best ones are refined.
@@ -133,7 +196,7 @@ Configuration comes from the environment, falling back to the repository `.env`
 | `AIC_AGENT_USER`, `AIC_AGENT_PASSWORD` | unset | Basic Auth, only for a deployment that still uses it. Over Tailscale, `tailscale serve` identifies you and no credentials are needed |
 | `AIC_AGENT_TRUSTED_USER` | unset | Direct-to-uvicorn development only: sent as `X-AIC-User` |
 | `DEEPSEEK_MODEL` / `GEMINI_MODEL` | `deepseek-flash` / `gemini-3.8-flash` | |
-| `DEEPSEEK_THINKING` | `enabled` | Thinking mode for tool-loop turns |
+| `DEEPSEEK_THINKING` | `enabled` | Thinking mode for deep-mode loop turns (fast mode never thinks) |
 | `DEEPSEEK_PLAN_THINKING` | `disabled` | Planning takes 2-3 s without thinking and 12-28 s with it, and plan quality was comparable |
 | `GEMINI_THINKING_LEVEL` | `low` | |
 | `AIC_AGENT_SEARCH_API` | `auto` | `batch` requires `/agent/search`; `compat` always uses the public routes |
@@ -146,6 +209,7 @@ python -m agent check                                    # server, DeepSeek and 
 python -m agent plan queries/SOTUYEN2-bo-de-thi.zip      # plans + round-1 queries only; no server needed
 python -m agent ask "Nhiều con rùa nhỏ đang ăn rau cải" --kind kis
 python -m agent run queries/SOTUYEN1-bo-de-thi.zip --answers queries/Round12026_answer.zip
+python -m agent run queries/SOTUYEN1-bo-de-thi.zip --mode deep --only query-p1-9-qa   # hard case, minutes
 python -m agent eval artifacts/agent/<run> --answers queries/Round12026_answer.zip --tolerance 250
 ```
 
@@ -172,40 +236,49 @@ visual benchmarks use) of any gold frame as a hit, or anywhere between the two f
 of an organiser key that marks a clip by its first and last frame. Use its
 numbers to compare agent versions, not to predict the leaderboard.
 
-## Results so far (2026-09-18, team server, compat mode)
+## Results so far
 
 Same 10 s tolerance as `benchmarks/visual/visual_embedding_benchmark_2026_en.json`. The
 PE-Core row is that benchmark's single human-approved caption per case. Its case sets
 differ slightly (it scores TRAKE events separately), so read the comparison as
 direction, not exact margin.
 
-| Round (queries) | Method | R@1 | R@5 | MRR | Video@1 |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Round 1 (25) | PE-Core caption | 22.2% | 37.0% | 0.31 | |
-| Round 1 (25) | agent v2 / v3 | 56% / 52% | 76% / 72% | 0.63 / 0.61 | 84% / 72% |
-| Round 2 (30) | PE-Core caption | 38.9% | 63.9% | 0.50 | |
-| Round 2 (30) | agent v3 | 66.7% | 73.3% | 0.70 | 86.7% |
+| Round (queries) | Method | R@1 | R@5 | MRR | Video@1 | Time per query (median / p90) |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Round 1 (25) | PE-Core caption | 22.2% | 37.0% | 0.31 | | |
+| Round 1 (25) | deep v2 / v3 (2026-09-18, compat) | 56% / 52% | 76% / 72% | 0.63 / 0.61 | 84% / 72% | 29 s / ~170 s |
+| Round 1 (25) | fast v6 / v7 (2026-09-19, batch) | 48% / 48% | 60% / 68% | 0.54 / 0.56 | 60% / 72% | 18-20 s / 28-40 s |
+| Round 2 (30) | PE-Core caption | 38.9% | 63.9% | 0.50 | | |
+| Round 2 (30) | deep v3 (compat) | 66.7% | 73.3% | 0.70 | 86.7% | 99 s / ~250 s |
+| Round 2 (30) | fast v6 | 56.7% | 73.3% | 0.64 | 76.7% | 19 s / 35 s |
 
-- Round 2 was never used while tuning the agent. Round 1 was.
-- One query is 3-4 points, and LLM plans and verdicts vary between runs. The v2 and v3
-  swings on Round 1 are mostly queries that did not touch the changed code, so treat a
-  few points as noise.
-- Q&A answers: 3/4 correct on Round 1 v3. The team benchmark has no answer strings for
-  Round 2.
-- Time per query: median 29 s (Round 1) and 99 s (Round 2), maximum about 6 min. Most of
-  it is Gemini verification and loop turns; compat-mode audio search adds 5-10 s per
-  transcript query.
-- Remaining failure types: right video but wrong frame in long lecture shots;
-  confident look-alikes among same-genre videos (lion dances, lecture sets); VLM
-  counting; and TRAKE, where the gold video is often outside the server's top temporal
-  paths.
+- Fast mode costs roughly a tenth of R@1 for a 5x shorter run; `--mode auto` sits
+  between them. R@5 is level, which matters most when a human checks the list.
+- Round 2 was never used while tuning deep mode; fast mode's fixes (verification
+  quota, local TRAKE paths, scene coherence) were found on both rounds.
+- One query is 3-4 points, and LLM plans and verdicts vary between runs: the same
+  fast code scored 40-56% R@1 on round 1 across runs. Treat a few points as noise.
+- Round-1 retrieval is the same in both modes (the gold video is in a round-1 visual
+  top 20 for 25 of 30 round-2 queries); what differs is how many candidates are looked
+  at and re-searched.
+- TRAKE: 2/2 on round 2 with the in-video local paths (previously 1/2). Round 1's p1-16
+  (lion dance) still misses: the gold video reaches the top 4 only in some runs.
+- Q&A answers: 2/4 on round 1 in the latest run. p1-17's pass name is fixed by the web
+  lookup ("Đèo Bứa" in the ASR, "Đèo Tà Pứa" in the news) when the right video is on
+  top; counting (p1-15: 10-11 read, 12 in the key) stays wrong even at Gemini's `high`
+  thinking level, which also took 20-28 s. The team benchmark has no answer strings
+  for round 2.
+- Remaining failure types: right video but wrong frame in long lecture shots; confident
+  look-alikes among same-genre videos (lion dances, cycling); VLM counting.
 
 ## Tuning
 
 - Prompts: all in `agent/prompts.py`. Iterate with `python -m agent plan`, which is
   cheap and fast.
-- Budgets: `--max-steps`, `--time-budget`, and `AgentOptions` in
-  `agent/orchestrator.py` (`verify_top`, `early_stop_score`, `trake_refine`).
+- Budgets: `--mode`, `--time-budget` (default 20 s fast, 300 s deep), `--max-steps`
+  (deep), and `AgentOptions` / `FAST_DEFAULTS` in `agent/orchestrator.py`
+  (`verify_top`, `verify_chunk`, `accept_score`, `early_stop_score`, `trake_refine`).
+  The budget is soft: a step already started finishes, and a Q&A answer is always read.
 - Fusion weights: `KIND_WEIGHTS`, `POINT_WINDOW_SECONDS` and `VIDEO_WEIGHT` in
   `agent/pool.py`.
 

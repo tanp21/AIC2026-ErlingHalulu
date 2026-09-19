@@ -17,6 +17,7 @@ MAX_VARIANTS = 5  # caption + up to 4 paraphrases
 MAX_PHRASES = 3
 MAX_TEXT = 300
 BATCH_LIMIT = 12
+TRAKE_TIGHT_GAP = 45
 ANSWER_SOURCES = {"on_screen_text", "visual_count", "visual_attribute", "speech", "world_knowledge"}
 
 
@@ -143,13 +144,19 @@ def initial_queries(plan: Plan, task, spoken_numbers: bool = False) -> list[dict
         scene.visual_en[0] for scene in plan.scenes
     ]
     if len(events) >= 2:
-        temporal.append({
-            "kind": "temporal", "id": "r1.t", "events": events[:6],
-            "max_gap_seconds": 300 if task.kind == "trake" else 180,
-            "limit": 30,
-        })
-        if task.kind == "trake" and plan.transcript_vi:
-            temporal[0]["audio_text"] = transcript_text(plan.transcript_vi[0], spoken_numbers)
+        base = {"kind": "temporal", "events": events[:6], "limit": 30}
+        if task.kind == "trake":
+            # Every TRAKE key so far (rounds 1 and 2) puts consecutive events within
+            # ~15 s; a 300 s gap let the DP take one event from far away in the
+            # video (p2-8's last event at +5 min). The loose path stays as a fallback.
+            temporal = [{**base, "id": "r1.t", "max_gap_seconds": TRAKE_TIGHT_GAP},
+                        {**base, "id": "r1.tw", "max_gap_seconds": 300}]
+            if plan.transcript_vi:
+                spoken_text = transcript_text(plan.transcript_vi[0], spoken_numbers)
+                for query in temporal:
+                    query["audio_text"] = spoken_text
+        else:
+            temporal = [{**base, "id": "r1.t", "max_gap_seconds": 180}]
 
     spoken = []
     for index, phrase in enumerate(plan.transcript_vi):

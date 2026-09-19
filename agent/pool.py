@@ -21,6 +21,8 @@ KIND_WEIGHTS = {
     "ocr": 0.8, "ocr_exact": 1.2, "neighbour": 0.0,
 }
 POINT_KINDS = {"visual", "similar", "temporal", "neighbour"}
+SEQUENCE_RRF_K = 10
+SCENE_BONUS = 1.0
 VERIFIED_MATCH = 6.0
 VERIFIED_REJECT = 3.0
 
@@ -73,6 +75,39 @@ class Sequence:
     refined: bool = False
     # Gemini's per-event 0-10 check of `frames` (before any refinement), if run.
     event_scores: list[float] | None = None
+
+
+def local_path(event_hits: list[list[dict]], max_gap: float, span_cost: float = 0.001):
+    """Best in-order keyframe per event within one video, or None.
+
+    `event_hits[e]` are that event's scoped visual hits (`time`, `frame_idx`,
+    `score`). Consecutive events must be strictly later and at most `max_gap`
+    seconds apart; among valid paths the highest summed score wins, a little
+    less per second of total span.
+    """
+    if not event_hits or not all(event_hits):
+        return None
+    # best[e][j] = (value, back-pointer) for a path ending at hit j of event e
+    best = [[(hit.get("score", 0.0), None) for hit in event_hits[0]]]
+    for index in range(1, len(event_hits)):
+        row = []
+        for hit in event_hits[index]:
+            options = [
+                (value - span_cost * (hit["time"] - previous["time"]) + hit.get("score", 0.0), j)
+                for j, ((value, _), previous) in enumerate(zip(best[-1], event_hits[index - 1]))
+                if value is not None and 0 < hit["time"] - previous["time"] <= max_gap
+            ]
+            row.append(max(options) if options else (None, None))
+        best.append(row)
+    ends = [(value, j) for j, (value, _) in enumerate(best[-1]) if value is not None]
+    if not ends:
+        return None
+    value, j = max(ends)
+    path = []
+    for index in range(len(event_hits) - 1, -1, -1):
+        path.append(event_hits[index][j])
+        j = best[index][j][1]
+    return value, path[::-1]
 
 
 def _weight(evidence: Evidence) -> float:
@@ -178,28 +213,35 @@ class CandidatePool:
             ))
 
     def rescore(self) -> None:
-        video_best: dict[str, dict[str, float]] = defaultdict(dict)
         for candidate in self.candidates.values():
-            candidate.fused = 0.0
-            for evidence in candidate.evidence.values():
-                contribution = _weight(evidence) / (RRF_K + evidence.rank)
-                candidate.fused += contribution
-                best = video_best[candidate.video_id]
-                best[evidence.source] = max(best.get(evidence.source, 0.0), contribution)
-        video_scores = {video: sum(best.values()) for video, best in video_best.items()}
+            candidate.fused = sum(_weight(e) / (RRF_K + e.rank) for e in candidate.evidence.values())
+        video_scores = self._video_support()
         for candidate in self.candidates.values():
             candidate.fused += VIDEO_WEIGHT * video_scores.get(candidate.video_id, 0.0)
 
     def ordered(self) -> list[Candidate]:
-        """Verified matches first, then unverified by fusion, rejected last."""
+        """Verified matches first, then unverified by fusion, rejected last.
+
+        Among verified matches, a video in which Gemini confirmed several different
+        scenes of a multi-scene query gains SCENE_BONUS per extra scene: each
+        keyframe shows one scene, so on p1-17 a 10/10 motorbike shot from another
+        video outranked the gold video whose mudslide, road marker and motorbike
+        scenes were each matched.
+        """
         self.rescore()
+        scenes: dict[str, set] = defaultdict(set)
+        for candidate in self.candidates.values():
+            verdict = candidate.verdict
+            if verdict is not None and verdict.scene is not None and verdict.score >= VERIFIED_MATCH:
+                scenes[candidate.video_id].add(verdict.scene)
 
         def key(candidate):
             verdict = candidate.verdict
             if verdict is None:
                 return (1, 0.0, -candidate.fused)
             if verdict.score >= VERIFIED_MATCH:
-                return (0, -verdict.score, -candidate.fused)
+                bonus = SCENE_BONUS * max(0, len(scenes.get(candidate.video_id, ())) - 1)
+                return (0, -(verdict.score + bonus), -candidate.fused)
             if verdict.score <= VERIFIED_REJECT:
                 return (2, -verdict.score, -candidate.fused)
             return (1, -verdict.score / 10, -candidate.fused)
@@ -208,6 +250,78 @@ class CandidatePool:
 
     def unverified(self, limit: int) -> list[Candidate]:
         return [candidate for candidate in self.ordered() if candidate.verdict is None][:limit]
+
+    def to_verify(self, limit: int, quota_share: float = 0.6) -> list[Candidate]:
+        """Unverified candidates worth a Gemini look: each query's best hits, then by fusion.
+
+        Fusion alone favours moments many weak hits agree on (a transcript span, an
+        OCR'd shot, a temporal event), and on round 2 it left a caption's rank-1
+        keyframe -- the gold frame of p2-3 -- unverified at fused rank 32. Up to
+        `quota_share` of the slots therefore go round-robin to every query's best
+        unverified hits, visual queries first.
+        """
+        pending = [candidate for candidate in self.ordered() if candidate.verdict is None]
+        per_source: dict[str, list[tuple[int, Candidate]]] = defaultdict(list)
+        for candidate in pending:
+            for evidence in candidate.evidence.values():
+                if evidence.kind != "neighbour":
+                    per_source[evidence.source].append((evidence.rank, candidate))
+        sources = sorted(per_source, key=lambda source: (
+            -_weight(next(iter(per_source[source]))[1].evidence[source]), source))
+        queues = [[c for _, c in sorted(per_source[source], key=lambda item: item[0])]
+                  for source in sources]
+        chosen: list[Candidate] = []
+        quota = min(limit, round(limit * quota_share))
+        while len(chosen) < quota and any(queues):
+            for queue in queues:
+                while queue and queue[0] in chosen:
+                    queue.pop(0)
+                if queue and len(chosen) < quota:
+                    chosen.append(queue.pop(0))
+        chosen += [candidate for candidate in pending if candidate not in chosen][:limit - len(chosen)]
+        return chosen
+
+    def ranked_sequences(self, count: int | None = None) -> list[Sequence]:
+        """Unique temporal paths, best first, fused over every temporal query and the video.
+
+        A path's own rank is backed by other temporal queries that found the same
+        video and by how strongly the non-temporal channels (visual, speech, OCR)
+        point at that video: on p1-16 the gold video was path 8 but video 2 overall,
+        its intro shot being in the query rather than in the events.
+        """
+        unique: dict[tuple, Sequence] = {}
+        best_rank: dict[tuple[str, str], int] = {}
+        for sequence in self.sequences:
+            source_key = (sequence.video_id, sequence.source)
+            best_rank[source_key] = min(best_rank.get(source_key, sequence.rank), sequence.rank)
+            if count and len(sequence.frames) != count:
+                continue
+            key = (sequence.video_id, tuple(sequence.frames))
+            if key not in unique or sequence.rank < unique[key].rank:
+                unique[key] = sequence
+        support = self._video_support(exclude={"temporal", "neighbour"})
+        video_rank = {video: rank for rank, video in enumerate(
+            sorted(support, key=support.get, reverse=True), 1)}
+
+        def score(sequence):
+            value = sum(1.0 / (SEQUENCE_RRF_K + rank)
+                        for (video, _), rank in best_rank.items() if video == sequence.video_id)
+            if sequence.video_id in video_rank:
+                value += 1.0 / (SEQUENCE_RRF_K + video_rank[sequence.video_id])
+            return value
+
+        return sorted(unique.values(), key=lambda s: (-score(s), s.rank))
+
+    def _video_support(self, exclude=frozenset()) -> dict[str, float]:
+        best: dict[str, dict[str, float]] = defaultdict(dict)
+        for candidate in self.candidates.values():
+            for evidence in candidate.evidence.values():
+                if evidence.kind in exclude:
+                    continue
+                contribution = _weight(evidence) / (RRF_K + evidence.rank)
+                sources = best[candidate.video_id]
+                sources[evidence.source] = max(sources.get(evidence.source, 0.0), contribution)
+        return {video: sum(sources.values()) for video, sources in best.items()}
 
     def video_ranking(self) -> list[str]:
         seen = []

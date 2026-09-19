@@ -5,6 +5,7 @@ image judgement and Google-Search-grounded lookups.
 """
 from __future__ import annotations
 
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 import json
 import re
@@ -142,18 +143,47 @@ class GroundedAnswer:
 
 class GeminiClient:
     def __init__(self, api_key, model="gemini-3.8-flash", *, thinking_level="low",
-                 retries=4, usage=None, client=None, sleep=time.sleep):
+                 retries=4, max_backoff=30.0, timeout=None, hedge_after=None, usage=None,
+                 client=None, sleep=time.sleep):
         if client is None:
             from google import genai
-            client = genai.Client(api_key=api_key)
+            from google.genai import types
+
+            options = types.HttpOptions(timeout=int(timeout * 1000)) if timeout else None
+            client = genai.Client(api_key=api_key, http_options=options)
         self.model = model
         self.thinking_level = thinking_level
         self.usage = usage or Usage()
         self._client = client
         self._retries = retries
+        self._max_backoff = max_backoff
         self._sleep = sleep
+        self._hedge_after = hedge_after
+        self._hedges = ThreadPoolExecutor(max_workers=16) if hedge_after else None
 
-    def _generate(self, contents, config):
+    def _generate(self, contents, config, hedge=True):
+        """One generation; with `hedge_after`, a duplicate request races a slow one.
+
+        A judge call normally takes ~4 s, but on live runs one in ~20 took 15-35 s,
+        which alone blew a 20 s query budget. The loser keeps running and is ignored.
+        """
+        if not (hedge and self._hedges):
+            return self._generate_once(contents, config)
+        first = self._hedges.submit(self._generate_once, contents, config)
+        done, _ = wait([first], timeout=self._hedge_after)
+        if done:
+            return first.result()
+        racing = {first, self._hedges.submit(self._generate_once, contents, config)}
+        error = None
+        while racing:
+            done, racing = wait(racing, return_when=FIRST_COMPLETED)
+            for future in done:
+                if future.exception() is None:
+                    return future.result()
+                error = future.exception()
+        raise error
+
+    def _generate_once(self, contents, config):
         for attempt in range(self._retries + 1):
             try:
                 response = self._client.models.generate_content(
@@ -162,7 +192,7 @@ class GeminiClient:
             except Exception as exc:
                 if attempt == self._retries or not _gemini_retryable(exc):
                     raise LLMError(f"gemini: {exc}") from exc
-                self._sleep(min(30.0, 2 ** (attempt + 1)))
+                self._sleep(min(self._max_backoff, 2 ** (attempt + 1)))
                 continue
             usage = getattr(response, "usage_metadata", None)
             self.usage.add(
@@ -208,7 +238,7 @@ class GeminiClient:
             "temperature": 0.0,
             "tools": [types.Tool(google_search=types.GoogleSearch())],
             "automatic_function_calling": {"disable": True},
-        })
+        }, hedge=False)  # runs in the background; a duplicate would only cost quota
         metadata = None
         if getattr(response, "candidates", None):
             metadata = getattr(response.candidates[0], "grounding_metadata", None)

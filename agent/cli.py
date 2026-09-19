@@ -25,22 +25,31 @@ DEFAULT_OUT = ROOT / "artifacts" / "agent"
 
 def build_agent(settings, options):
     usage = Usage()
+    fast = options.mode != "deep"
+    # Fast mode cannot afford a 30 s backoff: a call that keeps failing costs the
+    # query that step, not the run.
     deepseek = DeepSeekClient(
         settings.deepseek_api_key, settings.deepseek_model, settings.deepseek_base_url,
         thinking=settings.deepseek_thinking, usage=usage,
+        **({"timeout": 30.0, "retries": 2} if fast else {}),
     )
     gemini = GeminiClient(
         settings.gemini_api_key, settings.gemini_model,
         thinking_level=settings.gemini_thinking_level, usage=usage,
+        **({"timeout": 40.0, "retries": 2, "max_backoff": 4.0, "hedge_after": 8.0} if fast else {}),
     )
     search = SearchClient.from_settings(settings)
     return Agent(deepseek, gemini, search, options), usage
 
 
 def options_from(args, settings):
-    return AgentOptions(max_steps=args.max_steps, time_budget=args.time_budget,
-                        plan_thinking=settings.deepseek_plan_thinking,
-                        spoken_numbers=settings.spoken_numbers)
+    overrides = {"max_steps": args.max_steps, "plan_thinking": settings.deepseek_plan_thinking,
+                 "spoken_numbers": settings.spoken_numbers}
+    if args.time_budget is not None:
+        overrides["time_budget"] = args.time_budget
+    if args.no_web:
+        overrides["auto_web"] = False
+    return AgentOptions.for_mode(args.mode, **overrides)
 
 
 def save_run(results, directory, server_url, usage=None):
@@ -172,8 +181,15 @@ def main(argv=None):
 
     def agent_flags(command):
         command.add_argument("--out", help="output directory (default artifacts/agent/<timestamp>)")
-        command.add_argument("--max-steps", type=int, default=6, help="agent tool rounds after round 1")
-        command.add_argument("--time-budget", type=float, default=300.0, help="seconds per query")
+        command.add_argument("--mode", choices=["fast", "auto", "deep"], default="fast", help=(
+            "fast: round 1 + at most one rewrite, ~10-20 s a query; "
+            "auto: fast, then the deep loop (up to 120 s) only for queries left unsure; "
+            "deep: the multi-step DeepSeek tool loop, minutes on hard queries"))
+        command.add_argument("--max-steps", type=int, default=6, help="deep: agent tool rounds after round 1")
+        command.add_argument("--time-budget", type=float, default=None,
+                             help="seconds per query (default 20 fast, 300 deep)")
+        command.add_argument("--no-web", action="store_true",
+                             help="skip the automatic web searches (cooking recipes, spoken QA answers)")
         command.add_argument("--workers", type=int, default=2, help="queries processed concurrently")
 
     sub.add_parser("check", help="verify server, DeepSeek and Gemini connectivity")
