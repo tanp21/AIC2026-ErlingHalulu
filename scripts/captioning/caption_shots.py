@@ -83,6 +83,42 @@ CAPTION_SCHEMA = pa.schema([
     ("output_tokens", pa.int32()),
     ("elapsed_sec", pa.float64()),
 ])
+# The window pipeline (scripts.captioning.caption_api) writes this instead. It is a
+# superset rather than a replacement: CAPTION_SCHEMA is still the contract for the
+# earlier in-process runner and for every parquet already under artifacts/captions.
+# Primary key is (video_id, shot_index, window_index); an unsplit shot has
+# window_index 0 and window_count 1, so its row means exactly what it meant before.
+WINDOW_CAPTION_SCHEMA = pa.schema([
+    ("year", pa.string()),
+    ("group", pa.string()),
+    ("video_id", pa.string()),
+    ("shot_index", pa.int32()),
+    ("window_index", pa.int32()),
+    ("window_count", pa.int32()),
+    ("start_frame", pa.int32()),
+    ("end_frame", pa.int32()),
+    ("start_sec", pa.float64()),
+    ("end_sec", pa.float64()),
+    ("duration_sec", pa.float64()),
+    ("window_start_sec", pa.float64()),
+    ("window_end_sec", pa.float64()),
+    ("window_duration_sec", pa.float64()),
+    ("frames_used", pa.int32()),
+    ("frame_width", pa.int32()),
+    ("summary", pa.string()),
+    ("caption", pa.string()),
+    ("onscreen_text", pa.string()),
+    ("raw_output", pa.string()),
+    ("model_id", pa.string()),
+    ("prompt_sha256", pa.string()),
+    ("kv_cache_dtype", pa.string()),
+    ("max_tokens", pa.int32()),
+    ("prompt_tokens", pa.int32()),
+    ("output_tokens", pa.int32()),
+    ("total_tokens", pa.int32()),
+    ("finish_reason", pa.string()),
+    ("elapsed_sec", pa.float64()),
+])
 
 
 @dataclass(frozen=True)
