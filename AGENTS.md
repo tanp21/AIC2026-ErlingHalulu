@@ -171,4 +171,6 @@ Frame ↔ time conversion goes through `backend.frame_maps.FrameMap` (PTS + time
 
 ## Further reading
 
-`docs/getting-started.md` (setup, indexing, local dev) · `docs/audio-search.md` · `docs/temporal-search.md` · `docs/clip-export.md` (per-shot clips for captioning) · `docs/shot-exclusions.md` (reviewer shot labelling) · `docs/caprl-shot-captioning.md` · `docs/agent.md` (retrieval agent) · `docs/team-deployment.md` (direct-IP deployment) · `docs/operations.md` (failure playbook). Methodology write-ups for offline decisions (audio cleaning, OCR engine choice, hybrid fusion tuning, **which vision backend the agent should judge with**) live under `docs/reports/` — the last is `docs/reports/agent-vision-backends-2026.md`.
+`docs/getting-started.md` (setup, indexing, local dev) · `docs/audio-search.md` · `docs/temporal-search.md` · `docs/clip-export.md` (per-shot clips for captioning) · `docs/shot-exclusions.md` (reviewer shot labelling) · `docs/caprl-shot-captioning.md` · `docs/agent.md` (retrieval agent) · `docs/team-deployment.md` (direct-IP deployment) · `docs/operations.md` (failure playbook). Methodology write-ups for offline decisions (audio cleaning, OCR engine choice, hybrid fusion tuning, **which vision backend the agent should judge with**, and the agent's own
+end-to-end baseline on the official 2026 set) live under `docs/reports/` — the last is
+`docs/reports/agent-benchmark-2026-09.md`.
