@@ -67,10 +67,10 @@ class AgentRunReq(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
     kind: Literal["kis", "qa", "trake"] = "kis"
     mode: Literal["fast", "auto", "deep"] = "fast"
-    deepseek_api_key: str = Field(min_length=1, max_length=512)
-    # Optional: a deployment on a local vision backend needs no Gemini key, and a
-    # required field here would reject the request before the guard below can allow
-    # it. The frontend still collects both.
+    # Both may be empty: the owner's runs fall back to the keys this deployment
+    # holds (see `_deployment_key`), so a field left blank is a question the server
+    # answers, not a client-side error.
+    deepseek_api_key: str = Field(default="", max_length=512)
     gemini_api_key: str = Field(default="", max_length=512)
     max_steps: int = Field(default=6, ge=1, le=12)
     time_budget: float | None = Field(default=None, ge=30.0, le=900.0)
@@ -101,6 +101,11 @@ class AgentRun:
     error: str | None = None
     review: HumanReview = field(default_factory=HumanReview)
     progress: dict | None = None
+    #: Set when the owner started this run, which is the only case a request may
+    #: spend the deployment's own model keys. Decided from the request identity at
+    #: creation, never from the request body, and carried on the run so the executor
+    #: thread cannot be talked into a different answer.
+    deployment_keys: bool = False
 
     def to_payload(self, now: float):
         return {
@@ -127,7 +132,7 @@ class AgentRunStore:
         self._lock = threading.Lock()
         self._runs: dict[str, AgentRun] = {}
 
-    def create(self, run_id, owner, task, output_dir, report_url):
+    def create(self, run_id, owner, task, output_dir, report_url, deployment_keys=False):
         with self._lock:
             self._purge()
             if any(run.owner == owner and run.status == "running"
@@ -137,6 +142,7 @@ class AgentRunStore:
             run = AgentRun(
                 run_id=run_id, owner=owner, task=task, output_dir=output_dir,
                 report_url=report_url, started=now, expires_at=now + self.ttl_seconds,
+                deployment_keys=deployment_keys,
             )
             self._runs[run_id] = run
             return run
@@ -203,11 +209,28 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
     return result, usage
 
 
+#: The keys this deployment holds for UI runs, read from the app's own environment
+#: (compose `env_file: .env.secure`). They belong to the owner, so only an
+#: admin-started run may spend them -- a teammate's run always supplies its own, and
+#: nothing in the API can reach these.
+_DEPLOYMENT_KEY_ENV = {"deepseek": "DEEPSEEK_API_KEY", "gemini": "GEMINI_API_KEY"}
+
+
+def _deployment_key(name: str) -> str:
+    return os.environ.get(_DEPLOYMENT_KEY_ENV[name], "").strip()
+
+
 def execute_run(store: AgentRunStore, run: AgentRun, req: AgentRunReq, internal_url: str):
     try:
+        def key(supplied: str, name: str) -> str:
+            """The request's key, or this deployment's for the owner's own run."""
+            if supplied.strip():
+                return supplied.strip()
+            return _deployment_key(name) if run.deployment_keys else ""
+
         env = {
-            "DEEPSEEK_API_KEY": req.deepseek_api_key,
-            "GEMINI_API_KEY": req.gemini_api_key,
+            "DEEPSEEK_API_KEY": key(req.deepseek_api_key, "deepseek"),
+            "GEMINI_API_KEY": key(req.gemini_api_key, "gemini"),
             "AIC_AGENT_URL": internal_url,
             "AIC_AGENT_TRUSTED_USER": run.owner,
             # The server has /agent/search; skip the compat fallback.
@@ -258,11 +281,21 @@ def install_agent_routes(app) -> None:
 
     @app.post("/api/agent/runs")
     async def start_run(req: AgentRunReq, request: Request):
-        # A Gemini key is only needed when this deployment judges with Gemini. On a
-        # local vision backend a run works without one; the web lookup goes without.
-        if not req.deepseek_api_key.strip():
+        # A key may come from the request or -- for the owner's own runs -- from this
+        # deployment's environment, which is why the owner does not have to paste one
+        # at all. A teammate never falls back: those keys are the owner's, and
+        # spending them is the one thing this gate exists to prevent.
+        admin = bool(getattr(request.state, "is_admin", False))
+
+        def usable(supplied: str, name: str) -> bool:
+            return bool(supplied.strip()) or (admin and bool(_deployment_key(name)))
+
+        if not usable(req.deepseek_api_key, "deepseek"):
             raise HTTPException(422, "a DeepSeek API key is required")
-        if deployment_vision() == "gemini" and not req.gemini_api_key.strip():
+        # A Gemini key is only needed when this deployment judges with Gemini: on a
+        # local vision backend a run works without one, and only the web lookup goes
+        # without.
+        if deployment_vision() == "gemini" and not usable(req.gemini_api_key, "gemini"):
             raise HTTPException(422, "a Gemini API key is required")
         run_id = secrets.token_hex(8)
         task = task_from_text(run_id, req.text, req.kind)
@@ -270,7 +303,7 @@ def install_agent_routes(app) -> None:
         try:
             run = runs.create(
                 run_id, request.state.login, task, agent_output_dir(run_id),
-                str(request.base_url).rstrip("/"),
+                str(request.base_url).rstrip("/"), deployment_keys=admin,
             )
         except AgentRunConflict as exc:
             raise HTTPException(409, str(exc)) from exc

@@ -70,12 +70,12 @@ export function AgentPanel() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    // Only DeepSeek is checked here, because every deployment requires it. A Gemini
-    // key is deployment-dependent: a run judged by a local vision backend needs
-    // none, and a copy of that rule in the client -- this used to require both --
-    // is exactly what blocked those runs once the server stopped requiring one.
-    // The server owns it and answers 422 naming the key that is actually missing.
-    if (!deepseekKey.trim()) { setError("A DeepSeek API key is required."); return; }
+    // Neither key is checked here. Whether a key is needed depends on the
+    // deployment: its vision backend decides on the Gemini side, and whether it
+    // holds a key of its own decides on both -- and a copy of either rule in the
+    // client is how this panel came to demand a Gemini key that the server had
+    // stopped requiring. The server answers 422 naming the key that is missing.
+    if (!text.trim()) { setError("Enter a query."); return; }
     if (!text.trim()) { setError("Enter a query."); return; }
     setBusy(true);
     setError("");
@@ -139,7 +139,7 @@ export function AgentPanel() {
               value={geminiKey} onChange={(event) => updateKey(setGeminiKey, event.target.value)} />
           </label>
         </div>
-        <p className="agent-key-note">Keys are used only for this run, are never stored, and are cleared when you reload the page.</p>
+        <p className="agent-key-note">Keys are used only for this run, are never stored, and are cleared when you reload the page. Leave a field empty to use the deployment's own key, if it has one.</p>
         <label className="field"><span>Query</span>
           <textarea rows={3} maxLength={4000} aria-label="Agent query" value={text}
             placeholder="Vietnamese KIS/Q&A/TRAKE query. TRAKE events go on E1:, E2:, ... lines."

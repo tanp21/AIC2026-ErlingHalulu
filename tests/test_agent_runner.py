@@ -144,6 +144,60 @@ class ExecuteRunTests(unittest.TestCase):
             self.assertIn("llm down", failed.error)
 
 
+class DeploymentKeyTests(unittest.TestCase):
+    """The keys this deployment holds are the owner's; only the owner's runs spend them.
+
+    They live in the app's environment (compose `env_file`), so the question is not
+    just whether a key exists but whether *this* run may use it -- which is why the
+    answer is decided once, from the request identity, and carried on the run.
+    """
+
+    DEPLOYMENT = {"DEEPSEEK_API_KEY": "dsk-deployment", "GEMINI_API_KEY": "gmk-deployment"}
+
+    def settings_for(self, directory, deployment_keys, **overrides):
+        from agent.tasks import task_from_text
+
+        store = AgentRunStore()
+        run = store.create("run1", OWNER, task_from_text("run1", "a red boat", "kis"),
+                           Path(directory) / "run1", "http://test",
+                           deployment_keys=deployment_keys)
+        req = AgentRunReq(text="a red boat", kind="kis", **overrides)
+        with (
+            patch("backend.agent_runner.run_query",
+                  return_value=(fake_result(run.run_id), Mock(as_dict=lambda: {}))) as query,
+            patch.dict(os.environ, {**self.DEPLOYMENT, "AIC_AGENT_OUT_DIR": directory,
+                                    "AIC_AGENT_VISION": "gemini"}),
+        ):
+            execute_run(store, run, req, INT_URL)
+        self.query = query
+        return store, run, query
+
+    def test_an_owner_run_with_empty_fields_uses_the_deployment_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, run, query = self.settings_for(directory, deployment_keys=True)
+
+        settings = query.call_args.args[1]
+        self.assertEqual(settings.deepseek_api_key, "dsk-deployment")
+        self.assertEqual(settings.gemini_api_key, "gmk-deployment")
+
+    def test_a_key_typed_into_the_panel_still_wins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, run, query = self.settings_for(directory, deployment_keys=True,
+                                                  deepseek_api_key="dsk-typed")
+
+        settings = query.call_args.args[1]
+        self.assertEqual(settings.deepseek_api_key, "dsk-typed")
+        self.assertEqual(settings.gemini_api_key, "gmk-deployment")
+
+    def test_a_run_that_is_not_the_owners_never_reaches_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, run, query = self.settings_for(directory, deployment_keys=False)
+
+        query.assert_not_called()
+        # It failed for want of a key rather than quietly borrowing the deployment's.
+        self.assertIn("DEEPSEEK_API_KEY", store.get(OWNER, run.run_id).error)
+
+
 class AgentRunEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         server.app.state.access_config = AccessConfig(
@@ -154,7 +208,13 @@ class AgentRunEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.runs = server.app.state.agent_runs
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.env = patch.dict(os.environ, {"AIC_AGENT_OUT_DIR": self.directory.name})
+        self.env = patch.dict(os.environ, {
+            "AIC_AGENT_OUT_DIR": self.directory.name,
+            # The deployment's own model keys live in the process environment, and so
+            # does the vision backend. Blank them so a key exported in a developer's
+            # shell cannot decide what these assertions mean.
+            "DEEPSEEK_API_KEY": "", "GEMINI_API_KEY": "", "AIC_AGENT_VISION": "gemini",
+        })
         self.env.start()
         self.addCleanup(self.env.stop)
         self.submit = patch.object(agent_runner._AGENT_RUN_EXECUTOR, "submit")
@@ -186,6 +246,31 @@ class AgentRunEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_blank_keys_and_unknown_kinds(self):
         self.assertEqual((await self.start(deepseek_api_key=" ")).status_code, 422)
         self.assertEqual((await self.start(kind="caption")).status_code, 422)
+
+    async def test_the_owner_may_leave_both_fields_empty(self):
+        # What the deployment's own keys are for: the owner runs without pasting.
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dsk-deployment",
+                                     "GEMINI_API_KEY": "gmk-deployment"}):
+            response = await self.start(deepseek_api_key="", gemini_api_key="")
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(self.runs.get(OWNER, response.json()["run_id"]).deployment_keys)
+
+    async def test_a_teammate_may_not_ride_on_the_deployments_keys(self):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dsk-deployment",
+                                     "GEMINI_API_KEY": "gmk-deployment"}):
+            blank = await self.start(headers={"X-AIC-User": TEAMMATE},
+                                     deepseek_api_key="", gemini_api_key="")
+
+        self.assertEqual(blank.status_code, 422)
+        self.assertIn("DeepSeek", blank.json()["detail"])
+
+    async def test_a_teammate_run_with_their_own_keys_is_not_marked_for_the_deployments(self):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dsk-deployment",
+                                     "GEMINI_API_KEY": "gmk-deployment"}):
+            theirs = await self.start(headers={"X-AIC-User": TEAMMATE})
+
+        self.assertEqual(theirs.status_code, 202)
+        self.assertFalse(self.runs.get(TEAMMATE, theirs.json()["run_id"]).deployment_keys)
 
     async def test_requires_an_identity(self):
         response = await self.client.post("/api/agent/runs", json={"text": "x", **KEYS})
