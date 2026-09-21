@@ -287,7 +287,7 @@ class Inspector:
 
         verdicts, errors = {}, []
         known = {candidate.cid for candidate in candidates}
-        with ThreadPoolExecutor(min(4, len(chunks))) as pool:
+        with ThreadPoolExecutor(min(self._workers, len(chunks))) as pool:
             futures = [pool.submit(judge, chunk) for chunk in chunks]
             for future in futures:
                 try:

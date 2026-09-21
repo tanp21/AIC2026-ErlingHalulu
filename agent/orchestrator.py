@@ -54,6 +54,13 @@ class AgentOptions:
     time_budget: float = 300.0
     verify_top: int = 12
     verify_chunk: int = 8
+    #: How many chunks are judged at once. Small chunks with more of them in flight beat
+    #: large ones: measured on one query's twenty candidates, a 20-image call scored the
+    #: gold moment 6/9/8/3 where four 5-image calls scored it 10/10/9 -- the judge loses
+    #: the candidate when it looks at too much at once. More workers, same chunk, is the
+    #: way to more coverage: 30 candidates at chunk 5 take 5.8 s at eight workers against
+    #: 9.5 s at four, and score the gold 10 either way.
+    verify_workers: int = 4
     verify_per_step: int = 8
     accept_score: float = 9.0  # fast: a verified match this good skips the rewrite round
     auto_web: bool = True  # background web searches for cooking queries and Q&A answers
@@ -87,7 +94,11 @@ class AgentOptions:
 
 
 FAST_DEFAULTS = dict(
-    time_budget=20.0, verify_top=15, verify_chunk=5,
+    # Fifteen candidates left seventeen queries' answers at fused rank 16-100, judged by
+    # nobody. Thirty at eight workers costs no more wall time than fifteen at four
+    # (measured: 5.8 s against 6.0 s) because the chunks overlap; what it does cost is
+    # Gemini calls per query, which is the scarcer resource on a free-tier key.
+    time_budget=20.0, verify_top=30, verify_chunk=5, verify_workers=8,
     answer_moments=2, trake_check=8, trake_refine=1,
 )
 
@@ -216,7 +227,8 @@ class Agent:
         self.search = search
         self.options = options or AgentOptions()
         self.inspector = Inspector(
-            self.vision, search, chunk_size=self.options.verify_chunk
+            self.vision, search, chunk_size=self.options.verify_chunk,
+            workers=self.options.verify_workers,
         )
         self.clock = clock
 
