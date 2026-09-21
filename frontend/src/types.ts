@@ -273,7 +273,13 @@ export interface AgentRunRequest {
   deepseek_model?: string;
   gemini_model?: string;
 }
-export interface AgentVerdict { score: number; reason: string; answer?: string | null; scene?: number | null }
+export interface AgentVerdict {
+  score: number;
+  reason: string;
+  answer?: string | null;
+  scene?: number | null;
+  by?: "gemini" | "human";
+}
 export interface AgentEvidence {
   source: string;
   kind: string;
@@ -322,6 +328,57 @@ export interface AgentUsage {
   // counts: the local models do not bill.
   vlm_calls: number;
 }
+export type AgentStage =
+  | "planning" | "searching" | "judging" | "second_look" | "rewriting" | "agent_loop"
+  | "reading_answer" | "checking_paths" | "finalizing" | "done";
+export type AgentDecision = "accept" | "reject";
+/** The retrieval context Gemini is shown beside a keyframe, trimmed exactly as it sees it. */
+export interface AgentCandidateContext { speech?: string; on_screen?: string; caption?: string }
+export interface AgentLiveCandidate {
+  id: string;
+  video_id: string;
+  frame_idx: number;
+  time: number;
+  /** Its image is with Gemini right now. */
+  judging: boolean;
+  verdict: AgentVerdict | null;
+  context: AgentCandidateContext;
+  sources: string[];
+}
+export interface AgentLivePlan {
+  summary_vi: string;
+  scenes: string[];
+  target_scene: number;
+  question_vi: string | null;
+  events: string[];
+}
+export interface AgentLiveSequence {
+  video_id: string;
+  frames: number[];
+  event_scores: number[] | null;
+  refined: boolean;
+}
+export interface AgentProgress {
+  stage: AgentStage;
+  step: number;
+  elapsed: number;
+  plan: AgentLivePlan | null;
+  candidates: AgentLiveCandidate[];
+  sequences: AgentLiveSequence[];
+  answer: string | null;
+}
+export interface AgentReviewState {
+  decisions: Record<string, AgentDecision>;
+  answer: string | null;
+  stopped: boolean;
+  decided: boolean;
+}
+export interface AgentReviewRequest {
+  candidate_id?: string;
+  decision?: AgentDecision | "clear";
+  answer?: string;
+  stop?: boolean;
+}
 export interface AgentRunResponse {
   run_id: string;
   status: AgentRunStatus;
@@ -332,4 +389,6 @@ export interface AgentRunResponse {
   result: AgentRunResult | null;
   usage: AgentUsage | null;
   error: string | null;
+  progress?: AgentProgress | null;
+  review?: AgentReviewState;
 }

@@ -96,27 +96,40 @@ ANSWER_SCHEMA = {
 MAX_CAPTION_CHARS = 600
 
 
+def label_context(candidate, caption: str | None = None) -> dict[str, str]:
+    """The retrieval context Gemini is shown beside a keyframe, trimmed as it sees it.
+
+    Shared with the UI's review view, so a teammate checking candidates in
+    parallel reads exactly what the model is judging, not a longer or shorter
+    version of it -- which is why both sources below go through one limit.
+
+    `caption` is the one fetched for the frames being judged, which the route
+    resolves from a frame index; left unset, the caption that rode in on a
+    candidate the caption channel retrieved is used instead. Same CapRL text
+    either way, and the fetched one is only absent when the server has none.
+    """
+    def first(kinds, limit):
+        text = next((e.text for e in candidate.evidence.values() if e.kind in kinds and e.text), None)
+        return text[:limit] if text else None
+
+    described = caption or first(("caption",), MAX_CAPTION_CHARS)
+    context = {"speech": first(("audio",), 200), "on_screen": first(("ocr", "ocr_exact"), 150),
+               "caption": described[:MAX_CAPTION_CHARS] if described else None}
+    return {key: value for key, value in context.items() if value}
+
+
 def candidate_label(candidate, caption: str | None = None) -> str:
     parts = [f"[{candidate.cid}] {candidate.video_id} t={candidate.time:.1f}s"]
-    spoken = next((e.text for e in candidate.evidence.values()
-                   if e.kind == "audio" and e.text), None)
-    written = next((e.text for e in candidate.evidence.values()
-                    if e.kind in ("ocr", "ocr_exact") and e.text), None)
-    described = next((e.text for e in candidate.evidence.values()
-                      if e.kind == "caption" and e.text), None)
-    if spoken:
-        parts.append(f'speech nearby: "{spoken[:200]}"')
-    if written:
-        parts.append(f'on-screen text in this shot: "{written[:150]}"')
-    # Two sources for the same CapRL text: `caption` is fetched for the frames being
-    # judged, `described` rode in on a candidate the caption channel retrieved. Either
-    # will do, and the fetched one is only absent when the server has no captions.
-    caption = caption or described
-    if caption:
+    context = label_context(candidate, caption)
+    if "speech" in context:
+        parts.append(f'speech nearby: "{context["speech"]}"')
+    if "on_screen" in context:
+        parts.append(f'on-screen text in this shot: "{context["on_screen"]}"')
+    if "caption" in context:
         # Quoted and disclaimed on purpose: this comes from another model looking at
         # the same frames, so it can be confidently wrong, and the judge must weight
         # what it can see over what it is told.
-        parts.append(f'shot caption (auto, may be wrong): "{caption[:MAX_CAPTION_CHARS]}"')
+        parts.append(f'shot caption (auto, may be wrong): "{context["caption"]}"')
     return " | ".join(parts)
 
 

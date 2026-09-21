@@ -1,4 +1,4 @@
-import type { AgentRunRequest, AgentRunResponse } from "./types";
+import type { AgentReviewRequest, AgentRunRequest, AgentRunResponse } from "./types";
 
 export class AgentApiError extends Error {}
 
@@ -20,6 +20,14 @@ export async function startAgentRun(request: AgentRunRequest): Promise<AgentRunR
 
 export async function fetchAgentRun(runId: string): Promise<AgentRunResponse> {
   return readJson(await fetch(`/api/agent/runs/${runId}`));
+}
+
+export async function reviewAgentRun(runId: string, review: AgentReviewRequest): Promise<AgentRunResponse> {
+  return readJson(await fetch(`/api/agent/runs/${runId}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(review),
+  }));
 }
 
 export async function downloadAgentSubmission(runId: string): Promise<{ blob: Blob; filename: string }> {

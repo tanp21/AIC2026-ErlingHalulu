@@ -13,6 +13,28 @@ const running: AgentRunResponse = {
   elapsed: 1, result: null, usage: null, error: null,
 };
 
+const live: AgentRunResponse = {
+  ...running,
+  kind: "qa",
+  progress: {
+    stage: "judging", step: 0, elapsed: 6, answer: null, sequences: [],
+    plan: {
+      summary_vi: "tìm cảnh", scenes: ["hai người cầm điện thoại", "trả lời phỏng vấn"],
+      target_scene: 1, question_vi: "Người đó nói gì?", events: [],
+    },
+    candidates: [{
+      id: "C3", video_id: "L21_V010", frame_idx: 23484, time: 939.4, judging: true,
+      verdict: null, sources: ["caption", "visual"],
+      context: { speech: "tôi rất vui", caption: "A young woman speaks while a woman walks past." },
+    }, {
+      id: "C7", video_id: "L22_V003", frame_idx: 10912, time: 436.5, judging: false,
+      verdict: { score: 8, reason: "hai người cầm điện thoại", by: "gemini" }, sources: ["visual"],
+      context: {},
+    }],
+  },
+  review: { decisions: {}, answer: null, stopped: false, decided: false },
+};
+
 const done: AgentRunResponse = {
   ...running,
   status: "done",
@@ -86,9 +108,9 @@ describe("agent panel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByText(/working/)).toBeInTheDocument();
+    expect(screen.getByText(/still planning and searching/)).toBeInTheDocument();
 
-    await act(async () => { vi.advanceTimersByTime(2000); await Promise.resolve(); });
+    await act(async () => { vi.advanceTimersByTime(1000); await Promise.resolve(); });
 
     expect(fetchMock.mock.calls[1][0]).toBe("/api/agent/runs/abc");
     expect(screen.getByText("8/10")).toBeInTheDocument();
@@ -96,5 +118,77 @@ describe("agent panel", () => {
     expect(screen.getByText("Answer:")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Candidate 1: L01_V001 frame 10" }))
       .toHaveAttribute("src", "/thumb/L01_V001/10?w=320");
+  });
+
+  async function startLive() {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(live, { status: 202 }));
+    render(<AgentPanel />);
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
+    await screen.findByLabelText("Live review");
+    return fetchMock;
+  }
+
+  it("shows what Gemini is judging, with the same context, while it judges", async () => {
+    const fetchMock = await startLive();
+
+    expect(screen.getByText("Gemini is judging candidates")).toBeInTheDocument();
+    expect(screen.getByText("Gemini is judging…")).toBeInTheDocument();
+    expect(screen.getByText("tôi rất vui")).toBeInTheDocument();
+    expect(screen.getByText("A young woman speaks while a woman walks past.")).toBeInTheDocument();
+    expect(screen.getByText(/trả lời phỏng vấn/)).toHaveTextContent("(frame to submit)");
+    expect(screen.getByText("Người đó nói gì?")).toBeInTheDocument();
+    expect(screen.getByText("8/10")).toBeInTheDocument();
+  });
+
+  it("sends an acceptance, and a second click withdraws it", async () => {
+    const fetchMock = await startLive();
+    const accepted = { ...live, review: { decisions: { C3: "accept" as const }, answer: null, stopped: false, decided: true } };
+    fetchMock.mockResolvedValueOnce(jsonResponse(accepted));
+
+    fireEvent.click(screen.getByRole("button", { name: "Accept C3" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Accept C3" }))
+      .toHaveAttribute("aria-pressed", "true"));
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/agent/runs/abc/review");
+    expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body)))
+      .toEqual({ candidate_id: "C3", decision: "accept" });
+    expect(screen.getByText(/your decision is being applied/)).toBeInTheDocument();
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(live));
+    fireEvent.click(screen.getByRole("button", { name: "Accept C3" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body)))
+      .toEqual({ candidate_id: "C3", decision: "clear" });
+  });
+
+  it("sends a typed Q&A answer and a stop", async () => {
+    const fetchMock = await startLive();
+    fetchMock.mockResolvedValue(jsonResponse(live));
+
+    fireEvent.change(screen.getByLabelText("Reviewer answer"), { target: { value: " 2.15 " } });
+    fireEvent.click(screen.getByRole("button", { name: "Use this answer" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Stop and use the current ranking" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    const bodies = fetchMock.mock.calls.slice(1).map((call) => JSON.parse(String((call[1] as RequestInit).body)));
+    expect(bodies).toEqual([{ answer: "2.15" }, { stop: true }]);
+  });
+
+  it("marks a reviewer's verdict in the finished ranking", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(jsonResponse({
+      ...done,
+      result: { ...done.result!, ranking: [{
+        ...done.result!.ranking[0], verdict: { score: 10, reason: "Accepted by the reviewer", by: "human" },
+      }] },
+    }, { status: 202 }));
+    render(<AgentPanel />);
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
+
+    expect(await screen.findByText("Reviewer")).toBeInTheDocument();
+    expect(screen.getByText("10/10")).toBeInTheDocument();
   });
 });

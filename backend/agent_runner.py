@@ -12,6 +12,14 @@ writable mount (`/workspace/agent` in the container, `artifacts/agent` locally).
 
 Run state is in-process: the container runs a single uvicorn worker, and a
 restart drops in-flight runs (the client can start a new one).
+
+While a run is in progress its latest `progress` snapshot -- the candidates
+Gemini is judging, with the same speech, OCR and caption context Gemini gets --
+rides along on every poll, and `POST .../review` lets the owner accept or reject
+a candidate, type a Q&A answer, or stop the run. The orchestrator applies those
+decisions as it goes and stops waiting on Gemini once one of them settles the
+query (`agent/review.py`): at a venue whose network slows Gemini to a crawl, a
+teammate looking at the same frames is often the faster judge.
 """
 from __future__ import annotations
 
@@ -21,7 +29,7 @@ import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -33,6 +41,7 @@ from agent.cli import save_run
 from agent.config import VISION_ENV, AgentSettings, deployment_vision
 from agent.llm import DeepSeekClient, GeminiClient, OfflineGemini, Usage
 from agent.orchestrator import Agent, AgentOptions
+from agent.review import HumanReview
 from agent.search_client import SearchClient
 from agent.tasks import Task, task_from_text
 from agent.vlm import build_vision
@@ -69,6 +78,14 @@ class AgentRunReq(BaseModel):
     gemini_model: str | None = Field(default=None, max_length=100)
 
 
+class AgentReviewReq(BaseModel):
+    """One reviewer action; any combination of the fields may be sent at once."""
+    candidate_id: str | None = Field(default=None, pattern=r"^C\d{1,6}$")
+    decision: Literal["accept", "reject", "clear"] | None = None
+    answer: str | None = Field(default=None, max_length=100)
+    stop: bool = False
+
+
 @dataclass
 class AgentRun:
     run_id: str
@@ -82,6 +99,8 @@ class AgentRun:
     result: dict | None = None
     usage: dict | None = None
     error: str | None = None
+    review: HumanReview = field(default_factory=HumanReview)
+    progress: dict | None = None
 
     def to_payload(self, now: float):
         return {
@@ -94,6 +113,8 @@ class AgentRun:
             "result": self.result,
             "usage": self.usage,
             "error": self.error,
+            "progress": self.progress,
+            "review": self.review.snapshot(),
         }
 
 
@@ -129,6 +150,12 @@ class AgentRunStore:
             run.expires_at = self.clock() + self.ttl_seconds
             return run
 
+    def update_progress(self, run_id, snapshot):
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run is not None:
+                run.progress = snapshot
+
     def finish(self, run_id, *, result, usage, error):
         with self._lock:
             run = self._runs.get(run_id)
@@ -147,7 +174,7 @@ class AgentRunStore:
 
 
 def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
-              time_budget: float | None):
+              time_budget: float | None, *, review: HumanReview | None = None, progress=None):
     """Build the clients and run one task; split out so tests can stub it."""
     usage = Usage()
     deepseek = DeepSeekClient(
@@ -170,7 +197,7 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
     try:
         agent = Agent(deepseek, gemini, search, AgentOptions.for_mode(mode, **overrides),
                       vision=vision)
-        result = agent.run(task).to_dict()
+        result = agent.run(task, review=review, progress=progress).to_dict()
     finally:
         search.close()
     return result, usage
@@ -197,6 +224,8 @@ def execute_run(store: AgentRunStore, run: AgentRun, req: AgentRunReq, internal_
         settings = AgentSettings.from_env(env, dotenv=_NO_DOTENV)
         result, usage = run_query(
             run.task, settings, req.mode, req.max_steps, req.time_budget,
+            review=run.review,
+            progress=lambda snapshot: store.update_progress(run.run_id, snapshot),
         )
         save_run([result], run.output_dir, run.report_url, usage)
         store.finish(run.run_id, result=result, usage=usage.as_dict(), error=None)
@@ -251,6 +280,22 @@ def install_agent_routes(app) -> None:
     @app.get("/api/agent/runs/{run_id}")
     async def get_run(run_id: str, request: Request):
         return owned(request, run_id).to_payload(time.monotonic())
+
+    @app.post("/api/agent/runs/{run_id}/review")
+    async def review_run(run_id: str, req: AgentReviewReq, request: Request):
+        """The owner's decision on a running query, applied by the agent as it goes."""
+        run = owned(request, run_id)
+        if run.status != "running":
+            raise HTTPException(409, "the agent run has already finished")
+        if req.decision is not None:
+            if req.candidate_id is None:
+                raise HTTPException(422, "a decision needs a candidate_id")
+            run.review.decide(req.candidate_id, req.decision)
+        if req.answer is not None:
+            run.review.set_answer(req.answer)
+        if req.stop:
+            run.review.stop()
+        return run.to_payload(time.monotonic())
 
     @app.get("/api/agent/runs/{run_id}/submission.zip")
     async def download_submission(run_id: str, request: Request):

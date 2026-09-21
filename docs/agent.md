@@ -137,6 +137,38 @@ finalize: ranking (verified matches first) · Q&A answer read from the frame/spe
   themselves. Each of the server's top paths is therefore sent to Gemini as E1..En and
   scored against its own events before the best ones are refined.
 
+### A teammate judging alongside Gemini
+
+Gemini judges every candidate the agent submits. On a quiet network that is ~4 s a
+call; on a congested venue network it can be far longer, and the run waits. So while a
+UI-hosted run is in progress, the **Retrieval agent** tab shows what Gemini is being
+shown, as it is shown:
+
+- the brief: the query, the plan's scenes (with the scene whose frame will be
+  submitted), the Q&A question or the TRAKE events;
+- every candidate, marked while its image is with Gemini, with exactly the speech,
+  on-screen text and caption snippets Gemini's label carries (`vision.label_context`
+  builds both, so they cannot drift apart), and Gemini's verdict once it arrives.
+
+The teammate can act on it (`POST /api/agent/runs/{id}/review`, `agent/review.py`):
+
+| Action | Effect on the run |
+| --- | --- |
+| **Accept** a candidate | Becomes a 10/10 reviewer verdict, ranked first; the agent stops waiting on Gemini and finishes |
+| **Reject** a candidate | Becomes 0/10, ranked last, and is never sent to Gemini; the run goes on |
+| Click the same button again | Withdraws the decision; Gemini's own verdict comes back |
+| **Type an answer** (Q&A) | Used as the answer; a Gemini reading still in flight is abandoned |
+| **Stop** | Finishes now with the current ranking, skipping every remaining model call |
+
+A reviewer's verdict is never overwritten by a model reply, even one that arrives
+late. The agent checks for decisions every 0.25 s while it waits on a model call
+(`_await`), and those calls run on their own executor so abandoning one does not block
+on it. On a live run against the team server, Gemini started judging 15 candidates at
+12.8 s, a simulated reviewer accepted one at 13.8 s, and the run finished at 13.8 s.
+
+The CLI runs have no reviewer; `Agent.run(task, review=None, progress=None)` behaves
+exactly as before.
+
 ### Why this shape
 
 Drawn from agents built for the same kind of competition:
