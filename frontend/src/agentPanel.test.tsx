@@ -87,15 +87,32 @@ describe("agent panel", () => {
     expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)).mode).toBe("deep");
   });
 
-  it("refuses to start without both keys", async () => {
+  it("refuses to start without a DeepSeek key", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     render(<AgentPanel />);
     fireEvent.change(screen.getByLabelText("Agent query"), { target: { value: "a red boat" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Both API keys are required.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("A DeepSeek API key is required.");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("starts with no Gemini key, which is what a local-vision deployment needs", async () => {
+    // Requiring both keys here is what blocked `AIC_AGENT_VISION=local` runs: the
+    // server stopped needing a Gemini key, and this panel kept asking for one.
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(running, { status: 202 }));
+    render(<AgentPanel />);
+    fireEvent.change(screen.getByLabelText("DeepSeek API key"), { target: { value: "dsk" } });
+    fireEvent.change(screen.getByLabelText("Agent query"), { target: { value: "a red boat" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body.deepseek_api_key).toBe("dsk");
+    expect(body.gemini_api_key).toBe("");
   });
 
   it("polls until the run finishes and renders the verified ranking", async () => {

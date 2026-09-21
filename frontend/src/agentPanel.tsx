@@ -70,7 +70,12 @@ export function AgentPanel() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!deepseekKey.trim() || !geminiKey.trim()) { setError("Both API keys are required."); return; }
+    // Only DeepSeek is checked here, because every deployment requires it. A Gemini
+    // key is deployment-dependent: a run judged by a local vision backend needs
+    // none, and a copy of that rule in the client -- this used to require both --
+    // is exactly what blocked those runs once the server stopped requiring one.
+    // The server owns it and answers 422 naming the key that is actually missing.
+    if (!deepseekKey.trim()) { setError("A DeepSeek API key is required."); return; }
     if (!text.trim()) { setError("Enter a query."); return; }
     setBusy(true);
     setError("");
