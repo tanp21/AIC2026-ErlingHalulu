@@ -343,7 +343,10 @@ class _Run:
                 "id": c.cid, "video_id": c.video_id, "frame_idx": c.frame_idx,
                 "time": round(c.time, 3), "judging": c.cid in self.judging,
                 "verdict": None if c.verdict is None else vars(c.verdict),
-                "context": label_context(c),
+                # The second argument is the caption the verify step fetched for this
+                # frame, if it fetched one: a reviewer has to read what the judge read.
+                "context": label_context(
+                    c, self.agent.inspector.caption_for(c.video_id, c.frame_idx)),
                 "sources": sorted({e.kind for e in c.evidence.values()}),
             } for c in shown],
             "sequences": [{

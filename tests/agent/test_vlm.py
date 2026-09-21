@@ -16,6 +16,7 @@ from agent.vision import (
     Inspector, candidate_label,
 )
 from backend.shots import strip_caption_lead_in
+from tests.agent.test_orchestrator import FakeDeepSeek, FakeGemini, FakeSearch, HITS, make_agent
 
 
 def jpeg(colour="red"):
@@ -442,6 +443,68 @@ class InspectorCaptionTests(unittest.TestCase):
                 return {frame: {"caption": ""} for frame in frames}
 
         self.assertEqual(self.inspector(Search()).captions([("L21_V001", 10)]), {})
+
+    def test_a_fetched_caption_is_readable_afterwards(self):
+        class Search:
+            def captions_for_frames(self, video_id, frames):
+                return {frame: {"caption": "a red boat"} for frame in frames}
+
+        inspector = self.inspector(Search())
+        inspector.captions([("L21_V001", 10)])
+        self.assertEqual(inspector.caption_for("L21_V001", 10), "a red boat")
+        self.assertIsNone(inspector.caption_for("L21_V001", 99))
+        self.assertIsNone(self.inspector(Search()).caption_for("L21_V001", 10))
+
+
+class ReviewerSeesTheFetchedCaptionTests(unittest.TestCase):
+    """The review view has to show the caption the judge read, not a shorter view.
+
+    `label_context` trims speech, on-screen text and caption to the lengths the
+    judge is shown, so a reviewer reading the same function compares like with
+    like. A caption the verify step *fetched* bypassed that unless the snapshot
+    passed it in -- these candidates carry no caption evidence at all, so a
+    caption in their context can only have come from the fetch.
+    """
+
+    def run_with_captions(self, seen):
+        from agent.tasks import task_from_text
+
+        class CaptioningSearch(FakeSearch):
+            def captions_for_frames(self, video_id, frames):
+                return {frame: {"caption": f"the shot at {frame} shows a red boat"}
+                        for frame in frames}
+
+        agent = make_agent(FakeDeepSeek(), FakeGemini({("L01_V002", 200): 9}),
+                           CaptioningSearch(HITS), mode="fast")
+        agent.run(task_from_text("q-kis", "thuyền đỏ"), progress=seen.append)
+        return agent
+
+    def test_the_context_carries_the_caption_the_verify_step_fetched(self):
+        seen = []
+        self.run_with_captions(seen)
+        contexts = [c for snap in seen for c in snap["candidates"] if c["context"].get("caption")]
+        self.assertTrue(contexts, "no candidate reached the view with a caption")
+        self.assertIn("shows a red boat", contexts[0]["context"]["caption"])
+        # None of them had caption evidence, so the context came from the fetch.
+        self.assertTrue(all("caption" not in c["sources"] for c in contexts))
+
+    def test_the_reviewer_reads_a_caption_trimmed_like_the_judge_reads_it(self):
+        seen = []
+
+        class Chatty(FakeSearch):
+            def captions_for_frames(self, video_id, frames):
+                return {frame: {"caption": "boat " * 400} for frame in frames}
+
+        from agent.tasks import task_from_text
+
+        make_agent(FakeDeepSeek(), FakeGemini({("L01_V002", 200): 9}),
+                   Chatty(HITS), mode="fast").run(
+            task_from_text("q-kis", "thuyền đỏ"), progress=seen.append)
+
+        captions = [c["context"]["caption"] for snap in seen for c in snap["candidates"]
+                    if c["context"].get("caption")]
+        self.assertTrue(captions)
+        self.assertEqual(len(captions[0]), MAX_CAPTION_CHARS)
 
 
 class BackendContractTests(unittest.TestCase):

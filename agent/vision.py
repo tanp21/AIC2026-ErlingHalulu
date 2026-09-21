@@ -244,6 +244,17 @@ class Inspector:
             self._captions.update(hits)
         return hits
 
+    def caption_for(self, video_id, frame_idx) -> str | None:
+        """The caption this run already fetched for one frame, if it fetched one.
+
+        The UI's review view reads it so a reviewer sees the caption the judge
+        read. Without it a caption the verify step fetched reaches the model and
+        not the person checking its work, which is the one thing
+        `label_context`'s shared trimming exists to prevent.
+        """
+        with self._lock:
+            return self._captions.get((video_id, int(frame_idx)))
+
     def verify(self, task, plan, candidates, question=None) -> tuple[dict[str, Verdict], list[str]]:
         """Judge candidates in chunks; returns verdicts by id and any chunk errors."""
         if not candidates:
