@@ -294,7 +294,10 @@ class _Run:
         # call, one batch and one parallel verification.
         confident = (best is not None and best.verdict.score >= self.options.accept_score
                      and not self._falsified(best))
-        if not confident and self.remaining() > 8:
+        # The rewrite is the only recovery this mode has, so it is not gated on the
+        # budget being comfortable: a 12 s round 1 once cancelled it with 8.0 s left
+        # and the run finished on a wrong video the rewrite would have questioned.
+        if not confident and not self.over_budget():
             self._rewrite_round()
 
     def _best_score(self):
@@ -344,19 +347,35 @@ class _Run:
         queries = [self._server_query(raw, index)
                    for index, raw in enumerate((raw_queries or [])[:6]) if isinstance(raw, dict)]
         queries = [query for query in queries if query]
-        # Right video, wrong moment is the commonest miss: look for the target scene
-        # inside the videos round 1 favoured.
-        caption, *paraphrases = self.plan.scenes[self.plan.target_scene].visual_en
-        scoped = {"kind": "visual", "id": "s1.scoped", "text": caption,
-                  "video_ids": self.pool.video_ranking()[:5], "limit": 100}
-        if paraphrases:
-            scoped["paraphrases"] = paraphrases[:4]
-        queries.append(scoped)
+        queries += self._scoped_queries(room=8 - len(queries))
         self.log("rewrite", {"queries": queries},
                  "; ".join(str(q.get("text") or q.get("events"))[:60] for q in queries), started)
         self._run_search(queries, "rewrite")
         fresh = self._best_neighbours()
         self._verify(fresh + self.pool.to_verify(self.options.verify_top - len(fresh)))
+
+    def _scoped_queries(self, room, videos=3):
+        """Each scene searched inside the videos round 1 favoured.
+
+        Right video, wrong moment is the commonest miss, and on a multi-scene query
+        the moment to submit is often not the scene that found the video: the one
+        that did can be generic ("two women with a phone") while the distinctive
+        scene ("a Black woman walking past") is never searched inside it.
+        """
+        leading = self.pool.video_ranking()[:videos]
+        if not leading or room <= 0:
+            return []
+        order = [self.plan.target_scene] + [index for index in range(len(self.plan.scenes))
+                                            if index != self.plan.target_scene]
+        scoped = []
+        for index in order[:max(1, room)]:
+            caption, *paraphrases = self.plan.scenes[index].visual_en
+            query = {"kind": "visual", "id": f"s1.scoped{index}", "text": caption,
+                     "video_ids": leading, "limit": 100}
+            if paraphrases:
+                query["paraphrases"] = paraphrases[:4]
+            scoped.append(query)
+        return scoped
 
     def _best_neighbours(self, radius=2):
         """Unverified keyframes next to a promising-but-unsure match, for the exact moment."""

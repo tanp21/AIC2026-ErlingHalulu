@@ -60,6 +60,7 @@ Reply with one JSON object and nothing else:
       "visual_en": ["English caption", "paraphrase 1", "paraphrase 2", "paraphrase 3"]}}
   ],
   "target_scene": 0,
+  "readings_en": ["a different plausible reading of the ambiguous part"],
   "events_en": [],
   "transcript_vi": ["spoken phrase"],
   "caption_en": ["English sentence as a shot caption would word it"],
@@ -75,6 +76,34 @@ Rules:
 detail (same counts, colours, clothing, quoted text, names) and change only word order, \
 synonyms or grammar. Never shorten to a subset of the details and never add details: \
 shortened "aspect" captions hurt retrieval in benchmarks, faithful paraphrases helped.
+- Write only what a camera shows, and never more than the query states. A relationship \
+or role no picture can show ("hai mẹ con", "hai vợ chồng", "người con", "đồng nghiệp") \
+becomes the bare count and nothing else -- "two people" -- unless the query itself gives \
+the gender, age or clothing, in which case write exactly that much. Guessing is what \
+loses clips: on one real query "mother and child" sent CLIP after an adult with a small \
+child and "a young man and an older woman" invented a gender, both ranking the right \
+video 66th, while the neutral "two people holding a phone" put it first. The same holds \
+for age: write "child" only where the query says so. A guess about who the people are \
+belongs in readings_en, never in visual_en. This bans inventing what the query leaves \
+open -- it never means dropping a detail the query states or plainly implies: a question \
+about the number shown on a scale implies a scale with a readable display, so the caption \
+says so; writing only "a fish on a scale" throws away the detail that finds the clip.
+- Never settle an interaction the query leaves open. A phone in someone's hand is not a \
+video call, a microphone is not an interview, two people at a table are not eating, \
+unless the query says so. If the query can be pictured in several ways, keep the caption \
+to what is certain and put the other pictures in "readings_en".
+- readings_en: kis and qa only, 0-2 entries. Each is ONE English caption of whichever \
+scene the Vietnamese can picture in more than one way, under a different reading of it: \
+"hai người cầm điện thoại trò chuyện" is two people walking side by side, one holding a \
+phone up, and it is also two people sitting over a phone screen. A reading changes only \
+HOW the stated details look; it never adds a person, object or action the query does not \
+mention (no microphone for an interview, no video call for a phone), and it never moves a \
+detail into another scene. Two readings must differ in something a camera would show \
+differently -- indoors or outdoors, sitting or walking, close-up or wide -- not in \
+wording: "two women sitting at a table with a phone" and "two women sitting over a phone" \
+are the same picture twice, while "two women walking outdoors, one holding a phone up" is \
+a real second reading. One entry may instead be a cautious version that keeps only \
+what is certain and drops the rest. Each is searched on its own and must describe ONE \nframe, like any caption -- never a sentence chaining scenes together ("... then ... \nthen ..."), which matches no single keyframe. Never repeat a visual_en wording here; \nleave the list empty when nothing is ambiguous.
 - target_scene: index of the scene whose frame should be submitted — the scene the query asks \
 to find exactly, otherwise the first scene.
 - events_en: trake only — exactly one English caption per listed event, in order, each \
@@ -220,6 +249,7 @@ REWRITE_SYSTEM = f"""You run the second and last search round for one query of A
 
 You see the query, the round-1 plan, web notes and the round-1 candidates with Gemini's 0-10 verdicts (reasons name what matched or was contradicted). Write up to 6 NEW queries that fix what round 1 missed:
 - visual: rewrite the caption around the detail the verdicts found missing or wrong, or the scene's most distinctive element; give "paraphrases" (faithful rewordings). When a promising video is known (a candidate scored 5+ or several channels agree), add a visual query with "video_ids" to pin the exact moment inside it.
+- Never name what the picture cannot show: a relationship ("mother and child") or a guessed gender or age costs the right video, where the bare count ("two people") finds it. Write an alternative reading as its own query instead of putting the guess in a caption.
 - audio: Vietnamese phrases a narrator would say, especially names from the web notes (dish names, places, people, organisations), numbers as digits.
 - ocr: exact on-screen strings the query quotes or the web notes name.
 - caption: an English sentence naming the details CLIP cannot encode (counts, on-screen sentences, the order of actions in one shot); add "video_ids" to read inside a promising video.

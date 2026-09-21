@@ -22,7 +22,7 @@ t=0   cooking query? ──► Gemini + Google Search: which "Món ngon mỗi ng
         hits round-robin, then the rest by fusion
       best ≥ 9 and the falsifier (~5 s) accepts it? ── yes ──► done
       otherwise ──► one DeepSeek rewrite (no thinking, sees verdicts + web notes)
-                    + the target scene searched inside the top 5 videos
+                    + every scene searched inside the top 3 videos
                     + neighbours of a 5-8 match ──► batch ──► parallel verification
       Q&A: reading at the top 2 moments  ∥  a web answer (recipe for cooking shows,
            a news/fact search otherwise, none for counts) ──► reconciled
@@ -91,6 +91,21 @@ finalize: ranking (verified matches first) · Q&A answer read from the frame/spe
   confident wrong matches. Deep mode only.
 - **Q&A answers are read at up to 3 moments** of the top video and decided by majority
   (ties to confidence): one keyframe can hide what is being counted or read.
+- **A caption says only what a camera shows.** A relationship no picture carries ("hai mẹ
+  con", "hai vợ chồng") becomes the bare count, "two people", and a guessed gender or age
+  is never written at all. Measured on one live query: "a mother and her child" and "a
+  young man and an older woman" both put the right video 34th-66th, while "two people
+  holding a phone together" put it first. The same query also showed the other half of
+  the rule — the caption keeps every detail the query states or plainly implies, so a
+  question about the number shown on a scale still says "digital scale, display showing a
+  number".
+- **Ambiguity becomes separate queries, not a blurrier one.** `readings_en` holds up to 2
+  alternative *pictures* of whatever the Vietnamese leaves open ("cầm điện thoại trò
+  chuyện" = two people walking with a phone held up, or two people sitting over a screen),
+  each searched as its own query right after the target scene. Paraphrases are fused into
+  one vector because they are the same picture; readings never are, since averaging two
+  incompatible pictures matches neither. Each reading describes one frame, adds nothing
+  the query does not mention, and may be a cautious version that drops what is uncertain.
 - **Captions are a channel of their own.** Every 2026 shot has an offline CapRL caption
   (`docs/caprl-shot-captioning.md`); `kind: "caption"` searches them as text. A caption
   says what a keyframe embedding cannot: how many, in what order inside the shot, and
@@ -275,12 +290,18 @@ direction, not exact margin.
 | Round 1 (25) | PE-Core caption | 22.2% | 37.0% | 0.31 | | |
 | Round 1 (25) | deep v2 / v3 (2026-09-18, compat) | 56% / 52% | 76% / 72% | 0.63 / 0.61 | 84% / 72% | 29 s / ~170 s |
 | Round 1 (25) | fast v6 / v7 (2026-09-19, batch) | 48% / 48% | 60% / 68% | 0.54 / 0.56 | 60% / 72% | 18-20 s / 28-40 s |
+| Round 1 (25) | fast + readings (2026-09-21) | 52% | 64% | 0.58 | 64% | 18 s / 28 s |
 | Round 2 (30) | PE-Core caption | 38.9% | 63.9% | 0.50 | | |
 | Round 2 (30) | deep v3 (compat) | 66.7% | 73.3% | 0.70 | 86.7% | 99 s / ~250 s |
 | Round 2 (30) | fast v6 | 56.7% | 73.3% | 0.64 | 76.7% | 19 s / 35 s |
+| Round 2 (30) | fast + readings (2026-09-21) | 63.3% | 80.0% | 0.70 | 73.3% | 21 s / 34 s |
 
-- Fast mode costs roughly a tenth of R@1 for a 5x shorter run; `--mode auto` sits
-  between them. R@5 is level, which matters most when a human checks the list.
+- The 2026-09-21 rows are the caption-blind numbers for the same code the caption channel
+  ships in: the deployed server has no caption index yet, so those sub-queries were dropped.
+  On round 2 they match deep mode (66.7% / 0.70) at a fifth of the time; on round 1, 7
+  queries improved and 5 worsened against the previous run, most by one or two ranks.
+- Fast mode's earlier gap to deep mode was about a tenth of R@1 for a 5x shorter run;
+  `--mode auto` sits between them. R@5 is what matters most when a human checks the list.
 - Round 2 was never used while tuning deep mode; fast mode's fixes (verification
   quota, local TRAKE paths, scene coherence) were found on both rounds.
 - One query is 3-4 points, and LLM plans and verdicts vary between runs: the same

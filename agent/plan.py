@@ -16,6 +16,7 @@ MAX_SCENES = 4
 MAX_VARIANTS = 5  # caption + up to 4 paraphrases
 MAX_PHRASES = 3
 MAX_CAPTIONS = 2
+MAX_READINGS = 2
 MAX_TEXT = 300
 BATCH_LIMIT = 12
 TRAKE_TIGHT_GAP = 45
@@ -33,6 +34,8 @@ class Plan:
     summary_vi: str
     scenes: list[Scene]
     target_scene: int = 0
+    # Other plausible pictures of an ambiguous target scene, each searched on its own.
+    readings_en: list[str] = field(default_factory=list)
     events_en: list[str] = field(default_factory=list)
     transcript_vi: list[str] = field(default_factory=list)
     caption_en: list[str] = field(default_factory=list)
@@ -103,6 +106,7 @@ def parse_plan(data, task) -> Plan:
         summary_vi=_text(data.get("summary_vi")) or task.text[:MAX_TEXT],
         scenes=scenes,
         target_scene=min(max(target, 0), len(scenes) - 1),
+        readings_en=_texts(data.get("readings_en"), MAX_READINGS) if task.kind != "trake" else [],
         events_en=events,
         transcript_vi=_texts(data.get("transcript_vi"), MAX_PHRASES),
         caption_en=_texts(data.get("caption_en"), MAX_CAPTIONS),
@@ -140,6 +144,13 @@ def initial_queries(plan: Plan, task, spoken_numbers: bool = False) -> list[dict
         return query
 
     first = [visual(plan.target_scene)]
+    # A reading is a different picture of the same scene, so it is its own query: fusing
+    # it into the caption's vector would blur both (the paraphrase benchmark fuses only
+    # faithful rewordings).
+    readings = [
+        {"kind": "visual", "id": f"r1.r{index}", "text": text, "limit": 200}
+        for index, text in enumerate(plan.readings_en)
+    ]
     rest = [visual(index) for index in range(len(plan.scenes)) if index != plan.target_scene]
 
     temporal = []
@@ -177,7 +188,7 @@ def initial_queries(plan: Plan, task, spoken_numbers: bool = False) -> list[dict
         {"kind": "caption", "id": f"r1.c{index}", "text": text, "limit": 100}
         for index, text in enumerate(plan.caption_en)
     ]
-    return (first + temporal + described + spoken + written + rest)[:BATCH_LIMIT]
+    return (first + readings + temporal + described + spoken + written + rest)[:BATCH_LIMIT]
 
 
 def expected_events(plan: Plan, task) -> int:
