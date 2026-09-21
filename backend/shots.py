@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from functools import lru_cache
 import json
 import os
+from pathlib import Path
+import re
 import subprocess
 import threading
-from pathlib import Path
 
 import numpy as np
 
@@ -127,6 +128,107 @@ def load(row, data_dir=DATA):
 
 def has_shots(row, data_dir=DATA):
     return shots_path(row, data_dir).exists()
+
+
+# --- shot captions -----------------------------------------------------------
+#
+# CapRL-Video-4B wrote one dense English description per shot window
+# (`docs/caprl-shot-captioning.md`). The agent reads it as extra context when it
+# judges a candidate frame, which is a job the team's own benchmark says captions
+# are good for and *ranking* is not: as a retrieval channel they lose to PE-Core
+# (MRR .295 vs .466) because different videos' captions read alike, but as a
+# description of a frame already retrieved they are the most detailed thing we have.
+#
+# Read per video, not corpus-wide. `shot_captions.parquet` keeps everything in one
+# row group, so filtering does not help: reading it costs ~5 s and leaves ~900 MB
+# resident in a container that also holds PE-Core, Qwen and FAISS. The per-video
+# part is ~1.4 MB and ~20 ms, so it goes through an LRU instead.
+
+CAPTION_COLUMNS = (
+    "shot_index", "window_index", "window_count",
+    "window_start_sec", "window_end_sec", "start_sec", "end_sec", "caption",
+)
+#: Only the 2026 `L*` corpus was captioned (`docs/caprl-shot-captioning.md`); the
+#: 2025 `K*` videos have no captions at all, so they are absent here rather than
+#: mapped to a path that can never exist. Captioning 2025 later means adding its
+#: prefix to this map and nothing else.
+CAPTION_YEARS = {"L": "2026"}
+
+#: The captioner narrates its own task before describing the picture — measured on
+#: L22_V001, 47% of captions open with "Based on the provided video frames, here is
+#: the detailed description in chronological order:". The team's cleaning probe
+#: (`docs/reports/caption-cleaning-probe-2026.md`) measured this class of lead-in as
+#: pure noise, so it is dropped rather than paid for on every candidate.
+CAPTION_LEAD_INS = (
+    r"based on the provided (?:video )?frames?\s*[,:]?\s*",
+    r"here is the (?:detailed |following )?description(?:\s+in chronological order)?\s*:?\s*",
+    r"the following is a (?:detailed )?description[^:]{0,40}:\s*",
+    r"in chronological order\s*:?\s*",
+)
+
+
+def strip_caption_lead_in(text):
+    """Drop the captioner's own preamble, leaving the description."""
+    changed = True
+    while changed:  # the observed openings stack two of these in one sentence
+        changed = False
+        for pattern in CAPTION_LEAD_INS:
+            trimmed = re.sub(pattern, "", text, count=1, flags=re.IGNORECASE).lstrip()
+            if trimmed != text:
+                text, changed = trimmed, True
+    return text
+
+
+def captions_path(video_id, *, data_dir=DATA):
+    """`data/<year>/captions/parts/<group>/<video_id>.parquet`, or None if never captioned."""
+    year = CAPTION_YEARS.get(video_id[:1])
+    if year is None:
+        return None
+    return Path(data_dir) / year / "captions" / "parts" / video_id[:3] / f"{video_id}.parquet"
+
+
+@lru_cache(maxsize=256)
+def _caption_rows(path):
+    """One video's windows as `(window_start_sec, window_end_sec, shot_index, …)`."""
+    import pyarrow.parquet as pq
+
+    try:
+        data = pq.read_table(path, columns=list(CAPTION_COLUMNS)).to_pydict()
+    except (OSError, ValueError):
+        return ()
+    return tuple(zip(
+        data["window_start_sec"], data["window_end_sec"], data["shot_index"],
+        data["window_index"], data["window_count"], data["caption"],
+    ))
+
+
+def caption_for_frame(video_id, seconds, *, data_dir=DATA):
+    """The caption of the shot window covering `seconds`, or None.
+
+    `seconds` is source-clock time (`FrameMap.frame_time`), the same clock the
+    window bounds were measured on. A shot longer than 20 s was split into
+    overlapping windows; the frame lands in the one it sits deepest inside, which
+    matters only for the 1.4% of shots that were split at all.
+    """
+    path = captions_path(video_id, data_dir=data_dir)
+    if path is None or not path.exists():
+        return None
+    best = None
+    for start, end, shot_index, window_index, window_count, caption in _caption_rows(str(path)):
+        if start is None or end is None or not caption:
+            continue
+        if start <= seconds <= end:
+            depth = min(seconds - start, end - seconds)
+            if best is None or depth > best[0]:
+                best = (depth, {
+                    "caption": strip_caption_lead_in(caption),
+                    "shot_index": int(shot_index),
+                    "window_index": int(window_index),
+                    "window_count": int(window_count),
+                    "start_sec": float(start),
+                    "end_sec": float(end),
+                })
+    return best[1] if best else None
 
 
 def frame_duration(mapping, frame_idx):

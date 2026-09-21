@@ -30,7 +30,7 @@ CORE_API_VERSION = "1"
 
 PROXY_PREFIXES = (
     "/thumb/", "/frame/", "/video/", "/clip/", "/shots/",
-    "/frame-map/", "/transcript/", "/context/",
+    "/frame-map/", "/transcript/", "/context/", "/captions/",
 )
 PROXY_PATHS = ("/videos", "/indexes", "/profiles")
 

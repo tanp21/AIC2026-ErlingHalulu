@@ -194,6 +194,65 @@ serves the archive. The orchestrator reaches the server over loopback
 (`AIC_AGENT_INTERNAL_URL`, default `http://127.0.0.1:8000`) under the caller's own
 identity. `backend/agent_runner.py` implements this; see AGENTS.md for the wiring.
 
+## Local vision
+
+Every image the agent looks at goes out through one function —
+`GeminiClient.judge` in `agent/llm.py`. `AIC_AGENT_VISION` chooses what sits
+behind it: `gemini` (the default), `deepseek`, or `local`, which puts a model on
+this machine behind the same call so the five jobs in `agent/vision.py`
+(`verify`, `falsify`, `check_sequence`, `pick_frame`, `answer`) keep their
+signatures and their schemas while the keyframes stop leaving the building. That
+matters on competition day, when the venue's uplink is the bottleneck and the
+image payload is the heaviest thing the agent sends.
+
+`agent/vlm.py` holds the backends and `agent/vlm_models.py` the loaders; the
+harness is `scripts/benchmarks/bench_agent_vision.py`.
+
+**The models are downloaded, not fetched at run time.** The container is offline
+and read-only, so `~/.cache/aic/vlm` is materialised on the dev machine and
+mounted at `/models/vlm`:
+
+```bash
+uv run python -m scripts.vlm.fetch_models          # all candidates
+uv run python -m scripts.vlm.fetch_models --list   # what is present
+```
+
+**A small model is prompted differently, and that is deliberate.** The prompts in
+`agent/prompts.py` are long, in English, and left to Gemini's
+`response_json_schema` to define the output shape — which means a local model
+handed the same text has nothing telling it what to emit. Three consequences,
+all handled inside `agent/vlm.py`:
+
+- The schema is rendered back into words and appended to the prompt.
+- `verify` and `sequence` fan out into **one call per frame** with a short prompt.
+  Measured on Vintern-1B-v3_5: handed five frames and a five-element schema it
+  invents the ones it cannot see and runs past its token budget, and a `reason`
+  field it is not asked to write is what it spends the budget on. Neither compact
+  prompt asks for one — `reason` is only ever logged, and `CandidatePool.ordered`
+  ranks on `score` and `scene`. The prompt's *language* is per family
+  (`AIC_VLM_PROMPT`): Vietnamese for the Vietnamese-tuned model, English for the
+  Qwen VLMs.
+- Ids are **stamped from the label, not read from the reply**. Asked about
+  `[C1]`, Vintern answers `"L21_V024 t=810.6s"`; `Inspector.verify` drops any id
+  it does not know, so trusting it would score nothing, silently.
+
+Measured on the RTX 3060, warm, one frame per call, alongside the server's own
+PE-Core and Qwen3-Embedding:
+
+| Model | s/frame | Weights | Fits beside the server |
+| --- | ---: | ---: | --- |
+| `5CD-AI/Vintern-1B-v3_5` | 1.9 | 2.0 GB | yes |
+| `Qwen/Qwen3-VL-2B-Instruct` | 4.3 | 4.1 GB | yes |
+| `Qwen/Qwen2.5-VL-3B-Instruct` | 4.6 | 7.3 GB | yes, but under 0.5 GB spare |
+
+The `nvidia-smi` figure for the server's own models with the container warm is
+**~4.2 GB**, so 4.2 + 7.3 is 11.5 GB against a 12.0 GB card: the 3B does load,
+and ran a full 91-case sweep with the container up. It is still the wrong choice
+— that margin is one allocation deep, and the 2B is both smaller and more
+accurate (see `docs/reports/agent-vision-backends-2026.md`). A model that cannot
+fit at all is what `AIC_VLM_URL` exists for: run it in another process or on
+another host. `AIC_AGENT_VISION=gemini` remains the default and the fallback.
+
 ## Setup
 
 ```bash
@@ -219,6 +278,16 @@ at your own app so runs use your local orchestrator; see
 | `GEMINI_THINKING_LEVEL` | `low` | |
 | `AIC_AGENT_SEARCH_API` | `auto` | `batch` requires `/agent/search`; `compat` always uses the public routes |
 | `AIC_AGENT_SPOKEN_NUMBERS` | `0` | `1` spells digits out in transcript queries (raw-ASR index only) |
+| `AIC_AGENT_VISION` | `gemini` | Which model does the five vision jobs: `gemini`, `local` (a model on this machine), or `deepseek`. `local` makes `GEMINI_API_KEY` optional — the web lookup goes without — but it does not need to be. `deepseek` is a remote API like Gemini, so it solves nothing about a congested uplink; it exists because it may simply judge more accurately |
+| `AIC_VLM_URL` | unset | Runs the local model in another process or on another host (`POST /core/vision/judge`), the same split as `AIC_CORE_URL`. Only read when `AIC_AGENT_VISION=local` |
+| `AIC_VLM_MODEL` | `deepseek-flash` / smallest candidate | The model the selected vision backend uses: a registry slug for `local`, a DeepSeek model id for `deepseek`. **Only `deepseek-flash` reads images** — `deepseek-v4-pro` answers a vision call with schema-shaped JSON whose every score is 0, which reads as a judge that works and scores badly. `bench_agent_vision` probes any remote judge with a solid-colour image before scoring it. The local default is deliberately the smallest, so a first run on a card that may already hold PE-Core and Qwen does not start by trying to fit the largest. See *Local vision* below |
+| `AIC_VLM_DIR` | `~/.cache/aic/vlm` | Where the snapshots are materialised; `/models/vlm` in the container |
+| `AIC_VLM_DEVICE` | `cuda` | `cpu` when the card is full; a 2B model on CPU is only viable in `--mode deep` |
+| `AIC_VLM_MAX_NEW_TOKENS` | `128` | A one-object reply is ~40 tokens. This is what stops a rambling model from spending the time budget, and a reply cut off mid-JSON parses as nothing |
+| `AIC_VLM_IMAGE_SIDE` | `448` | Long edge a frame is resized to before judging |
+| `AIC_VLM_ANSWER_SIDE` | `1280` | The `answer` job has to *read* text, so it keeps more resolution |
+| `AIC_AGENT_CAPTIONS` | `1` | `0` stops the agent reading CapRL shot captions into candidate labels |
+| `AIC_VLM_PROMPT` | per family | `vi` or `en` for the short local prompt. Defaults to `vi` for `InternVL` (Vietnamese-tuned; give it English and it answers in English) and `en` for the Qwen VLMs. Override it to measure the other side — both are scored in `benchmarks/visual/vlm_verify_2026.json` |
 
 ## Commands
 
@@ -302,8 +371,14 @@ direction, not exact margin.
 
 ## Not done yet
 
-- **Shot captions** as a search channel, once they are indexed server-side. Add a
-  `caption` kind to `/agent/search` and a plan field.
+- **Shot captions as a search channel.** The *context* half is done — the agent
+  reads a candidate's CapRL caption into its label (see *Local vision*). The other
+  half, a `caption` kind on `/agent/search` with a plan field, is not: the team's
+  own benchmark (`docs/reports/caption-retrieval-vs-pe-core-2026.md`) measured
+  captions as a retrieval channel losing to PE-Core (MRR .295 vs .466), and its
+  conclusion was that they belong in the verify step rather than the ranking one.
+  What would change that is the measured item below it being wrong: captions do win
+  on on-screen text and long action sequences.
 - **Image exemplars** for out-of-knowledge entities (QUEST/MADTempo style): fetch a web
   image and search with `/search/image`.
 - **Group priors**: past answer keys show L26 is cooking, L25 lectures, L24 lion dance

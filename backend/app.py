@@ -1402,6 +1402,43 @@ def keyframe_context(
     return {"video_id": video_id, "frame_idx": int(frames[pos]), "frames": neighbours}
 
 
+@app.get("/captions/{video_id}")
+def shot_captions(
+    response: Response,
+    video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$"),
+    frames: str = Query(pattern=r"^\d+(,\d+)*$"),
+):
+    """CapRL shot captions for `frames`, keyed by frame index.
+
+    The retrieval agent reads these as text context when it judges a candidate, so
+    it does not have to send the frame to a remote vision model to learn what is in
+    it. A caption is optional: a video the captioner never saw (any 2025 `K*` video,
+    or a 2026 one whose shot pass has not run) answers `available: false` with an
+    empty map rather than 404, because a missing caption must not fail a run.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    wanted = [int(value) for value in frames.split(",")][:60]
+    try:
+        mapping = frame_maps.load(video_id)
+    except (KeyError, OSError):
+        # A video with shots but no generated frame map raises FileNotFoundError from
+        # np.load, not KeyError. Either way the body promises availability, not a 404.
+        return {"video_id": video_id, "available": False, "captions": {}}
+    found = {}
+    for frame_idx in wanted:
+        try:
+            seconds = mapping.frame_time(frame_idx)
+        except (IndexError, KeyError):
+            # A frame index past the end of the map is a caller typo, not a server
+            # fault. `/frame/{video_id}/{frame_idx}` answers the same class of input
+            # with 422; a 500 here would be re-issued for every later batch.
+            continue
+        caption = shots.caption_for_frame(video_id, seconds)
+        if caption:
+            found[str(frame_idx)] = caption
+    return {"video_id": video_id, "available": bool(found), "captions": found}
+
+
 @app.get("/frame/{video_id}/{frame_idx}")
 def get_frame(
     video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$"),

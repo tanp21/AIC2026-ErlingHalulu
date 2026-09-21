@@ -46,7 +46,8 @@ class SearchClient:
     """
 
     def __init__(self, base_url, *, user=None, password=None, trusted_user=None,
-                 timeout=180.0, retries=3, http=None, sleep=time.sleep, api="auto"):
+                 timeout=180.0, retries=3, http=None, sleep=time.sleep, api="auto",
+                 captions=True):
         if api not in ("auto", "batch", "compat"):
             raise ValueError(f"unknown search api {api!r}")
         self.api = api
@@ -60,13 +61,18 @@ class SearchClient:
         self._sleep = sleep
         self._batch_lock = threading.Lock()
         self._image_slots = threading.BoundedSemaphore(MAX_IMAGE_REQUESTS)
+        # Set once a server answers `/captions` with 404/405, so an old build is
+        # asked exactly once per run instead of once per candidate.
+        self._no_captions = False
+        # Off entirely under `AIC_AGENT_CAPTIONS=0`.
+        self._captions_enabled = captions
 
     @classmethod
     def from_settings(cls, settings):
         return cls(
             settings.server_url, user=settings.server_user,
             password=settings.server_password, trusted_user=settings.trusted_user,
-            api=settings.search_api,
+            api=settings.search_api, captions=getattr(settings, "captions", True),
         )
 
     def close(self):
@@ -133,6 +139,34 @@ class SearchClient:
     def transcript(self, video_id: str) -> list[dict]:
         """`[{"start", "end", "text"}]` cues for the whole video."""
         return self._request("GET", f"/transcript/{video_id}", timeout=LOOKUP_TIMEOUT).json()["cues"]
+
+    def captions(self, video_id: str, frames: list[int]) -> dict[int, dict]:
+        """CapRL shot captions for `frames`, keyed by frame index.
+
+        Returns `{}` rather than raising when the server has no captions for this
+        video — every 2025 `K*` video, and anything whose shot pass has not run. A
+        caption is context, not evidence, so losing it must never cost a run; the
+        route answers `available: false` rather than 404 for the same reason, and
+        the latch is only for a server old enough not to have the route at all.
+        """
+        if not frames or self._no_captions or not self._captions_enabled:
+            return {}
+        wanted = ",".join(str(int(frame)) for frame in frames)
+        try:
+            response = self._request("GET", f"/captions/{video_id}", params={"frames": wanted},
+                                     timeout=LOOKUP_TIMEOUT)
+        except SearchError as exc:
+            if exc.status in (404, 405):
+                self._no_captions = True
+                logger.warning("server has no /captions; continuing without shot captions")
+            return {}
+        found = {}
+        for key, value in (response.json().get("captions") or {}).items():
+            try:
+                found[int(key)] = value
+            except (TypeError, ValueError):
+                continue
+        return found
 
 
 def _detail(response):

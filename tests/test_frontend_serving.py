@@ -49,6 +49,16 @@ class FrontendServingTests(unittest.TestCase):
         self.assertIn("/shots/{video_id}/labels", paths)
         self.assertIn("/clip/{video_id}/{shot_index}", paths)
 
+    def test_app_registers_the_shot_caption_route(self):
+        """The agent reads shot captions as context over HTTP, like every other channel."""
+        from backend.core_service import PROXY_PREFIXES
+
+        paths = {route.path for route in app.routes}
+        self.assertIn("/captions/{video_id}", paths)
+        # Split development forwards media/data routes to the compute host; a route
+        # missing here works locally and 404s for a teammate.
+        self.assertIn("/captions/", PROXY_PREFIXES)
+
 
 if __name__ == "__main__":
     unittest.main()
