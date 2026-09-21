@@ -167,7 +167,8 @@ def quantity_queries(plan: Plan) -> list[dict]:
     ]
 
 
-def initial_queries(plan: Plan, task, spoken_numbers: bool = False) -> list[dict]:
+def initial_queries(plan: Plan, task, spoken_numbers: bool = False,
+                    skip_kinds: frozenset = frozenset()) -> list[dict]:
     """Round-1 batch: every channel the plan names, capped at the server's batch size.
 
     Built in priority order and truncated: the target scene first, then temporal
@@ -230,10 +231,12 @@ def initial_queries(plan: Plan, task, spoken_numbers: bool = False) -> list[dict
         {"kind": "ocr", "id": f"r1.o{index}", "text": text, "limit": 50}
         for index, text in enumerate(plan.ocr)
     ]
+    # Skipped when the deployment cannot serve them: the batch is capped, so a query for
+    # a dead channel is a query removed from a live one.
     described = [
         {"kind": "caption", "id": f"r1.c{index}", "text": text, "limit": 100}
         for index, text in enumerate(plan.caption_en)
-    ]
+    ] if "caption" not in skip_kinds else []
     # Ahead of the captions and the other scenes: when the question asks for an amount,
     # the channel that answers it is speech, and the batch is truncated in this order.
     return (first + readings + temporal + quantity

@@ -176,6 +176,26 @@ class SearchClient:
             for frame in response.json()["frames"]
         ]
 
+    def caption_channel_available(self) -> bool:
+        """Whether this server can answer caption queries at all, probed once per run.
+
+        The planner writes two caption queries into every round-1 batch, and a deployment
+        without the caption index answers each with 503 -- they then take two of the
+        batch's twelve slots and fail. The latch that drops them flips only after the batch
+        they cost, which is too late for round 1 to use those slots: measured across the
+        saved runs, 28 of 197 planned round-1 queries were caption queries against an index
+        that does not exist. Any syntactically valid id probes the deployment; the route
+        answers 503 when the index is missing, and 200 with whatever hits exist otherwise.
+        """
+        if self.captions_supported is None:
+            try:
+                self._request("GET", "/captions/L26_V001", timeout=LOOKUP_TIMEOUT)
+            except SearchError as exc:
+                self.captions_supported = exc.status not in (404, 405, 500, 503)
+            else:
+                self.captions_supported = True
+        return bool(self.captions_supported)
+
     def captions(self, video_id: str) -> list[dict]:
         """`[{"start", "end", "time", "frame_idx", "text"}]` shot captions, in time order.
 

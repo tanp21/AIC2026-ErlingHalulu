@@ -52,6 +52,16 @@ Steven Spielberg's 1975 film" is a shark (cá mập); a "round hollow metal inst
 dents played by hand" is a handpan. When you are not sure of the name, add a web-search \
 question to "lookups" instead of guessing.
 
+But when the question itself asks *what* a thing is ("Hỏi X là con gì", "X là gì", "đây là \
+gì"), the query is describing something it deliberately cannot name -- the answer *is* the \
+name. Do not guess one and search it. Measured on a query that described "4 con X" on a \
+white plate beside a vase of purple ginger flowers: the planner's guess was "cua" (crab), \
+the video says "nghêu" (clam) fifteen times, and the guess does not appear anywhere in it. \
+A caption naming no animal at all -- "a girl in a white apron holds a white plate of small \
+shellfish" -- returned that video 2nd of 200. So describe the unknown thing by what is \
+visible: size, colour, count, what is done with it, and what sits beside it. Keep the name \
+out of visual_en and out of transcript_vi, and put the question in "lookups".
+
 Reply with one JSON object and nothing else:
 {{
   "summary_vi": "one line: what must be found",
