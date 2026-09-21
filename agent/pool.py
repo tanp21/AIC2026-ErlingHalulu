@@ -44,6 +44,8 @@ class Verdict:
     reason: str
     answer: str | None = None
     scene: int | None = None
+    #: "gemini", or "human" for a teammate's decision in the UI, which always wins.
+    by: str = "gemini"
 
 
 @dataclass
@@ -240,6 +242,8 @@ class CandidatePool:
             if verdict is None:
                 return (1, 0.0, -candidate.fused)
             if verdict.score >= VERIFIED_MATCH:
+                if verdict.by == "human":  # a teammate's acceptance outranks any model
+                    return (-1, -verdict.score, -candidate.fused)
                 bonus = SCENE_BONUS * max(0, len(scenes.get(candidate.video_id, ())) - 1)
                 return (0, -(verdict.score + bonus), -candidate.fused)
             if verdict.score <= VERIFIED_REJECT:

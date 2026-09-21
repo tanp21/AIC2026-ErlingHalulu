@@ -109,6 +109,10 @@ class ExecuteRunTests(unittest.TestCase):
             self.assertEqual(settings.trusted_user, OWNER)
             self.assertEqual(settings.search_api, "batch")
             self.assertEqual(query.call_args.args[2:], ("fast", 6, None))
+            # the run's own review channel and live view reach the agent
+            self.assertIs(query.call_args.kwargs["review"], run.review)
+            query.call_args.kwargs["progress"]({"stage": "x"})
+            self.assertEqual(store.get(OWNER, run.run_id).progress, {"stage": "x"})
 
             finished = store.get(OWNER, run.run_id)
             self.assertEqual(finished.status, "done")
@@ -205,6 +209,45 @@ class AgentRunEndpointTests(unittest.IsolatedAsyncioTestCase):
             f"/api/agent/runs/{run_id}/submission.zip", headers={"X-AIC-User": TEAMMATE}
         )
         self.assertEqual((polled.status_code, downloaded.status_code), (404, 404))
+
+    async def test_the_owner_reviews_a_running_query(self):
+        run_id = (await self.start()).json()["run_id"]
+        url = f"/api/agent/runs/{run_id}/review"
+
+        accepted = await self.client.post(url, headers=self.headers,
+                                          json={"candidate_id": "C3", "decision": "accept"})
+        typed = await self.client.post(url, headers=self.headers, json={"answer": "  2.15 "})
+        review = self.runs.get(OWNER, run_id).review
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(typed.json()["review"],
+                         {"decisions": {"C3": "accept"}, "answer": "2.15", "stopped": False,
+                          "decided": True})
+        self.assertTrue(review.event.is_set())  # the agent stops waiting on Gemini
+
+    async def test_review_is_validated_private_and_only_while_running(self):
+        run_id = (await self.start()).json()["run_id"]
+        url = f"/api/agent/runs/{run_id}/review"
+
+        no_candidate = await self.client.post(url, headers=self.headers, json={"decision": "accept"})
+        bad_id = await self.client.post(url, headers=self.headers,
+                                        json={"candidate_id": "../x", "decision": "accept"})
+        foreign = await self.client.post(url, headers={"X-AIC-User": TEAMMATE}, json={"stop": True})
+        self.runs.finish(run_id, result=fake_result(run_id), usage=None, error=None)
+        late = await self.client.post(url, headers=self.headers, json={"stop": True})
+
+        self.assertEqual((no_candidate.status_code, bad_id.status_code), (422, 422))
+        self.assertEqual((foreign.status_code, late.status_code), (404, 409))
+        self.assertFalse(self.runs.get(OWNER, run_id).review.stopped)
+
+    async def test_polls_carry_the_live_view(self):
+        run_id = (await self.start()).json()["run_id"]
+        self.runs.update_progress(run_id, {"stage": "judging", "candidates": []})
+
+        polled = (await self.client.get(f"/api/agent/runs/{run_id}", headers=self.headers)).json()
+
+        self.assertEqual(polled["progress"]["stage"], "judging")
+        self.assertFalse(polled["review"]["decided"])
 
     async def test_downloads_the_submission_only_after_the_run_finishes(self):
         run_id = (await self.start()).json()["run_id"]

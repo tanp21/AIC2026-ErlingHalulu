@@ -29,15 +29,20 @@ from .plan import (
     TRAKE_TIGHT_GAP, Plan, analysis_messages, expected_events, initial_queries, parse_plan,
     transcript_text,
 )
-from .pool import VERIFIED_MATCH, Candidate, CandidatePool, Sequence, local_path
+from .pool import VERIFIED_MATCH, Candidate, CandidatePool, Sequence, Verdict, local_path
 from .prompts import AGENT_SYSTEM, LOOKUP_PROMPT, REWRITE_SYSTEM
+from .review import HUMAN_ACCEPT, HUMAN_REJECT, HumanReview
 from .tasks import Task
-from .vision import Inspector, caption_at, transcript_window
+from .vision import Inspector, caption_at, label_context, transcript_window
 from .web import cooking_lookup, fact_lookup, is_cooking, recipe_lookup, similar, tagged
 
 logger = logging.getLogger("agent")
 VIDEO_ID = re.compile(r"^[A-Z]\d{2}_V\d{3}$")
 OBSERVE_TOP = 12
+#: How many candidates the live review view shows (every pending one is added on top).
+PROGRESS_TOP = 24
+#: How often a wait on a model call looks at the human's decisions.
+REVIEW_POLL_SECONDS = 0.25
 # A reading whose evidence is the narration: its names went through ASR.
 SPOKEN_EVIDENCE = re.compile(r"lời|thoại|nói|phát thanh|thuyết minh|giọng|transcript|speech", re.IGNORECASE)
 
@@ -204,12 +209,16 @@ class Agent:
         self.inspector = Inspector(gemini, search, chunk_size=self.options.verify_chunk)
         self.clock = clock
 
-    def run(self, task: Task) -> AgentResult:
-        return _Run(self, task).execute()
+    def run(self, task: Task, review: HumanReview | None = None, progress=None) -> AgentResult:
+        """One task; `review` carries a teammate's decisions, `progress(snapshot)` the live view.
+
+        Both are optional: the CLI runs without a human, the UI supplies both.
+        """
+        return _Run(self, task, review, progress).execute()
 
 
 class _Run:
-    def __init__(self, agent: Agent, task: Task):
+    def __init__(self, agent: Agent, task: Task, review: HumanReview | None = None, progress=None):
         self.agent = agent
         self.task = task
         self.options = agent.options
@@ -226,6 +235,18 @@ class _Run:
         self.background = ThreadPoolExecutor(max_workers=3)
         self.pending: list = []
         self.budget = agent.options.time_budget
+        self.review = review or HumanReview()
+        self.progress = progress
+        #: A stage code the UI translates: planning, searching, judging, second_look,
+        #: rewriting, agent_loop, reading_answer, checking_paths, finalizing, done.
+        self.stage = "planning"
+        #: Candidates whose images are with Gemini right now, for the review view.
+        self.judging: set[str] = set()
+        #: Gemini's own verdicts, kept so withdrawing a human decision restores them.
+        self.model_verdicts: dict[str, Verdict | None] = {}
+        # Model calls a human decision may abandon run here, never under a `with`
+        # block that would wait for them on exit.
+        self.waiter = ThreadPoolExecutor(max_workers=4)
 
     # -- bookkeeping ---------------------------------------------------------------
     def elapsed(self):
@@ -245,10 +266,12 @@ class _Run:
 
     # -- main flow -----------------------------------------------------------------
     def execute(self) -> AgentResult:
+        self._publish("planning")
         try:
             if self.options.mode in ("fast", "auto"):
                 self._fast()
                 if (self.options.mode == "auto" and self.task.kind != "trake"
+                        and not self.review.decided()
                         and self._best_score() < self.options.escalate_below):
                     self.budget = self.options.escalate_budget
                     self.log("escalate", {}, f"best={self._best_score():.0f} -> deep loop", self.agent.clock())
@@ -268,8 +291,99 @@ class _Run:
             # Lookups still running are dropped, not waited for: they only ever add hints.
             self._collect_lookups(0)
             self.background.shutdown(wait=False, cancel_futures=True)
+            self.waiter.shutdown(wait=False, cancel_futures=True)
         self.result.elapsed = self.elapsed()
+        self.stage = "done"
+        self._publish()
         return self.result
+
+    # -- the human in the loop -------------------------------------------------------
+    def _publish(self, stage=None):
+        """Hand the live view to whoever is watching; never lets the view fail the run."""
+        if stage is not None:
+            self.stage = stage
+        if self.progress is None:
+            return
+        try:
+            self.progress(self.snapshot())
+        except Exception:
+            logger.exception("%s progress callback failed", self.task.query_id)
+
+    def snapshot(self) -> dict:
+        """What Gemini is shown, as it is shown, for a teammate to judge alongside it."""
+        ordered = self.pool.ordered()
+        shown = ordered[:PROGRESS_TOP]
+        shown += [c for c in ordered if c.cid in self.judging and c not in shown]
+        plan = None
+        if self.plan is not None:
+            plan = {
+                "summary_vi": self.plan.summary_vi,
+                "scenes": [scene.description_vi or scene.visual_en[0] for scene in self.plan.scenes],
+                "target_scene": self.plan.target_scene,
+                "question_vi": self.plan.question_vi,
+                "events": self.plan.events_en,
+            }
+        return {
+            "stage": self.stage,
+            "step": self.step,
+            "elapsed": round(self.elapsed(), 1),
+            "plan": plan,
+            "candidates": [{
+                "id": c.cid, "video_id": c.video_id, "frame_idx": c.frame_idx,
+                "time": round(c.time, 3), "judging": c.cid in self.judging,
+                "verdict": None if c.verdict is None else vars(c.verdict),
+                "context": label_context(c),
+                "sources": sorted({e.kind for e in c.evidence.values()}),
+            } for c in shown],
+            "sequences": [{
+                "video_id": s.video_id, "frames": list(s.frames),
+                "event_scores": s.event_scores, "refined": s.refined,
+            } for s in self.result.sequences or self.pool.ranked_sequences()[:8]],
+            "answer": self.result.answer,
+            "review": self.review.snapshot(),
+        }
+
+    def _apply_review(self):
+        """A teammate's decisions become verdicts no model reply can overwrite."""
+        self.review.changed.clear()
+        decisions = self.review.decisions()
+        for cid, decision in decisions.items():
+            candidate = self.pool.get(cid)
+            if candidate is None:
+                continue
+            if candidate.verdict is None or candidate.verdict.by != "human":
+                self.model_verdicts[cid] = candidate.verdict
+            accepted = decision == "accept"
+            candidate.verdict = Verdict(
+                HUMAN_ACCEPT if accepted else HUMAN_REJECT,
+                "Accepted by the reviewer" if accepted else "Rejected by the reviewer",
+                by="human",
+            )
+        for cid, verdict in list(self.model_verdicts.items()):
+            if cid not in decisions:  # a withdrawn decision gives the model its verdict back
+                candidate = self.pool.get(cid)
+                if candidate is not None and candidate.verdict and candidate.verdict.by == "human":
+                    candidate.verdict = verdict
+                del self.model_verdicts[cid]
+
+    def _human_says(self, cid) -> bool:
+        return cid in self.review.decisions()
+
+    def _await(self, futures, give_up):
+        """Wait for model calls, re-applying decisions, until done or `give_up()`.
+
+        Returns the futures that finished; the rest keep running unseen. This is
+        the whole point of the review: on a congested venue network a Gemini call
+        can take far longer than a teammate needs to say "that one".
+        """
+        futures = list(futures)
+        while True:
+            done, pending = wait(futures, timeout=REVIEW_POLL_SECONDS)
+            if self.review.changed.is_set():
+                self._apply_review()
+                self._publish()
+            if not pending or give_up():
+                return done
 
     # -- fast mode -----------------------------------------------------------------
     def _fast(self):
@@ -288,6 +402,8 @@ class _Run:
         if self.task.kind == "trake":
             return  # paths are checked event by event in _finalize_sequences
         self._verify(self.pool.to_verify(self.options.verify_top))
+        if self.review.decided():
+            return
         best = next((c for c in self.pool.ordered() if c.verdict), None)
         # A 9-10 must survive the falsifier (~5 s): on round 2, fast mode's misses were
         # mostly confident look-alikes it would have questioned. ~8 s is one DeepSeek
@@ -297,7 +413,7 @@ class _Run:
         # The rewrite is the only recovery this mode has, so it is not gated on the
         # budget being comfortable: a 12 s round 1 once cancelled it with 8.0 s left
         # and the run finished on a wrong video the rewrite would have questioned.
-        if not confident and not self.over_budget():
+        if not confident and not self.over_budget() and not self.review.decided():
             self._rewrite_round()
 
     def _best_score(self):
@@ -326,6 +442,7 @@ class _Run:
     def _rewrite_round(self):
         """DeepSeek (no thinking, one call) rewrites what round 1 missed; runs and verifies it."""
         self.step = 1
+        self._publish("rewriting")
         started = self.agent.clock()
         # A cooking lookup started before planning is usually back by now; its dish
         # name is what the transcript channel needs.
@@ -404,6 +521,7 @@ class _Run:
         if self.plan is None:
             raise RuntimeError(f"planning failed: {last_error}")
         self.result.plan = self.plan
+        self._publish("searching")
         self.log("plan", {}, f"{len(self.plan.scenes)} scenes, "
                  f"{len(self.plan.transcript_vi)} transcript, {len(self.plan.caption_en)} caption, "
                  f"{len(self.plan.ocr)} ocr, {len(self.plan.lookups)} lookups", started)
@@ -450,15 +568,28 @@ class _Run:
         show (finishing order), hence the prompt's not_visible rule and a rejection
         that never lowers the score.
         """
-        if not self.options.falsify:
+        if not self.options.falsify or self.review.decided():
             return False
         started = self.agent.clock()
-        try:
+        self.judging = {candidate.cid}
+        self._publish("second_look")
+
+        def second_look():
             neighbours = self.agent.search.neighbours(candidate.video_id, candidate.frame_idx, 2)
-            rejected, reason, contradicted = self.agent.inspector.falsify(
-                self.task, candidate, neighbours)
+            return self.agent.inspector.falsify(self.task, candidate, neighbours)
+
+        future = self.waiter.submit(second_look)
+        done = self._await([future], self.review.decided)
+        self.judging = set()
+        if future not in done:
+            self.log("falsify", {"candidate": candidate.cid}, "abandoned for a human decision", started)
+            return False
+        try:
+            rejected, reason, contradicted = future.result()
         except Exception as exc:  # no second opinion is not a rejection
             self.log("falsify", {"candidate": candidate.cid}, f"failed: {exc}", started)
+            return False
+        if candidate.verdict is None or candidate.verdict.by == "human":
             return False
         if rejected:
             # Keep the score: on the live round-1 run both rejections hit correct matches
@@ -487,6 +618,8 @@ class _Run:
             return "All of these queries were already run; change the wording or channel."
         results = self.agent.search.search(fresh)
         created = self.pool.add_results(results)
+        self._apply_review()
+        self._publish()
         errors = {qid: r["error"] for qid, r in results.items() if "error" in r}
         counts = {qid: len(r.get("hits", [])) for qid, r in results.items() if "hits" in r}
         self.log("search", {"label": label, "queries": fresh},
@@ -499,11 +632,29 @@ class _Run:
         return note
 
     def _verify(self, candidates, question=None):
-        if not candidates:
+        """Gemini judges `candidates` while the review view shows them as being judged.
+
+        A candidate a teammate already decided is not sent at all, and a decision
+        that ends the run stops the wait: the late reply is discarded.
+        """
+        self._apply_review()
+        candidates = [c for c in candidates if not self._human_says(c.cid)]
+        if not candidates or self.review.decided():
             return
         started = self.agent.clock()
-        verdicts, errors = self.agent.inspector.verify(self.task, self.plan, candidates, question)
+        self.judging = {c.cid for c in candidates}
+        self._publish("judging")
+        future = self.waiter.submit(self.agent.inspector.verify, self.task, self.plan, candidates, question)
+        done = self._await([future], self.review.decided)
+        self.judging = set()
+        if future not in done:
+            self.log("verify", {"ids": [c.cid for c in candidates]}, "abandoned for a human decision", started)
+            self._publish()
+            return
+        verdicts, errors = future.result()
         for cid, verdict in verdicts.items():
+            if self._human_says(cid):
+                continue  # a teammate decided while Gemini was still looking
             candidate = self.pool.get(cid)
             previous = candidate.verdict
             if question and previous is not None:
@@ -513,6 +664,7 @@ class _Run:
                 verdict.answer = verdict.answer or previous.answer
             candidate.verdict = verdict
         best = max((v.score for v in verdicts.values()), default=None)
+        self._publish()
         self.log("verify", {"ids": [c.cid for c in candidates], "question": question},
                  f"{len(verdicts)} verdicts, best={best}"
                  + (f", errors={[e[:120] for e in errors]}" if errors else ""), started)
@@ -661,7 +813,9 @@ class _Run:
             "web_search": self.tool_web_search, "finish": self.tool_finish,
         }
         nudged = False
-        while self.step < self.options.max_steps and not self.over_budget() and self.finished is None:
+        self._publish("agent_loop")
+        while (self.step < self.options.max_steps and not self.over_budget()
+               and self.finished is None and not self.review.decided()):
             self.step += 1
             started = self.agent.clock()
             message = self.agent.deepseek.chat(messages, tools=TOOLS)
@@ -691,7 +845,7 @@ class _Run:
                 if name != "finish":
                     content = f"{content}\n\n{self.observation()}"
                 messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": content})
-        if self.finished is None and self.step:
+        if self.finished is None and self.step and not self.review.decided():
             self._wrap_up(messages)
 
     def _wrap_up(self, messages):
@@ -720,6 +874,8 @@ class _Run:
 
     # -- final answer ------------------------------------------------------------------
     def _finalize(self):
+        self._apply_review()
+        self._publish("finalizing")
         ordered = self.pool.ordered()
         chosen = []
         if self.finished:
@@ -728,8 +884,12 @@ class _Run:
                 if candidate is not None and candidate not in chosen:
                     chosen.append(candidate)
             self.result.notes = str(self.finished.get("notes") or "")[:500]
-        # The model's picks lead only if they are not contradicted by verification.
+        # The model's picks lead only if they are not contradicted by verification,
+        # and never ahead of a candidate a teammate accepted.
         chosen = [c for c in chosen if c.verdict is None or c.verdict.score >= VERIFIED_MATCH / 2]
+        accepted = [c for c in ordered if c.verdict and c.verdict.by == "human"
+                    and c.verdict.score >= VERIFIED_MATCH]
+        chosen = accepted + [c for c in chosen if c not in accepted]
         self.result.ranking = chosen + [c for c in ordered if c not in chosen]
         if self.task.kind == "qa":
             self._finalize_answer()
@@ -743,9 +903,13 @@ class _Run:
         whole query, and on a live run Gemini filled it with a visible detail
         ("can màu xanh lá") instead of the asked-for pass name.
         """
+        if self.review.answer:
+            self.result.answer = self.review.answer
+            self.result.answer_evidence = "typed by the reviewer"
+            return
         answer = str((self.finished or {}).get("answer") or "").strip()
         evidence = "agent (finish)"
-        if not answer and self.result.ranking:
+        if not answer and self.result.ranking and not self.review.decided():
             if self.options.mode != "deep":
                 answer, evidence = self._answer_with_web()
             else:
@@ -782,17 +946,23 @@ class _Run:
                                                hints, captions)
 
         readings, errors = [], []
-        with ThreadPoolExecutor(max_workers=len(moments)) as pool:
-            for candidate, future in [(c, pool.submit(read, c)) for c in moments]:
-                try:
-                    reply = future.result()
-                except Exception as exc:
-                    errors.append(str(exc)[:120])
-                    continue
-                text = str(reply.get("answer") or "").strip()
-                if text:
-                    readings.append((text, float(reply.get("confidence") or 0), candidate.cid,
-                                     str(reply.get("evidence") or "")))
+        self._publish("reading_answer")
+        futures = [(c, self.waiter.submit(read, c)) for c in moments]
+        done = self._await([f for _, f in futures],
+                           lambda: bool(self.review.answer) or self.review.stopped)
+        for candidate, future in futures:
+            if future not in done:
+                errors.append("abandoned for a human decision")
+                continue
+            try:
+                reply = future.result()
+            except Exception as exc:
+                errors.append(str(exc)[:120])
+                continue
+            text = str(reply.get("answer") or "").strip()
+            if text:
+                readings.append((text, float(reply.get("confidence") or 0), candidate.cid,
+                                 str(reply.get("evidence") or "")))
         if not readings:
             self.log("answer", {"moments": [c.cid for c in moments]}, f"no reading; errors={errors}", started)
             return "", "no reading", 0.0
@@ -837,6 +1007,8 @@ class _Run:
         # Earlier lookups are hints for the reading when they are back in time.
         self._collect_lookups(min(3.0, max(0.0, self.remaining() - 8)))
         video, evidence, confidence = self._read_answer()
+        if self.review.answer:
+            return self.review.answer, "typed by the reviewer"
         web, web_source = None, None
         if recipe is not None:
             try:
@@ -879,15 +1051,20 @@ class _Run:
         order = {id(s): index for index, s in enumerate(sequences)}
 
         started = self.agent.clock()
-        checked, errors = sequences[:self.options.trake_check], []
-        with ThreadPoolExecutor(max_workers=max(1, len(checked))) as pool:
-            futures = [(s, pool.submit(self.agent.inspector.check_sequence,
-                                       self.task, events, s.video_id, s.frames)) for s in checked]
-            for sequence, future in futures:
-                try:
-                    sequence.event_scores = future.result()
-                except Exception as exc:  # an unchecked path keeps its fused rank
-                    errors.append(str(exc)[:120])
+        checked, errors = ([] if self.review.stopped else sequences[:self.options.trake_check]), []
+        self.result.sequences = sequences
+        self._publish("checking_paths")
+        futures = [(s, self.waiter.submit(self.agent.inspector.check_sequence,
+                                          self.task, events, s.video_id, s.frames)) for s in checked]
+        done = self._await([f for _, f in futures], lambda: self.review.stopped)
+        for sequence, future in futures:
+            if future not in done:
+                errors.append("abandoned: stopped by the reviewer")
+                continue
+            try:
+                sequence.event_scores = future.result()
+            except Exception as exc:  # an unchecked path keeps its fused rank
+                errors.append(str(exc)[:120])
 
         def key(sequence):
             if sequence.event_scores is None:
@@ -902,7 +1079,8 @@ class _Run:
         for index, sequence in enumerate(sequences):
             # Fast mode always refines: its picks run in parallel (~5 s) and a TRAKE row
             # is only right if every event is.
-            if index < self.options.trake_refine and (self.options.mode != "deep" or not self.over_budget()):
+            if (index < self.options.trake_refine and not self.review.stopped
+                    and (self.options.mode != "deep" or not self.over_budget())):
                 original = replace(sequence, frames=list(sequence.frames), times=list(sequence.times))
                 self._refine(sequence, events)
                 final.append(sequence)
