@@ -95,11 +95,24 @@ def candidate_label(candidate) -> str:
                    if e.kind == "audio" and e.text), None)
     written = next((e.text for e in candidate.evidence.values()
                     if e.kind in ("ocr", "ocr_exact") and e.text), None)
+    described = next((e.text for e in candidate.evidence.values()
+                      if e.kind == "caption" and e.text), None)
     if spoken:
         parts.append(f'speech nearby: "{spoken[:200]}"')
     if written:
         parts.append(f'on-screen text in this shot: "{written[:150]}"')
+    if described:
+        parts.append(f'shot caption: "{described[:300]}"')
     return " | ".join(parts)
+
+
+def caption_at(captions, time_, default="(none)") -> str:
+    """The caption of the shot window containing `time_`, else the nearest one."""
+    if not captions:
+        return default
+    inside = [c for c in captions if c["start"] <= time_ <= c["end"]]
+    nearest = inside or sorted(captions, key=lambda c: abs((c["start"] + c["end"]) / 2 - time_))[:1]
+    return " ".join(str(nearest[0].get("text", "")).split()) or default
 
 
 def transcript_window(cues, center, seconds=40.0) -> str:
@@ -253,8 +266,8 @@ class Inspector:
         return [min(max(scores.get(f"E{index + 1}", 0.0), 0.0), 10.0) if image else 5.0
                 for index, image in enumerate(data)]
 
-    def answer(self, task, question, candidate, neighbours, cues, hints=""):
-        """Read a QA answer from one moment: its full frame, neighbours, and speech."""
+    def answer(self, task, question, candidate, neighbours, cues, hints="", captions=()):
+        """Read a QA answer from one moment: full frame, neighbours, speech and caption."""
         frames = [(candidate.video_id, candidate.frame_idx)]
         frames += [(f["video_id"], f["frame_idx"]) for f in neighbours
                    if f["frame_idx"] != candidate.frame_idx][:6]
@@ -265,6 +278,7 @@ class Inspector:
         prompt = QA_PROMPT.format(
             query=task.text, question=question,
             transcript=transcript_window(cues, candidate.time),
+            caption=caption_at(captions, candidate.time),
             hints=hints or "(none)",
         )
         return self.gemini.judge(labelled, prompt, ANSWER_SCHEMA, max_output_tokens=4096)

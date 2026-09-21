@@ -49,6 +49,7 @@ Offline tooling runs as modules, never as file paths:
 uv run python -m scripts.indexing.build_flat_profile --help   # creates indexes/profiles/*
 uv run python -m scripts.indexing.build_audio_index --help    # populates Elasticsearch
 uv run python -m scripts.indexing.build_ocr_index --help      # populates the OCR Elasticsearch index
+uv run python -m scripts.indexing.build_caption_index --help  # populates the shot-caption Elasticsearch index
 uv run python -m scripts.indexing.build_frame_maps --help     # creates indexes/frame_maps/*.npz
 uv run python -m scripts.extraction.detect_shots --help       # creates data/<year>/shots/*.json
 uv run python -m scripts.embedding.embed_keyframes --help
@@ -73,6 +74,7 @@ Once per clone: `git config core.hooksPath .githooks` — the pre-commit hook is
 | Audio (Vietnamese) | Qwen3-Embedding-0.6B kNN + BM25 in Elasticsearch, merged by RRF | `backend/audio_search.py` |
 | Hybrid | Both branches in parallel `ThreadPoolExecutor`, fused around matching video timestamps | `fuse_search_results` in `backend/app.py` |
 | OCR (on-screen text) | ASCII-folded BM25 keyword match against one OCR'd keyframe per shot | `ocr_search_response` / `backend/ocr_search.py` |
+| Caption (shot descriptions) | BM25 over one CapRL caption per shot window (optional Qwen3 kNN + RRF); agent-only so far | `backend/caption_search.py`, `_agent_caption_hits` in `backend/app.py` |
 | Temporal | Batch-encode 2–6 ordered events → per-event candidates → DP over the best prefix per endpoint → optional audio RRF → temporal NMS | `backend/temporal_search.py` |
 
 `SearchReq.mode` is `Literal["visual", "audio", "hybrid", "ocr"]`, but `ocr_text` is also a cross-cutting filter: any non-empty `ocr_text` on a `visual`/`audio`/`hybrid` request runs OCR search in parallel and restricts results to hits whose shot overlaps an OCR match (`_with_ocr_filter` / `filter_search_results` in `backend/app.py`) — it doesn't just switch the mode. The frontend simplifies this further: `App.tsx`'s `MODE_OPTIONS` only exposes `hybrid` and `temporal` as top-level toggles, then derives the actual `visual`/`audio`/`ocr`/`hybrid` request mode from which of the visual/audio/OCR fields are filled in.
@@ -85,6 +87,13 @@ Hybrid degrades gracefully: if the audio branch raises, the visual results are r
 - `backend/core.py` — PE-Core model loading (lazy, lock-guarded), text/image encoding, and `ProfileStore`. **Builds a module-level `PROFILE_STORE` at import time**, so `from backend import core, app` touches `indexes/` on disk. This is why tests mock `backend.core.*` and `backend.app.*` symbols rather than constructing real indexes.
 - `backend/access_control.py` — the trusted-ingress ASGI middleware and `LatestWinsCoordinator` (per-user rate limiting + latest-request-wins scheduling).
 - `backend/audio_search.py` — Elasticsearch index definition, query builders, passage construction, transcript cues. `transcript_path()` reads the raw ASR parquet unless `AIC_TRANSCRIPT_PATH` names another file; cleaned transcripts are opt-in, never adopted just by existing on disk.
+- `backend/caption_search.py` — the caption half of Elasticsearch: BM25 over the offline
+  CapRL shot captions (`docs/caprl-shot-captioning.md`), one document per caption window,
+  built by `scripts/indexing/build_caption_index.py`. Dense vectors are optional and off by
+  default (`--dense`), so the channel ships without an embedding pass over 103k documents.
+  It reaches what CLIP cannot express — counts, the order of actions inside one shot, and
+  sentences written on a slide — and is optional at runtime: with no index, the agent's
+  caption sub-queries fail alone and the channel is dropped for that run.
 - `backend/ocr_search.py` — the OCR half of Elasticsearch: BM25-only (no dense vector — on-screen text is short overlays meant for literal keyword match), ASCII-folded analyzer, one document per shot built from its representative keyframe. Mirrors `backend/audio_search.py`'s query-building style. See `docs/reports/ocr-shot-audit.md` for why one keyframe per shot and what accuracy bar was accepted.
 - `scripts/audio/` — offline transcript cleaning (not in the image). `postprocess.py` holds pure transforms over a timed word stream, `pipeline.py` fixes their order, `capu.py` is the only part that loads a model. Every transform is off unless a benchmark justified it; most did not — see `docs/reports/audio-transcript-cleaning.md`.
 - `scripts/ocr/` — offline OCR extraction (not in the image): `engines.py`/`alt_engines.py` wrap the candidate OCR backends, `run_corpus.py`/`run_corpus_remote.py` drive the full-corpus pass, `postprocess.py` suppresses burned-in furniture (logos, tickers) before `scripts/indexing/build_ocr_index.py` consumes the output.

@@ -15,6 +15,7 @@ from .vi_numbers import spell_numbers
 MAX_SCENES = 4
 MAX_VARIANTS = 5  # caption + up to 4 paraphrases
 MAX_PHRASES = 3
+MAX_CAPTIONS = 2
 MAX_TEXT = 300
 BATCH_LIMIT = 12
 TRAKE_TIGHT_GAP = 45
@@ -34,6 +35,7 @@ class Plan:
     target_scene: int = 0
     events_en: list[str] = field(default_factory=list)
     transcript_vi: list[str] = field(default_factory=list)
+    caption_en: list[str] = field(default_factory=list)
     ocr: list[str] = field(default_factory=list)
     lookups: list[str] = field(default_factory=list)
     question_vi: str | None = None
@@ -103,6 +105,7 @@ def parse_plan(data, task) -> Plan:
         target_scene=min(max(target, 0), len(scenes) - 1),
         events_en=events,
         transcript_vi=_texts(data.get("transcript_vi"), MAX_PHRASES),
+        caption_en=_texts(data.get("caption_en"), MAX_CAPTIONS),
         # BM25 on a 1-2 character string ("kg") matches half the corpus.
         ocr=[text for text in _texts(data.get("ocr"), MAX_PHRASES)
              if len(re.sub(r"\W", "", text)) >= 3],
@@ -170,7 +173,11 @@ def initial_queries(plan: Plan, task, spoken_numbers: bool = False) -> list[dict
         {"kind": "ocr", "id": f"r1.o{index}", "text": text, "limit": 50}
         for index, text in enumerate(plan.ocr)
     ]
-    return (first + temporal + spoken + written + rest)[:BATCH_LIMIT]
+    described = [
+        {"kind": "caption", "id": f"r1.c{index}", "text": text, "limit": 100}
+        for index, text in enumerate(plan.caption_en)
+    ]
+    return (first + temporal + described + spoken + written + rest)[:BATCH_LIMIT]
 
 
 def expected_events(plan: Plan, task) -> int:

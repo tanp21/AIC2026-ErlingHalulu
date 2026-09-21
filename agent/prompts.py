@@ -28,7 +28,14 @@ would SAY: topic, place/person/organisation names, dish and ingredient names \
 in cooking shows, quantities. 2-8 word phrases. Never visual-only details like clothing colours.
 3. ocr — text physically written on screen: signs, banners, slide titles, captions, labels, \
 prices. Only strings the query quotes or clearly implies, 1-5 words each.
-4. temporal — ordered visual events inside one video (2-6 English captions). Use it for \
+4. caption — every shot was described offline by a video captioning model: one long, \
+factual ENGLISH paragraph per shot (at most 20 s), in chronological order, which also \
+transcribes text legible in the scene (slides, exam papers, signs, packaging). Searched \
+as text (BM25), so it matches wording, not vectors. Use it for what CLIP cannot express: \
+counts ("three men carry"), order inside one shot ("then he lifts"), sentences written on \
+a slide or a document, and rare names. Write 1-2 plain English sentences as they would \
+appear in such a caption, with the rarest words first; no negations, no "the video shows".
+5. temporal — ordered visual events inside one video (2-6 English captions). Use it for \
 trake and for any description with consecutive scenes ("bắt đầu ... sau đó ... kết thúc")."""
 
 ANALYZE_SYSTEM = f"""You plan the searches for one query of AI Challenge HCMC, a \
@@ -55,6 +62,7 @@ Reply with one JSON object and nothing else:
   "target_scene": 0,
   "events_en": [],
   "transcript_vi": ["spoken phrase"],
+  "caption_en": ["English sentence as a shot caption would word it"],
   "ocr": ["on-screen text"],
   "lookups": ["web search question"],
   "question_vi": null,
@@ -75,6 +83,9 @@ describing the frame at the START of that event. Empty for kis/qa.
 1-3 phrases the narrator would likely say about the topic (e.g. "sạt lở đất", "đèo", \
 "công trình thủy lợi", dish or ingredient names), rarest and most specific first. Leave it \
 empty only when the clip is plausibly unnarrated.
+- caption_en: 1-2 entries for the target scene, phrased as a caption sentence and \
+carrying the details CLIP drops (exact counts, what is written on screen, the order of \
+actions inside the shot). Leave empty only when the scene has no such detail.
 - ocr: only distinctive strings (names, titles, slogans, numbers with context); never \
 generic words or units such as "kg" or "km".
 - lookups: empty unless a name really has to be found on the web.
@@ -183,6 +194,10 @@ Question: {question}
 Transcript around this moment:
 {transcript}
 
+Caption of this shot, written offline by a video model (may be wrong in details, but it \
+watched the whole shot, not just these frames):
+{caption}
+
 Web-search notes (may be wrong; use one only if the video agrees with it or shows \
 nothing that contradicts it):
 {hints}
@@ -207,9 +222,10 @@ You see the query, the round-1 plan, web notes and the round-1 candidates with G
 - visual: rewrite the caption around the detail the verdicts found missing or wrong, or the scene's most distinctive element; give "paraphrases" (faithful rewordings). When a promising video is known (a candidate scored 5+ or several channels agree), add a visual query with "video_ids" to pin the exact moment inside it.
 - audio: Vietnamese phrases a narrator would say, especially names from the web notes (dish names, places, people, organisations), numbers as digits.
 - ocr: exact on-screen strings the query quotes or the web notes name.
+- caption: an English sentence naming the details CLIP cannot encode (counts, on-screen sentences, the order of actions in one shot); add "video_ids" to read inside a promising video.
 - temporal: 2-6 ordered English captions for consecutive scenes of one video.
 Never repeat a round-1 query. Reply with one JSON object and nothing else:
-{{"queries": [{{"kind": "visual", "text": "...", "paraphrases": ["..."], "video_ids": []}}, {{"kind": "audio", "text": "..."}}, {{"kind": "ocr", "text": "..."}}, {{"kind": "temporal", "events": ["...", "..."]}}]}}"""
+{{"queries": [{{"kind": "visual", "text": "...", "paraphrases": ["..."], "video_ids": []}}, {{"kind": "audio", "text": "..."}}, {{"kind": "caption", "text": "..."}}, {{"kind": "ocr", "text": "..."}}, {{"kind": "temporal", "events": ["...", "..."]}}]}}"""
 
 COOKING_LOOKUP_PROMPT = """Mô tả dưới đây là một đoạn trong kho video truyền hình Việt Nam, nhiều khả năng là một tập của chương trình dạy nấu ăn "Món ngon mỗi ngày" (hoặc chương trình ẩm thực tương tự). Hãy tìm trên web tập/công thức khớp nhất với mô tả và cho biết: tên món ăn, nguyên liệu chính kèm định lượng nếu có, và chi tiết nhận dạng (người nấu, cách trình bày).
 {question}

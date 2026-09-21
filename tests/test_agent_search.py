@@ -9,6 +9,7 @@ from backend import app as server
 from backend.access_control import AccessConfig, LatestWinsCoordinator
 from backend.app import AgentBatchReq, _agent_visual_hits, agent_search
 from backend.audio_search import AudioHit
+from backend.caption_search import CaptionHit
 from backend.ocr_search import OcrHit
 
 
@@ -43,7 +44,8 @@ class AgentBatchRequestTests(unittest.TestCase):
         invalid = (
             {"queries": [{"kind": "visual", "id": "a", "text": "x"},
                          {"kind": "ocr", "id": "a", "text": "y"}]},
-            {"queries": [{"kind": "caption", "id": "a", "text": "x"}]},
+            {"queries": [{"kind": "nonsense", "id": "a", "text": "x"}]},
+            {"queries": [{"kind": "caption", "id": "a", "text": "x", "method": "bm25"}]},
             {"queries": [{"kind": "visual", "id": str(i), "text": "x"} for i in range(13)]},
             {"queries": [{"kind": "temporal", "id": "t", "events": ["only one"]}]},
             {"queries": [{"kind": "visual", "id": "a", "text": "x", "limit": 501}]},
@@ -152,6 +154,56 @@ class AgentSearchTests(unittest.TestCase):
         only = response["results"]["o"]["hits"][0]
         self.assertTrue(only["exact"])
         self.assertEqual((only["frame_idx"], only["start"], only["end"]), (20, 0.5, 1.5))
+
+    def test_caption_hits_carry_the_shot_span_and_an_indexed_keyframe(self):
+        request = AgentBatchReq(queries=[{"kind": "caption", "id": "c", "text": "a lion dance"}])
+        hits = [
+            CaptionHit("L01_V002", 4, 0, 999, 10.0, 25.0, 17.5, "A golden lion dances.", 6.0),
+            CaptionHit("K01_V001", 1, 0, 3, 0.0, 5.0, 2.5, "outside the profile", 5.0),
+        ]
+        with (
+            patch("backend.app.core.load_meta", return_value=META),
+            patch("backend.app.core.nearest_frame", return_value=25),
+            patch("backend.app.caption_search.search_captions_keyword",
+                  return_value=hits) as keyword,
+        ):
+            result = agent_search(request)["results"]["c"]
+
+        keyword.assert_called_once_with("a lion dance", 100)
+        self.assertEqual(len(result["hits"]), 1)  # the off-profile video is dropped
+        only = result["hits"][0]
+        # the caption's own window is the span; the frame is this profile's keyframe
+        self.assertEqual((only["start"], only["end"], only["time"]), (10.0, 25.0, 17.5))
+        self.assertEqual((only["frame_idx"], only["text"]), (25, "A golden lion dances."))
+
+    def test_scoped_caption_search_asks_for_more_and_keeps_only_the_named_videos(self):
+        request = AgentBatchReq(queries=[{
+            "kind": "caption", "id": "c", "text": "x", "limit": 2, "video_ids": ["L01_V002"],
+        }])
+        hits = [CaptionHit("L01_V001", 1, 0, 10, 0.0, 5.0, 2.5, "a", 6.0),
+                CaptionHit("L01_V002", 2, 0, 20, 5.0, 9.0, 7.0, "b", 5.0)]
+        with (
+            patch("backend.app.core.load_meta", return_value=META),
+            patch("backend.app.core.nearest_frame", return_value=15),
+            patch("backend.app.caption_search.search_captions_keyword",
+                  return_value=hits) as keyword,
+        ):
+            result = agent_search(request)["results"]["c"]
+
+        keyword.assert_called_once_with("x", 10)  # limit * 5, since BM25 cannot scope
+        self.assertEqual([hit["video_id"] for hit in result["hits"]], ["L01_V002"])
+
+    def test_a_deployment_without_captions_fails_only_that_sub_query(self):
+        request = AgentBatchReq(queries=[{"kind": "caption", "id": "c", "text": "x"}])
+        with (
+            patch("backend.app.core.load_meta", return_value=META),
+            patch("backend.app.caption_search.search_captions_keyword",
+                  side_effect=RuntimeError("index_not_found_exception")),
+        ):
+            result = agent_search(request)["results"]["c"]
+
+        self.assertEqual(result, {"kind": "caption",
+                                  "error": "RuntimeError: index_not_found_exception"})
 
     def test_temporal_keeps_top_sequences_per_video_and_uses_benchmark_config(self):
         request = AgentBatchReq(queries=[

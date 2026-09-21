@@ -149,3 +149,27 @@ python -m scripts.captioning.caption_api --years 2026 --dry-run
 ```
 
 No caption data is added to the production search index by this offline step.
+
+## Making the captions searchable
+
+`scripts.indexing.build_caption_index` turns `shot_captions.parquet` into the
+Elasticsearch index `backend/caption_search.py` queries, one document per caption
+window, with the window's middle mapped to a real frame through `backend.frame_maps`:
+
+```bash
+uv run python -m scripts.indexing.build_caption_index --dry-run --limit 5   # resolve only
+uv run python -m scripts.indexing.build_caption_index --recreate            # BM25, no GPU
+uv run python -m scripts.indexing.build_caption_index --recreate --dense    # + Qwen3 vectors
+```
+
+BM25 is the shipped configuration: it needs no embedding pass over 103k long
+documents, and a caption's value is largely in rare words (a dish name, a number,
+a sentence copied off a slide). `--dense` adds a Qwen3 embedding per caption --
+the same model the transcript channel queries with -- which
+`search_captions_semantic` and `search_captions_hybrid` need; measure it with
+`scripts.benchmarks.bench_caption_search --method hybrid` before adopting it.
+
+Once indexed, the channel is served as `kind: "caption"` on `POST /agent/search`
+and as `GET /captions/{video_id}` (every window of one video, untruncated).
+A deployment without the index is not broken: those sub-queries return an error
+and the agent drops the channel for the rest of its run (`docs/agent.md`).

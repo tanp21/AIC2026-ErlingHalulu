@@ -17,7 +17,7 @@ There are three modes. They share every step except what happens after round 1.
 ```text
 t=0   cooking query? ──► Gemini + Google Search: which "Món ngon mỗi ngày" dish/episode (background)
       DeepSeek plan, no thinking (~2 s) ──► plan lookups start in the background
-      round 1: one /agent/search batch (~0.5-1 s)
+      round 1: one /agent/search batch (~0.5-1 s): visual, caption, transcript, OCR, temporal
       Gemini verifies 15 candidates as 3 parallel calls of 5 (~5 s): each query's best
         hits round-robin, then the rest by fusion
       best ≥ 9 and the falsifier (~5 s) accepts it? ── yes ──► done
@@ -91,6 +91,15 @@ finalize: ranking (verified matches first) · Q&A answer read from the frame/spe
   confident wrong matches. Deep mode only.
 - **Q&A answers are read at up to 3 moments** of the top video and decided by majority
   (ties to confidence): one keyframe can hide what is being counted or read.
+- **Captions are a channel of their own.** Every 2026 shot has an offline CapRL caption
+  (`docs/caprl-shot-captioning.md`); `kind: "caption"` searches them as text. A caption
+  says what a keyframe embedding cannot: how many, in what order inside the shot, and
+  what a slide or an exam paper actually says. A hit is a span, like a transcript
+  passage, so it backs every moment inside its shot window and its text rides along to
+  Gemini in the candidate label and into the Q&A reading (`/captions/{video_id}` returns
+  a video's captions untruncated). The plan's `caption_en` puts 1-2 caption-style
+  English sentences in round 1. A server with no caption index fails that sub-query
+  alone, and `SearchClient` drops the channel for the rest of the run.
 - **Web search is automatic where it pays** (`agent/web.py`). Cooking queries (15 of 55
   in 2026 rounds 1-2, mostly "Món ngon mỗi ngày") get a Google-Search lookup of the dish
   from the raw description before planning, so the rewrite round can search the
@@ -302,8 +311,11 @@ direction, not exact margin.
 
 ## Not done yet
 
-- **Shot captions** as a search channel, once they are indexed server-side. Add a
-  `caption` kind to `/agent/search` and a plan field.
+- **Captions for the humans too**: the caption channel is agent-only so far. `/search`
+  could take a caption query, and the UI show a shot's caption beside its keyframe.
+- **Dense captions**: `build_caption_index --dense` plus
+  `bench_caption_search --method hybrid` decides whether embedding 103k captions beats
+  BM25 over them.
 - **Image exemplars** for out-of-knowledge entities (QUEST/MADTempo style): fetch a web
   image and search with `/search/image`.
 - **Group priors**: past answer keys show L26 is cooking, L25 lectures, L24 lion dance

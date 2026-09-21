@@ -25,7 +25,9 @@ class FrontendServingTests(unittest.TestCase):
 
     def test_container_includes_the_paraphrase_fusion_module(self):
         # /agent/search imports it for embedding-mean paraphrase fusion.
-        self.assertIn("backend/subquery_fusion.py", Path("Dockerfile").read_text())
+        dockerfile = Path("Dockerfile").read_text()
+        self.assertIn("backend/subquery_fusion.py", dockerfile)
+        self.assertIn("backend/caption_search.py", dockerfile)
 
     def test_container_includes_the_clip_export_module(self):
         self.assertIn("backend/shots.py", Path("Dockerfile").read_text())

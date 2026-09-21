@@ -32,7 +32,7 @@ from .plan import (
 from .pool import VERIFIED_MATCH, Candidate, CandidatePool, Sequence, local_path
 from .prompts import AGENT_SYSTEM, LOOKUP_PROMPT, REWRITE_SYSTEM
 from .tasks import Task
-from .vision import Inspector, transcript_window
+from .vision import Inspector, caption_at, transcript_window
 from .web import cooking_lookup, fact_lookup, is_cooking, recipe_lookup, similar, tagged
 
 logger = logging.getLogger("agent")
@@ -125,9 +125,11 @@ TOOLS = [
         ),
         "parameters": {"type": "object", "properties": {"queries": {
             "type": "array", "items": {"type": "object", "properties": {
-                "kind": {"type": "string", "enum": ["visual", "audio", "ocr", "temporal", "similar"]},
+                "kind": {"type": "string",
+                         "enum": ["visual", "audio", "caption", "ocr", "temporal", "similar"]},
                 "text": {"type": "string", "description": (
                     "visual: English caption of one frame; audio: Vietnamese spoken phrase; "
+                    "caption: English sentence as an offline shot caption would word it; "
                     "ocr: exact on-screen text")},
                 "paraphrases": {"type": "array", "items": {"type": "string"},
                                 "description": "visual only: up to 4 same-meaning rewordings of text"},
@@ -138,7 +140,7 @@ TOOLS = [
                 "audio_text": {"type": "string", "description": "temporal only: optional spoken phrase"},
                 "candidate_id": {"type": "string", "description": "similar only: search from this candidate's frame"},
                 "video_ids": {"type": "array", "items": {"type": "string"},
-                              "description": "visual/similar only: search inside these videos"},
+                              "description": "visual/similar/caption only: search inside these videos"},
             }, "required": ["kind"]},
         }}, "required": ["queries"]},
     }},
@@ -217,6 +219,7 @@ class _Run:
         self.plan: Plan | None = None
         self.searched: set = set()
         self.cues: dict[str, list] = {}
+        self.shot_captions: dict[str, list] = {}
         self.finished: dict | None = None
         self.step = 0
         self.cooking = agent.options.auto_web and is_cooking(task.text)
@@ -383,8 +386,8 @@ class _Run:
             raise RuntimeError(f"planning failed: {last_error}")
         self.result.plan = self.plan
         self.log("plan", {}, f"{len(self.plan.scenes)} scenes, "
-                 f"{len(self.plan.transcript_vi)} transcript, {len(self.plan.ocr)} ocr, "
-                 f"{len(self.plan.lookups)} lookups", started)
+                 f"{len(self.plan.transcript_vi)} transcript, {len(self.plan.caption_en)} caption, "
+                 f"{len(self.plan.ocr)} ocr, {len(self.plan.lookups)} lookups", started)
 
     def _round_one(self):
         queries = initial_queries(self.plan, self.task, self.options.spoken_numbers)
@@ -515,6 +518,11 @@ class _Run:
                     "method": method, "limit": 100}
         if kind == "ocr" and text:
             return {"kind": "ocr", "id": qid, "text": text, "limit": 50}
+        if kind == "caption" and text:
+            query = {"kind": "caption", "id": qid, "text": text, "limit": 100}
+            if video_ids:
+                query["video_ids"] = video_ids
+            return query
         if kind == "temporal":
             events = [" ".join(str(e).split())[:300] for e in raw.get("events") or [] if str(e).strip()]
             if 2 <= len(events) <= 6:
@@ -747,9 +755,12 @@ class _Run:
                           for entry in self.result.lookups if entry.get("answer"))
         question = self.plan.question_vi or self.task.text
 
+        captions = self._captions(top_video)
+
         def read(candidate):
             neighbours = self.agent.search.neighbours(candidate.video_id, candidate.frame_idx, 3)
-            return self.agent.inspector.answer(self.task, question, candidate, neighbours, cues, hints)
+            return self.agent.inspector.answer(self.task, question, candidate, neighbours, cues,
+                                               hints, captions)
 
         readings, errors = [], []
         with ThreadPoolExecutor(max_workers=len(moments)) as pool:
@@ -824,6 +835,15 @@ class _Run:
         spoken = (self.plan.answer_source == "speech"
                   or bool(SPOKEN_EVIDENCE.search(evidence or "")))
         return reconcile_answer(video, evidence, confidence, web, web_source, spoken=spoken)
+
+    def _captions(self, video_id):
+        """This video's shot captions, fetched once; empty if the server has none."""
+        if video_id not in self.shot_captions:
+            try:
+                self.shot_captions[video_id] = self.agent.search.captions(video_id)
+            except Exception:
+                self.shot_captions[video_id] = []
+        return self.shot_captions[video_id]
 
     def _finalize_sequences(self):
         """Check the best paths event by event, then pin the best ones' frames.
