@@ -100,11 +100,13 @@ class AgentOptions:
 
 
 FAST_DEFAULTS = dict(
-    # Fifteen candidates left seventeen queries' answers at fused rank 16-100, judged by
-    # nobody. Thirty at eight workers costs no more wall time than fifteen at four
-    # (measured: 5.8 s against 6.0 s) because the chunks overlap; what it does cost is
-    # Gemini calls per query, which is the scarcer resource on a free-tier key.
-    time_budget=20.0, verify_top=30, verify_chunk=5, verify_workers=8, verify_wide=120,
+    # Back to fifteen, and no wide pass, because judging more measured *worse*: over the
+    # 113-query set the wider field (median 30 judged, up to 150) found the right moment
+    # for seven more queries but the judge's own discrimination fell from 64/82 to 59/89 --
+    # the max of a noisy score over a bigger field is a bigger noise. Net, top-1 went from
+    # 67 to 63. Bounding the ranking to the pool's own top-N afterwards does not recover
+    # it (58/57/60 against 61 unbounded), so the field itself is what has to stay small.
+    time_budget=20.0, verify_top=15, verify_chunk=5, verify_workers=4, verify_wide=15,
     answer_moments=2, trake_check=8, trake_refine=1,
 )
 
