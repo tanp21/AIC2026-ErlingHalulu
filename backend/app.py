@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from starlette.background import BackgroundTask
 
 from . import core, thumb, shots, shot_labels, audio_search, ocr_search, frame_maps, subquery_fusion
+from . import caption_search
 from . import core_service, search_core
 from .temporal_search import (
     SCORING_METHODS, build_sequences, deduplicate_candidates, fuse_audio, temporal_nms,
@@ -149,6 +150,16 @@ class AgentOcrQuery(BaseModel):
     limit: int = Field(default=100, ge=1, le=AGENT_RESULT_LIMIT)
 
 
+class AgentCaptionQuery(BaseModel):
+    kind: Literal["caption"]
+    id: AgentQueryId
+    text: AgentText
+    # "keyword" is BM25 over the captions; "semantic" needs a --dense index.
+    method: Literal["semantic", "keyword"] = "keyword"
+    video_ids: list[VideoId] | None = Field(default=None, max_length=50)
+    limit: int = Field(default=100, ge=1, le=AGENT_RESULT_LIMIT)
+
+
 class AgentTemporalQuery(BaseModel):
     kind: Literal["temporal"]
     id: AgentQueryId
@@ -159,7 +170,8 @@ class AgentTemporalQuery(BaseModel):
 
 
 AgentQuery = Annotated[
-    Union[AgentVisualQuery, AgentSimilarQuery, AgentAudioQuery, AgentOcrQuery, AgentTemporalQuery],
+    Union[AgentVisualQuery, AgentSimilarQuery, AgentAudioQuery, AgentOcrQuery,
+          AgentCaptionQuery, AgentTemporalQuery],
     Field(discriminator="kind"),
 ]
 
@@ -1255,6 +1267,42 @@ def _agent_ocr_hits(query, profile):
     return hits
 
 
+def _agent_caption_hits(query, profile):
+    """Shot captions as span hits, like transcript passages.
+
+    A caption covers a whole shot window (at most 20 s), so the hit carries that
+    span and an anchor keyframe from this profile: the agent attaches the caption
+    to every moment inside the span and can search visually within it for the
+    exact frame.
+    """
+    search_fn = (caption_search.search_captions_semantic if query.method == "semantic"
+                 else caption_search.search_captions_keyword)
+    wanted = set(query.video_ids or ())
+    known = search_core.known_videos(profile)
+    # Scoped search asks for more before filtering: BM25 knows nothing of the scope.
+    hits = [hit for hit in search_fn(query.text, query.limit * 5 if wanted else query.limit)
+            if hit.video_id in known and (not wanted or hit.video_id in wanted)][:query.limit]
+    marks = iter(search_core.annotate(
+        [{"video_id": hit.video_id, "time": hit.anchor_sec} for hit in hits],
+        profile, with_pts=False,
+    ))
+    results = []
+    for hit in hits:
+        mark = next(marks)
+        results.append({
+            "rank": len(results) + 1,
+            "video_id": hit.video_id,
+            "frame_idx": mark["frame_idx"] if mark else hit.frame_idx,
+            "time": round(hit.anchor_sec, 3),
+            "start": round(hit.start_sec, 3),
+            "end": round(hit.end_sec, 3),
+            "score": round(hit.score, 6),
+            "text": _snippet(hit.text),
+            "matched_keywords": list(hit.matched_keywords),
+        })
+    return results
+
+
 def _agent_temporal_hits(query, profile):
     candidate_k, scoring_method, min_gap_seconds = load_temporal_config()
     request = TemporalSearchReq(
@@ -1297,6 +1345,8 @@ def _run_agent_query(query, profile):
         hits = _agent_audio_hits(query, profile)
     elif query.kind == "ocr":
         hits = _agent_ocr_hits(query, profile)
+    elif query.kind == "caption":
+        hits = _agent_caption_hits(query, profile)
     else:
         hits = _agent_temporal_hits(query, profile)
     return hits, round((time.perf_counter() - started) * 1000, 1)
@@ -1402,7 +1452,7 @@ def keyframe_context(
     return {"video_id": video_id, "frame_idx": int(frames[pos]), "frames": neighbours}
 
 
-@app.get("/captions/{video_id}")
+@app.get("/captions/{video_id}/frames")
 def shot_captions(
     response: Response,
     video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$"),
@@ -1412,9 +1462,14 @@ def shot_captions(
 
     The retrieval agent reads these as text context when it judges a candidate, so
     it does not have to send the frame to a remote vision model to learn what is in
-    it. A caption is optional: a video the captioner never saw (any 2025 `K*` video,
-    or a 2026 one whose shot pass has not run) answers `available: false` with an
-    empty map rather than 404, because a missing caption must not fail a run.
+    it. Where `/captions/{video_id}` answers a whole video in time order from the
+    caption index, this answers only the frames being judged, resolved through the
+    frame map, and reads the per-video transcripts on disk so a deployment without
+    the caption index still has them.
+
+    A caption is optional: a video the captioner never saw (any 2025 `K*` video, or
+    a 2026 one whose shot pass has not run) answers `available: false` with an empty
+    map rather than 404, because a missing caption must not fail a run.
     """
     response.headers["Cache-Control"] = "no-store"
     wanted = [int(value) for value in frames.split(",")][:60]
@@ -1632,6 +1687,21 @@ def get_transcript(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
     except (FileNotFoundError, OSError) as exc:
         raise HTTPException(503, "transcript data unavailable") from exc
     return {"videoId": video_id, "cues": cues}
+
+
+@app.get("/captions/{video_id}")
+def get_captions(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
+    """Every shot caption of one video, in time order (empty when not indexed)."""
+    try:
+        hits = caption_search.captions_for_video(video_id)
+    except Exception as exc:  # no caption index on this deployment
+        raise HTTPException(503, f"caption data unavailable: {type(exc).__name__}") from exc
+    return {"videoId": video_id, "captions": [
+        {"shot_idx": hit.shot_idx, "window_idx": hit.window_idx, "frame_idx": hit.frame_idx,
+         "start": round(hit.start_sec, 3), "end": round(hit.end_sec, 3),
+         "time": round(hit.anchor_sec, 3), "text": hit.text}
+        for hit in hits
+    ]}
 
 
 @app.get("/indexes")

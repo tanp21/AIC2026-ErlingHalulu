@@ -32,7 +32,7 @@ from .plan import (
 from .pool import VERIFIED_MATCH, Candidate, CandidatePool, Sequence, local_path
 from .prompts import AGENT_SYSTEM, LOOKUP_PROMPT, REWRITE_SYSTEM
 from .tasks import Task
-from .vision import Inspector, transcript_window
+from .vision import Inspector, caption_at, transcript_window
 from .web import cooking_lookup, fact_lookup, is_cooking, recipe_lookup, similar, tagged
 
 logger = logging.getLogger("agent")
@@ -130,9 +130,11 @@ TOOLS = [
         ),
         "parameters": {"type": "object", "properties": {"queries": {
             "type": "array", "items": {"type": "object", "properties": {
-                "kind": {"type": "string", "enum": ["visual", "audio", "ocr", "temporal", "similar"]},
+                "kind": {"type": "string",
+                         "enum": ["visual", "audio", "caption", "ocr", "temporal", "similar"]},
                 "text": {"type": "string", "description": (
                     "visual: English caption of one frame; audio: Vietnamese spoken phrase; "
+                    "caption: English sentence as an offline shot caption would word it; "
                     "ocr: exact on-screen text")},
                 "paraphrases": {"type": "array", "items": {"type": "string"},
                                 "description": "visual only: up to 4 same-meaning rewordings of text"},
@@ -143,7 +145,7 @@ TOOLS = [
                 "audio_text": {"type": "string", "description": "temporal only: optional spoken phrase"},
                 "candidate_id": {"type": "string", "description": "similar only: search from this candidate's frame"},
                 "video_ids": {"type": "array", "items": {"type": "string"},
-                              "description": "visual/similar only: search inside these videos"},
+                              "description": "visual/similar/caption only: search inside these videos"},
             }, "required": ["kind"]},
         }}, "required": ["queries"]},
     }},
@@ -228,6 +230,7 @@ class _Run:
         self.plan: Plan | None = None
         self.searched: set = set()
         self.cues: dict[str, list] = {}
+        self.shot_captions: dict[str, list] = {}
         self.finished: dict | None = None
         self.step = 0
         self.cooking = agent.options.auto_web and is_cooking(task.text)
@@ -302,7 +305,10 @@ class _Run:
         # call, one batch and one parallel verification.
         confident = (best is not None and best.verdict.score >= self.options.accept_score
                      and not self._falsified(best))
-        if not confident and self.remaining() > 8:
+        # The rewrite is the only recovery this mode has, so it is not gated on the
+        # budget being comfortable: a 12 s round 1 once cancelled it with 8.0 s left
+        # and the run finished on a wrong video the rewrite would have questioned.
+        if not confident and not self.over_budget():
             self._rewrite_round()
 
     def _best_score(self):
@@ -352,19 +358,35 @@ class _Run:
         queries = [self._server_query(raw, index)
                    for index, raw in enumerate((raw_queries or [])[:6]) if isinstance(raw, dict)]
         queries = [query for query in queries if query]
-        # Right video, wrong moment is the commonest miss: look for the target scene
-        # inside the videos round 1 favoured.
-        caption, *paraphrases = self.plan.scenes[self.plan.target_scene].visual_en
-        scoped = {"kind": "visual", "id": "s1.scoped", "text": caption,
-                  "video_ids": self.pool.video_ranking()[:5], "limit": 100}
-        if paraphrases:
-            scoped["paraphrases"] = paraphrases[:4]
-        queries.append(scoped)
+        queries += self._scoped_queries(room=8 - len(queries))
         self.log("rewrite", {"queries": queries},
                  "; ".join(str(q.get("text") or q.get("events"))[:60] for q in queries), started)
         self._run_search(queries, "rewrite")
         fresh = self._best_neighbours()
         self._verify(fresh + self.pool.to_verify(self.options.verify_top - len(fresh)))
+
+    def _scoped_queries(self, room, videos=3):
+        """Each scene searched inside the videos round 1 favoured.
+
+        Right video, wrong moment is the commonest miss, and on a multi-scene query
+        the moment to submit is often not the scene that found the video: the one
+        that did can be generic ("two women with a phone") while the distinctive
+        scene ("a Black woman walking past") is never searched inside it.
+        """
+        leading = self.pool.video_ranking()[:videos]
+        if not leading or room <= 0:
+            return []
+        order = [self.plan.target_scene] + [index for index in range(len(self.plan.scenes))
+                                            if index != self.plan.target_scene]
+        scoped = []
+        for index in order[:max(1, room)]:
+            caption, *paraphrases = self.plan.scenes[index].visual_en
+            query = {"kind": "visual", "id": f"s1.scoped{index}", "text": caption,
+                     "video_ids": leading, "limit": 100}
+            if paraphrases:
+                query["paraphrases"] = paraphrases[:4]
+            scoped.append(query)
+        return scoped
 
     def _best_neighbours(self, radius=2):
         """Unverified keyframes next to a promising-but-unsure match, for the exact moment."""
@@ -394,8 +416,8 @@ class _Run:
             raise RuntimeError(f"planning failed: {last_error}")
         self.result.plan = self.plan
         self.log("plan", {}, f"{len(self.plan.scenes)} scenes, "
-                 f"{len(self.plan.transcript_vi)} transcript, {len(self.plan.ocr)} ocr, "
-                 f"{len(self.plan.lookups)} lookups", started)
+                 f"{len(self.plan.transcript_vi)} transcript, {len(self.plan.caption_en)} caption, "
+                 f"{len(self.plan.ocr)} ocr, {len(self.plan.lookups)} lookups", started)
 
     def _round_one(self):
         queries = initial_queries(self.plan, self.task, self.options.spoken_numbers)
@@ -526,6 +548,11 @@ class _Run:
                     "method": method, "limit": 100}
         if kind == "ocr" and text:
             return {"kind": "ocr", "id": qid, "text": text, "limit": 50}
+        if kind == "caption" and text:
+            query = {"kind": "caption", "id": qid, "text": text, "limit": 100}
+            if video_ids:
+                query["video_ids"] = video_ids
+            return query
         if kind == "temporal":
             events = [" ".join(str(e).split())[:300] for e in raw.get("events") or [] if str(e).strip()]
             if 2 <= len(events) <= 6:
@@ -758,9 +785,12 @@ class _Run:
                           for entry in self.result.lookups if entry.get("answer"))
         question = self.plan.question_vi or self.task.text
 
+        captions = self._captions(top_video)
+
         def read(candidate):
             neighbours = self.agent.search.neighbours(candidate.video_id, candidate.frame_idx, 3)
-            return self.agent.inspector.answer(self.task, question, candidate, neighbours, cues, hints)
+            return self.agent.inspector.answer(self.task, question, candidate, neighbours, cues,
+                                               hints, captions)
 
         readings, errors = [], []
         with ThreadPoolExecutor(max_workers=len(moments)) as pool:
@@ -835,6 +865,15 @@ class _Run:
         spoken = (self.plan.answer_source == "speech"
                   or bool(SPOKEN_EVIDENCE.search(evidence or "")))
         return reconcile_answer(video, evidence, confidence, web, web_source, spoken=spoken)
+
+    def _captions(self, video_id):
+        """This video's shot captions, fetched once; empty if the server has none."""
+        if video_id not in self.shot_captions:
+            try:
+                self.shot_captions[video_id] = self.agent.search.captions(video_id)
+            except Exception:
+                self.shot_captions[video_id] = []
+        return self.shot_captions[video_id]
 
     def _finalize_sequences(self):
         """Check the best paths event by event, then pin the best ones' frames.

@@ -28,7 +28,7 @@ RUN uv export --frozen --only-group server --no-emit-project --no-hashes --outpu
     && uv pip install --system --no-cache --requirement requirements.txt \
     && rm requirements.txt
 
-COPY backend/__init__.py backend/app.py backend/access_control.py backend/audio_search.py backend/ocr_search.py backend/collaboration.py backend/core.py backend/thumb.py backend/shots.py backend/shot_labels.py backend/frame_maps.py backend/temporal_search.py backend/subquery_fusion.py backend/agent_runner.py backend/core_service.py backend/search_core.py ./backend/
+COPY backend/__init__.py backend/app.py backend/access_control.py backend/audio_search.py backend/ocr_search.py backend/caption_search.py backend/collaboration.py backend/core.py backend/thumb.py backend/shots.py backend/shot_labels.py backend/frame_maps.py backend/temporal_search.py backend/subquery_fusion.py backend/agent_runner.py backend/core_service.py backend/search_core.py ./backend/
 COPY agent ./agent
 COPY scripts/indexing/build_audio_index.py ./scripts/indexing/build_audio_index.py
 COPY scripts/indexing/build_ocr_index.py ./scripts/indexing/build_ocr_index.py

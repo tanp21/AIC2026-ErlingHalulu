@@ -400,7 +400,7 @@ class InspectorCaptionTests(unittest.TestCase):
         calls = []
 
         class Search:
-            def captions(self, video_id, frames):
+            def captions_for_frames(self, video_id, frames):
                 calls.append((video_id, sorted(frames)))
                 return {frame: {"caption": f"shot at {frame}"} for frame in frames}
 
@@ -414,7 +414,7 @@ class InspectorCaptionTests(unittest.TestCase):
         calls = []
 
         class Search:
-            def captions(self, video_id, frames):
+            def captions_for_frames(self, video_id, frames):
                 calls.append(video_id)
                 return {frame: {"caption": "once"} for frame in frames}
 
@@ -431,14 +431,14 @@ class InspectorCaptionTests(unittest.TestCase):
 
     def test_a_search_failure_does_not_cost_the_round(self):
         class Search:
-            def captions(self, video_id, frames):
+            def captions_for_frames(self, video_id, frames):
                 raise RuntimeError("boom")
 
         self.assertEqual(self.inspector(Search()).captions([("L21_V001", 10)]), {})
 
     def test_a_caption_that_is_empty_is_not_recorded(self):
         class Search:
-            def captions(self, video_id, frames):
+            def captions_for_frames(self, video_id, frames):
                 return {frame: {"caption": ""} for frame in frames}
 
         self.assertEqual(self.inspector(Search()).captions([("L21_V001", 10)]), {})
@@ -502,7 +502,7 @@ class BackendContractTests(unittest.TestCase):
             def image(self, video_id, frame_idx, width):
                 return jpeg()
 
-            def captions(self, video_id, frames):
+            def captions_for_frames(self, video_id, frames):
                 return {}
 
         inspector = Inspector(Backend(), Search(), chunk_size=1)

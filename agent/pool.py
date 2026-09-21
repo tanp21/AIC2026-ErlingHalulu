@@ -18,7 +18,7 @@ SPAN_PAD_SECONDS = 2.0
 VIDEO_WEIGHT = 0.5
 KIND_WEIGHTS = {
     "visual": 1.0, "similar": 0.8, "temporal": 1.0, "audio": 0.8,
-    "ocr": 0.8, "ocr_exact": 1.2, "neighbour": 0.0,
+    "ocr": 0.8, "ocr_exact": 1.2, "caption": 1.0, "neighbour": 0.0,
 }
 POINT_KINDS = {"visual", "similar", "temporal", "neighbour"}
 SEQUENCE_RRF_K = 10

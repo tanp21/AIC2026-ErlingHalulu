@@ -234,7 +234,7 @@ class CaptionFetchTests(unittest.TestCase):
             "video_id": "L21_V001", "available": True,
             "captions": {"100": {"caption": "A red boat.", "shot_index": 3}},
         }))
-        self.assertEqual(client.captions("L21_V001", [100]),
+        self.assertEqual(client.captions_for_frames("L21_V001", [100]),
                          {100: {"caption": "A red boat.", "shot_index": 3}})
 
     def test_a_video_without_captions_returns_empty_rather_than_raising(self):
@@ -242,7 +242,7 @@ class CaptionFetchTests(unittest.TestCase):
         # look like the route is missing.
         client = search_client(lambda request: httpx.Response(200, json={
             "video_id": "K01_V001", "available": False, "captions": {}}))
-        self.assertEqual(client.captions("K01_V001", [10, 20]), {})
+        self.assertEqual(client.captions_for_frames("K01_V001", [10, 20]), {})
 
     def test_a_server_without_the_route_is_asked_exactly_once_per_run(self):
         paths = []
@@ -252,22 +252,22 @@ class CaptionFetchTests(unittest.TestCase):
             return httpx.Response(404, json={"detail": "not found"})
 
         client = search_client(handler)
-        self.assertEqual(client.captions("L21_V001", [100]), {})
-        self.assertEqual(client.captions("L21_V002", [200]), {})
+        self.assertEqual(client.captions_for_frames("L21_V001", [100]), {})
+        self.assertEqual(client.captions_for_frames("L21_V002", [200]), {})
         self.assertEqual(len(paths), 1, "the latch should stop the second request")
 
     def test_no_frames_means_no_request_at_all(self):
         def handler(request):
             raise AssertionError("a caption request should not be made")
 
-        self.assertEqual(search_client(handler).captions("L21_V001", []), {})
+        self.assertEqual(search_client(handler).captions_for_frames("L21_V001", []), {})
 
     def test_captions_can_be_turned_off_entirely(self):
         # AIC_AGENT_CAPTIONS=0 has to stop the request, not just discard the answer.
         def handler(request):
             raise AssertionError("a disabled caption lookup should not reach the server")
 
-        self.assertEqual(search_client(handler, captions=False).captions("L21_V001", [1]), {})
+        self.assertEqual(search_client(handler, captions=False).captions_for_frames("L21_V001", [1]), {})
 
     def test_the_setting_reaches_the_client(self):
         from types import SimpleNamespace
@@ -275,14 +275,14 @@ class CaptionFetchTests(unittest.TestCase):
         settings = SimpleNamespace(server_url="http://server", server_user=None,
                                    server_password=None, trusted_user=None,
                                    search_api="batch", captions=False)
-        self.assertEqual(SearchClient.from_settings(settings).captions("L21_V001", [1]), {})
+        self.assertEqual(SearchClient.from_settings(settings).captions_for_frames("L21_V001", [1]), {})
 
     def test_a_malformed_frame_key_is_skipped(self):
         client = search_client(lambda request: httpx.Response(200, json={
             "video_id": "L21_V001", "available": True,
             "captions": {"100": {"caption": "ok"}, "not-a-frame": {"caption": "x"}},
         }))
-        self.assertEqual(list(client.captions("L21_V001", [100])), [100])
+        self.assertEqual(list(client.captions_for_frames("L21_V001", [100])), [100])
 
 
 class DeepSeekVisionTests(unittest.TestCase):

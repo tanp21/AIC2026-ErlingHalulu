@@ -25,7 +25,9 @@ class FrontendServingTests(unittest.TestCase):
 
     def test_container_includes_the_paraphrase_fusion_module(self):
         # /agent/search imports it for embedding-mean paraphrase fusion.
-        self.assertIn("backend/subquery_fusion.py", Path("Dockerfile").read_text())
+        dockerfile = Path("Dockerfile").read_text()
+        self.assertIn("backend/subquery_fusion.py", dockerfile)
+        self.assertIn("backend/caption_search.py", dockerfile)
 
     def test_container_includes_the_clip_export_module(self):
         self.assertIn("backend/shots.py", Path("Dockerfile").read_text())
@@ -54,7 +56,11 @@ class FrontendServingTests(unittest.TestCase):
         from backend.core_service import PROXY_PREFIXES
 
         paths = {route.path for route in app.routes}
+        # Two routes, one path segment apart: the whole video in time order, and the
+        # frames a verify chunk is about to judge. Registering both under the same
+        # path silently dropped whichever FastAPI did not match first.
         self.assertIn("/captions/{video_id}", paths)
+        self.assertIn("/captions/{video_id}/frames", paths)
         # Split development forwards media/data routes to the compute host; a route
         # missing here works locally and 404s for a teammate.
         self.assertIn("/captions/", PROXY_PREFIXES)

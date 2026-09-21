@@ -28,7 +28,14 @@ would SAY: topic, place/person/organisation names, dish and ingredient names \
 in cooking shows, quantities. 2-8 word phrases. Never visual-only details like clothing colours.
 3. ocr — text physically written on screen: signs, banners, slide titles, captions, labels, \
 prices. Only strings the query quotes or clearly implies, 1-5 words each.
-4. temporal — ordered visual events inside one video (2-6 English captions). Use it for \
+4. caption — every shot was described offline by a video captioning model: one long, \
+factual ENGLISH paragraph per shot (at most 20 s), in chronological order, which also \
+transcribes text legible in the scene (slides, exam papers, signs, packaging). Searched \
+as text (BM25), so it matches wording, not vectors. Use it for what CLIP cannot express: \
+counts ("three men carry"), order inside one shot ("then he lifts"), sentences written on \
+a slide or a document, and rare names. Write 1-2 plain English sentences as they would \
+appear in such a caption, with the rarest words first; no negations, no "the video shows".
+5. temporal — ordered visual events inside one video (2-6 English captions). Use it for \
 trake and for any description with consecutive scenes ("bắt đầu ... sau đó ... kết thúc")."""
 
 ANALYZE_SYSTEM = f"""You plan the searches for one query of AI Challenge HCMC, a \
@@ -53,8 +60,10 @@ Reply with one JSON object and nothing else:
       "visual_en": ["English caption", "paraphrase 1", "paraphrase 2", "paraphrase 3"]}}
   ],
   "target_scene": 0,
+  "readings_en": ["a different plausible reading of the ambiguous part"],
   "events_en": [],
   "transcript_vi": ["spoken phrase"],
+  "caption_en": ["English sentence as a shot caption would word it"],
   "ocr": ["on-screen text"],
   "lookups": ["web search question"],
   "question_vi": null,
@@ -67,6 +76,34 @@ Rules:
 detail (same counts, colours, clothing, quoted text, names) and change only word order, \
 synonyms or grammar. Never shorten to a subset of the details and never add details: \
 shortened "aspect" captions hurt retrieval in benchmarks, faithful paraphrases helped.
+- Write only what a camera shows, and never more than the query states. A relationship \
+or role no picture can show ("hai mẹ con", "hai vợ chồng", "người con", "đồng nghiệp") \
+becomes the bare count and nothing else -- "two people" -- unless the query itself gives \
+the gender, age or clothing, in which case write exactly that much. Guessing is what \
+loses clips: on one real query "mother and child" sent CLIP after an adult with a small \
+child and "a young man and an older woman" invented a gender, both ranking the right \
+video 66th, while the neutral "two people holding a phone" put it first. The same holds \
+for age: write "child" only where the query says so. A guess about who the people are \
+belongs in readings_en, never in visual_en. This bans inventing what the query leaves \
+open -- it never means dropping a detail the query states or plainly implies: a question \
+about the number shown on a scale implies a scale with a readable display, so the caption \
+says so; writing only "a fish on a scale" throws away the detail that finds the clip.
+- Never settle an interaction the query leaves open. A phone in someone's hand is not a \
+video call, a microphone is not an interview, two people at a table are not eating, \
+unless the query says so. If the query can be pictured in several ways, keep the caption \
+to what is certain and put the other pictures in "readings_en".
+- readings_en: kis and qa only, 0-2 entries. Each is ONE English caption of whichever \
+scene the Vietnamese can picture in more than one way, under a different reading of it: \
+"hai người cầm điện thoại trò chuyện" is two people walking side by side, one holding a \
+phone up, and it is also two people sitting over a phone screen. A reading changes only \
+HOW the stated details look; it never adds a person, object or action the query does not \
+mention (no microphone for an interview, no video call for a phone), and it never moves a \
+detail into another scene. Two readings must differ in something a camera would show \
+differently -- indoors or outdoors, sitting or walking, close-up or wide -- not in \
+wording: "two women sitting at a table with a phone" and "two women sitting over a phone" \
+are the same picture twice, while "two women walking outdoors, one holding a phone up" is \
+a real second reading. One entry may instead be a cautious version that keeps only \
+what is certain and drops the rest. Each is searched on its own and must describe ONE \nframe, like any caption -- never a sentence chaining scenes together ("... then ... \nthen ..."), which matches no single keyframe. Never repeat a visual_en wording here; \nleave the list empty when nothing is ambiguous.
 - target_scene: index of the scene whose frame should be submitted — the scene the query asks \
 to find exactly, otherwise the first scene.
 - events_en: trake only — exactly one English caption per listed event, in order, each \
@@ -75,6 +112,9 @@ describing the frame at the START of that event. Empty for kis/qa.
 1-3 phrases the narrator would likely say about the topic (e.g. "sạt lở đất", "đèo", \
 "công trình thủy lợi", dish or ingredient names), rarest and most specific first. Leave it \
 empty only when the clip is plausibly unnarrated.
+- caption_en: 1-2 entries for the target scene, phrased as a caption sentence and \
+carrying the details CLIP drops (exact counts, what is written on screen, the order of \
+actions inside the shot). Leave empty only when the scene has no such detail.
 - ocr: only distinctive strings (names, titles, slogans, numbers with context); never \
 generic words or units such as "kg" or "km".
 - lookups: empty unless a name really has to be found on the web.
@@ -183,6 +223,10 @@ Question: {question}
 Transcript around this moment:
 {transcript}
 
+Caption of this shot, written offline by a video model (may be wrong in details, but it \
+watched the whole shot, not just these frames):
+{caption}
+
 Web-search notes (may be wrong; use one only if the video agrees with it or shows \
 nothing that contradicts it):
 {hints}
@@ -205,11 +249,13 @@ REWRITE_SYSTEM = f"""You run the second and last search round for one query of A
 
 You see the query, the round-1 plan, web notes and the round-1 candidates with Gemini's 0-10 verdicts (reasons name what matched or was contradicted). Write up to 6 NEW queries that fix what round 1 missed:
 - visual: rewrite the caption around the detail the verdicts found missing or wrong, or the scene's most distinctive element; give "paraphrases" (faithful rewordings). When a promising video is known (a candidate scored 5+ or several channels agree), add a visual query with "video_ids" to pin the exact moment inside it.
+- Never name what the picture cannot show: a relationship ("mother and child") or a guessed gender or age costs the right video, where the bare count ("two people") finds it. Write an alternative reading as its own query instead of putting the guess in a caption.
 - audio: Vietnamese phrases a narrator would say, especially names from the web notes (dish names, places, people, organisations), numbers as digits.
 - ocr: exact on-screen strings the query quotes or the web notes name.
+- caption: an English sentence naming the details CLIP cannot encode (counts, on-screen sentences, the order of actions in one shot); add "video_ids" to read inside a promising video.
 - temporal: 2-6 ordered English captions for consecutive scenes of one video.
 Never repeat a round-1 query. Reply with one JSON object and nothing else:
-{{"queries": [{{"kind": "visual", "text": "...", "paraphrases": ["..."], "video_ids": []}}, {{"kind": "audio", "text": "..."}}, {{"kind": "ocr", "text": "..."}}, {{"kind": "temporal", "events": ["...", "..."]}}]}}"""
+{{"queries": [{{"kind": "visual", "text": "...", "paraphrases": ["..."], "video_ids": []}}, {{"kind": "audio", "text": "..."}}, {{"kind": "caption", "text": "..."}}, {{"kind": "ocr", "text": "..."}}, {{"kind": "temporal", "events": ["...", "..."]}}]}}"""
 
 COOKING_LOOKUP_PROMPT = """Mô tả dưới đây là một đoạn trong kho video truyền hình Việt Nam, nhiều khả năng là một tập của chương trình dạy nấu ăn "Món ngon mỗi ngày" (hoặc chương trình ẩm thực tương tự). Hãy tìm trên web tập/công thức khớp nhất với mô tả và cho biết: tên món ăn, nguyên liệu chính kèm định lượng nếu có, và chi tiết nhận dạng (người nấu, cách trình bày).
 {question}

@@ -43,6 +43,11 @@ class SearchClient:
 
     `api="auto"` uses `/agent/search` and falls back, for good, to the public
     search routes (`agent.compat`) the first time a server answers it with 404.
+
+    The caption channel is optional in the same spirit: a server built before it,
+    or one whose Elasticsearch has no caption index, makes the first caption
+    sub-query fail, and caption queries are then dropped for the rest of the run
+    instead of failing a batch per step.
     """
 
     def __init__(self, base_url, *, user=None, password=None, trusted_user=None,
@@ -60,6 +65,8 @@ class SearchClient:
         self._retries = retries
         self._sleep = sleep
         self._batch_lock = threading.Lock()
+        # None until a caption query has been tried against this server.
+        self.captions_supported = None
         self._image_slots = threading.BoundedSemaphore(MAX_IMAGE_REQUESTS)
         # Set once a server answers `/captions` with 404/405, so an old build is
         # asked exactly once per run instead of once per candidate.
@@ -102,6 +109,39 @@ class SearchClient:
 
     def search(self, queries: list[dict]) -> dict[str, dict]:
         """Run one batch; returns `{query_id: {"kind", "hits"} | {"kind", "error"}}`."""
+        dropped = {}
+        if self.captions_supported is False:
+            dropped = {query["id"]: {"kind": "caption", "error": "caption channel unavailable"}
+                       for query in queries if query.get("kind") == "caption"}
+            queries = [query for query in queries if query.get("kind") != "caption"]
+            if not queries:
+                return dropped
+        try:
+            results = self._search(queries)
+        except SearchError as exc:
+            # A server predating the caption channel rejects the whole batch (422).
+            kept = [query for query in queries if query.get("kind") != "caption"]
+            if exc.status != 422 or len(kept) == len(queries):
+                raise
+            self.captions_supported = False
+            logger.warning("server rejects caption queries (%s); dropping them", exc)
+            results = self._search(kept) if kept else {}
+        self._note_caption_support(queries, results)
+        return {**results, **dropped}
+
+    def _note_caption_support(self, queries, results):
+        if self.captions_supported is not None:
+            return
+        asked = [query["id"] for query in queries if query.get("kind") == "caption"]
+        if not asked:
+            return
+        failed = [qid for qid in asked if "error" in results.get(qid, {})]
+        self.captions_supported = len(failed) < len(asked)
+        if not self.captions_supported:
+            logger.warning("server has no caption channel (%s); dropping caption queries",
+                           results.get(failed[0], {}).get("error"))
+
+    def _search(self, queries: list[dict]) -> dict[str, dict]:
         with self._batch_lock:
             if self.api != "compat":
                 try:
@@ -136,12 +176,29 @@ class SearchClient:
             for frame in response.json()["frames"]
         ]
 
+    def captions(self, video_id: str) -> list[dict]:
+        """`[{"start", "end", "time", "frame_idx", "text"}]` shot captions, in time order.
+
+        Empty when the deployment has no caption index; a caption is what a
+        model wrote about the whole shot, so it carries counts and on-screen
+        sentences that neither a keyframe nor the transcript shows.
+        """
+        try:
+            return self._request("GET", f"/captions/{video_id}",
+                                 timeout=LOOKUP_TIMEOUT).json()["captions"]
+        except (SearchError, KeyError, ValueError):
+            return []
+
     def transcript(self, video_id: str) -> list[dict]:
         """`[{"start", "end", "text"}]` cues for the whole video."""
         return self._request("GET", f"/transcript/{video_id}", timeout=LOOKUP_TIMEOUT).json()["cues"]
 
-    def captions(self, video_id: str, frames: list[int]) -> dict[int, dict]:
+    def captions_for_frames(self, video_id: str, frames: list[int]) -> dict[int, dict]:
         """CapRL shot captions for `frames`, keyed by frame index.
+
+        The sibling of `captions`, for the verify step: that one asks for a whole
+        video in time order, this asks only about the frames being judged and gets
+        them back already resolved through the frame map. Both read the same captions.
 
         Returns `{}` rather than raising when the server has no captions for this
         video — every 2025 `K*` video, and anything whose shot pass has not run. A
@@ -153,12 +210,13 @@ class SearchClient:
             return {}
         wanted = ",".join(str(int(frame)) for frame in frames)
         try:
-            response = self._request("GET", f"/captions/{video_id}", params={"frames": wanted},
-                                     timeout=LOOKUP_TIMEOUT)
+            response = self._request("GET", f"/captions/{video_id}/frames",
+                                     params={"frames": wanted}, timeout=LOOKUP_TIMEOUT)
         except SearchError as exc:
             if exc.status in (404, 405):
                 self._no_captions = True
-                logger.warning("server has no /captions; continuing without shot captions")
+                logger.warning("server has no /captions/{id}/frames; "
+                               "continuing without shot captions")
             return {}
         found = {}
         for key, value in (response.json().get("captions") or {}).items():

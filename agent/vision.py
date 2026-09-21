@@ -102,16 +102,31 @@ def candidate_label(candidate, caption: str | None = None) -> str:
                    if e.kind == "audio" and e.text), None)
     written = next((e.text for e in candidate.evidence.values()
                     if e.kind in ("ocr", "ocr_exact") and e.text), None)
+    described = next((e.text for e in candidate.evidence.values()
+                      if e.kind == "caption" and e.text), None)
     if spoken:
         parts.append(f'speech nearby: "{spoken[:200]}"')
     if written:
         parts.append(f'on-screen text in this shot: "{written[:150]}"')
+    # Two sources for the same CapRL text: `caption` is fetched for the frames being
+    # judged, `described` rode in on a candidate the caption channel retrieved. Either
+    # will do, and the fetched one is only absent when the server has no captions.
+    caption = caption or described
     if caption:
         # Quoted and disclaimed on purpose: this comes from another model looking at
         # the same frames, so it can be confidently wrong, and the judge must weight
         # what it can see over what it is told.
         parts.append(f'shot caption (auto, may be wrong): "{caption[:MAX_CAPTION_CHARS]}"')
     return " | ".join(parts)
+
+
+def caption_at(captions, time_, default="(none)") -> str:
+    """The caption of the shot window containing `time_`, else the nearest one."""
+    if not captions:
+        return default
+    inside = [c for c in captions if c["start"] <= time_ <= c["end"]]
+    nearest = inside or sorted(captions, key=lambda c: abs((c["start"] + c["end"]) / 2 - time_))[:1]
+    return " ".join(str(nearest[0].get("text", "")).split()) or default
 
 
 def transcript_window(cues, center, seconds=40.0) -> str:
@@ -188,7 +203,7 @@ class Inspector:
         rather than five. Returns `{}` against a server without the route, and for
         2025 videos, which were never captioned.
         """
-        if not getattr(self.search, "captions", None):
+        if not getattr(self.search, "captions_for_frames", None):
             return {}
         hits, want = {}, {}
         for video_id, frame_idx in frames:
@@ -202,7 +217,7 @@ class Inspector:
         def fetch(item):
             video_id, indices = item
             try:
-                return video_id, self.search.captions(video_id, indices)
+                return video_id, self.search.captions_for_frames(video_id, indices)
             except Exception:  # a caption is context; never let it cost the round
                 return video_id, {}
 
@@ -338,8 +353,8 @@ class Inspector:
         return [min(max(scores.get(f"E{index + 1}", 0.0), 0.0), 10.0) if image else 5.0
                 for index, image in enumerate(data)]
 
-    def answer(self, task, question, candidate, neighbours, cues, hints=""):
-        """Read a QA answer from one moment: its full frame, neighbours, and speech."""
+    def answer(self, task, question, candidate, neighbours, cues, hints="", captions=()):
+        """Read a QA answer from one moment: full frame, neighbours, speech and caption."""
         frames = [(candidate.video_id, candidate.frame_idx)]
         frames += [(f["video_id"], f["frame_idx"]) for f in neighbours
                    if f["frame_idx"] != candidate.frame_idx][:6]
@@ -350,6 +365,7 @@ class Inspector:
         prompt = QA_PROMPT.format(
             query=task.text, question=question,
             transcript=transcript_window(cues, candidate.time),
+            caption=caption_at(captions, candidate.time),
             hints=hints or "(none)",
         )
         return self._judge("answer", prompt, ANSWER_SCHEMA, labelled, max_output_tokens=4096)

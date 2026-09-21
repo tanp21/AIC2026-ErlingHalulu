@@ -135,30 +135,30 @@ class CaptionRouteTests(unittest.TestCase):
         return self.client.get(url, headers={"X-AIC-User": "owner@example.com"})
 
     def test_an_indexed_video_answers_with_its_captions(self):
-        response = self.get("/captions/L22_V001?frames=1000")
+        response = self.get("/captions/L22_V001/frames?frames=1000")
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertTrue(body["available"])
         self.assertIn("caption", body["captions"]["1000"])
 
     def test_a_frame_past_the_end_of_the_map_is_not_a_server_error(self):
-        response = self.get("/captions/L22_V001?frames=999999")
+        response = self.get("/captions/L22_V001/frames?frames=999999")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"video_id": "L22_V001", "available": False,
                                            "captions": {}})
 
     def test_a_video_without_a_frame_map_is_not_a_server_error(self):
-        response = self.get("/captions/L99_V999?frames=0")
+        response = self.get("/captions/L99_V999/frames?frames=0")
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["available"])
 
     def test_a_2025_video_answers_unavailable(self):
-        response = self.get("/captions/K01_V001?frames=1000")
+        response = self.get("/captions/K01_V001/frames?frames=1000")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["captions"], {})
 
     def test_a_malformed_frame_list_is_rejected(self):
-        self.assertEqual(self.get("/captions/L22_V001?frames=abc").status_code, 422)
+        self.assertEqual(self.get("/captions/L22_V001/frames?frames=abc").status_code, 422)
 
 
 if __name__ == "__main__":
