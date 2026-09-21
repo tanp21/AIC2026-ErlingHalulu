@@ -187,9 +187,16 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
         settings.deepseek_api_key, settings.deepseek_model, settings.deepseek_base_url,
         thinking=settings.deepseek_thinking, usage=usage,
     )
+    # Same tuning the CLI gives a fast run, and it matters more here: a teammate's key
+    # may be a free-tier one, where a rate-limited call retries five times and sleeps
+    # 2+4+8+16 s doing it. Runs from the UI default to fast, so fast is what they get.
+    # No `hedge_after`: hedging races a duplicate request, which doubles the quota a
+    # free-tier key spends and is the opposite of what a congested one needs.
+    fast = mode in ("fast", "auto")
     gemini = (GeminiClient(
         settings.gemini_api_key, settings.gemini_model,
         thinking_level=settings.gemini_thinking_level, usage=usage,
+        **({"timeout": 40.0, "retries": 2, "max_backoff": 4.0} if fast else {}),
     ) if settings.gemini_api_key else OfflineGemini())
     vision = build_vision(settings, usage=usage, gemini=gemini if settings.gemini_api_key else None)
     search = SearchClient.from_settings(settings)
