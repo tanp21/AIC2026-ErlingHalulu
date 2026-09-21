@@ -31,7 +31,7 @@ Elasticsearch remained healthy.
 - Output contracts: shot captions and keyframe-to-shot mapping use separate
   Parquet schemas. Every keyframe in one shot therefore resolves to the same
   shot caption.
-- Local failed-run artifact: `artifacts/captions/2026/benchmark.json` records
+- Local failed-run artifact: `data/2026/captions/benchmark.json` records
   77.62 seconds elapsed and 1,420 MiB peak observed GPU use. Failure happened
   during engine startup, so the peak is not model residency.
 
