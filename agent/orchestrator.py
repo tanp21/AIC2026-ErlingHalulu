@@ -34,7 +34,7 @@ from .prompts import AGENT_SYSTEM, LOOKUP_PROMPT, REWRITE_SYSTEM
 from .review import HUMAN_ACCEPT, HUMAN_REJECT, HumanReview
 from .tasks import Task
 from .vision import Inspector, caption_at, label_context, transcript_window
-from .web import cooking_lookup, fact_lookup, is_cooking, recipe_lookup, similar, tagged
+from .web import cooking_lookup, dish_name, fact_lookup, is_cooking, recipe_lookup, similar, tagged
 
 logger = logging.getLogger("agent")
 VIDEO_ID = re.compile(r"^[A-Z]\d{2}_V\d{3}$")
@@ -408,10 +408,13 @@ class _Run:
         waited for only where their result is used.
         """
         if self.cooking:
-            self._lookup_later(cooking_lookup(self.task.text, None), "món ăn (Món ngon mỗi ngày)")
+            # About the query, not about a video the agent has already chosen: those
+            # two kinds are kept apart because only this one is safe to search for.
+            self._lookup_later(cooking_lookup(self.task.text, None),
+                               "món ăn (Món ngon mỗi ngày)", about_the_query=True)
         self._plan()
         for question in self.plan.lookups:
-            self._lookup_later(LOOKUP_PROMPT.format(question=question), question)
+            self._lookup_later(LOOKUP_PROMPT.format(question=question), question, about_the_query=True)
         self._run_search(initial_queries(self.plan, self.task, self.options.spoken_numbers), "round1")
         if self.task.kind == "trake":
             return  # paths are checked event by event in _finalize_sequences
@@ -433,8 +436,8 @@ class _Run:
     def _best_score(self):
         return max((c.verdict.score for c in self.pool.candidates.values() if c.verdict), default=0.0)
 
-    def _lookup_later(self, prompt, label):
-        self.pending.append(self.background.submit(self._lookup, label, prompt))
+    def _lookup_later(self, prompt, label, about_the_query=False):
+        self.pending.append(self.background.submit(self._lookup, label, prompt, about_the_query))
 
     def _collect_lookups(self, timeout):
         """Move finished background lookups into the result, waiting up to `timeout` s."""
@@ -478,12 +481,42 @@ class _Run:
         queries = [self._server_query(raw, index)
                    for index, raw in enumerate((raw_queries or [])[:6]) if isinstance(raw, dict)]
         queries = [query for query in queries if query]
+        # Before the scoped visuals: a dish name is a key the corpus certainly has, and
+        # it is the one thing here that was measured to rank the answer's video first.
+        queries += self._dish_queries(room=2)
         queries += self._scoped_queries(room=8 - len(queries))
         self.log("rewrite", {"queries": queries},
                  "; ".join(str(q.get("text") or q.get("events"))[:60] for q in queries), started)
         self._run_search(queries, "rewrite")
         fresh = self._best_neighbours()
         self._verify(fresh + self.pool.to_verify(self.options.verify_top - len(fresh)))
+
+    def _dish_queries(self, room):
+        """The dish names the web lookups found, as transcript queries.
+
+        The prompts already ask a lookup to end with `TỪ KHÓA: <tên món>; …`, and the
+        rewrite prompt is handed the same lookups as prose -- but the prose is what the
+        model has to notice, and across runs it used the quantities the question
+        mentions instead ("hai muỗng nước tương") rather than the name. Measured on the
+        round-3 soy-sauce query: the lookup named "Cá hồi áp chảo xốt tiêu", an audio
+        search for that name returns its video **first**, and the query's own terms
+        ranked it 30th of 84. The transcript says the dish out loud, so the name is a
+        key the corpus has and the description does not.
+        """
+        names = []
+        for entry in self.result.lookups:
+            # Only the lookups that describe the *query*. A lookup anchored to a video
+            # the agent already chose (the recipe search for the current top candidate)
+            # names that video's dish whatever it is, and searching it would spend a
+            # query reinforcing a choice that may be the mistake being corrected.
+            if not entry.get("about_the_query"):
+                continue
+            name = dish_name(entry.get("answer"))
+            if name and name not in names:
+                names.append(name)
+        return [{"kind": "audio", "id": f"s1.k{index}", "text": name,
+                 "method": "keyword", "limit": 100}
+                for index, name in enumerate(names[:max(0, room)])]
 
     def _scoped_queries(self, room, videos=3):
         """Each scene searched inside the videos round 1 favoured.
@@ -549,15 +582,16 @@ class _Run:
                 self.result.lookups.append(future.result())
         self._verify(self.pool.to_verify(self.options.verify_top))
 
-    def _lookup(self, question, prompt=None):
+    def _lookup(self, question, prompt=None, about_the_query=False):
         started = self.agent.clock()
         try:
             answer = self.agent.gemini.web_search(prompt or LOOKUP_PROMPT.format(question=question))
         except LLMError as exc:
-            entry = {"question": question, "error": str(exc)}
+            entry = {"question": question, "error": str(exc), "about_the_query": about_the_query}
         else:
             entry = {"question": question, "answer": answer.text,
-                     "sources": [uri for _, uri in answer.sources]}
+                     "sources": [uri for _, uri in answer.sources],
+                     "about_the_query": about_the_query}
         self.log("web_search", {"question": question},
                  (entry.get("answer") or entry.get("error", ""))[:120], started)
         return entry

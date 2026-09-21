@@ -60,3 +60,41 @@ def fact_lookup(query: str, question: str, moment: str) -> str:
 def similar(a: str, b: str) -> float:
     """0-1 closeness of two short answers, ignoring accents and case."""
     return SequenceMatcher(None, _fold(a or ""), _fold(b or "")).ratio()
+
+
+#: Where a lookup's dish name shows up. The prompts ask for a final
+#: `TỪ KHÓA: <tên món>; <nguyên liệu>` line, but a grounded search does not always give
+#: one -- a real reply wrote "**Tên món ăn:** Cá hồi áp chảo xốt tiêu (hoặc …)" with no
+#: TỪ KHÓA line at all, and the run then searched nothing. The name is the one thing in
+#: a lookup worth searching for: measured on the round-3 soy-sauce query, an audio query
+#: with the name ("Cá hồi áp chảo xốt tiêu") ranks its video **first**, where the
+#: query's own terms ranked it 30th of 84. The transcript says the dish out loud at
+#: 48 s, so the name is a key the corpus has and the description does not.
+DISH_PATTERNS = (
+    re.compile(r"^\s*T[ỪU] KH[ÓO]A\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"t[êe]n m[óo]n(?:\s*[ăâ]n)?\s*:?\s*\**\s*(.+)$", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"(?:l[àa]|m[óo]n)\s+\*\*(.+?)\*\*", re.IGNORECASE),
+)
+#: A reply that offers alternatives ("… xốt tiêu (hoặc … sốt tiêu xanh)") or a list
+#: should be searched by its first name only.
+NAME_TAIL = re.compile(r"\s*[(\[;,.–—]|\s+(?:hoặc|hay|hoac)\s")
+#: Answers the model marks as unknown; "không rõ" is what the prompts ask for.
+UNKNOWN_ANSWER = re.compile(r"^(kh[ôo]ng r[õo]|khong ro|unknown|n/?a)$", re.IGNORECASE)
+
+
+def dish_name(text: str | None) -> str | None:
+    """The dish name a lookup named, or None if it named none.
+
+    The first field only when the reply lists ingredients after it -- the ingredients
+    are what the query already described, so searching them adds nothing.
+    """
+    for pattern in DISH_PATTERNS:
+        match = pattern.search(text or "")
+        if not match:
+            continue
+        name = " ".join(match.group(1).split())
+        name = name.split(";")[0]
+        name = NAME_TAIL.split(name)[0].strip(" .,-*_")
+        if len(name) > 2:
+            return name
+    return None
