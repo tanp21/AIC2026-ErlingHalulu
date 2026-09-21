@@ -22,6 +22,17 @@ BATCH_LIMIT = 12
 TRAKE_TIGHT_GAP = 45
 ANSWER_SOURCES = {"on_screen_text", "visual_count", "visual_attribute", "speech", "world_knowledge"}
 
+#: A question that asks for an *amount* is answered by a sentence that states one, so
+#: the terms which find it are the ones such a sentence must contain: the substance and
+#: a measure. Measured on the round-3 soy-sauce query, whose answer line reads
+#: "…hai muỗng cà phê nước tương Phú Sĩ…": BM25 over the transcript passages ranks the
+#: video 30th of 84 for `nước tương` alone, 21st for `lượng nước tương`, 7th for
+#: `lượng nước tương muỗng`, and 9th for `muỗng cà phê nước tương`. The bare term fails
+#: because of boilerplate -- "nước tương Phú Sĩ" is the show's sponsor and is said in
+#: every episode, so the one term that should discriminate ranks the ad reads. A
+#: seasoning *verb* from the question does not help (it is not what the video says).
+QUANTITY_MARKERS = ("lượng", "bao nhiêu", "số lượng", "mấy")
+
 
 @dataclass
 class Scene:
@@ -129,6 +140,33 @@ def transcript_text(phrase: str, spoken_numbers: bool = False) -> str:
     return spell_numbers(phrase) if spoken_numbers else phrase
 
 
+def quantity_queries(plan: Plan) -> list[dict]:
+    """Audio phrasings for a question whose answer states an amount, else nothing.
+
+    The plan's `transcript_vi` already names the substance ("nước tương"); asking for
+    it alone is what finds the sponsor reads instead of the recipe. Two shapes, both
+    measured on the soy-sauce query: the question's own quantity word with the bare
+    measure, and the spelled-out unit the answer sentence uses.
+
+    Only when the plan says the answer is *spoken*. An amount read off a slide, a
+    chart or a scale ("vùng này gồm bao nhiêu tỉnh?") is not in the transcript, and
+    the round-1 batch is capped at `BATCH_LIMIT` and truncated in order, so these two
+    queries would displace the OCR ones that do answer those.
+    """
+    if plan.answer_source != "speech":
+        return []
+    question = (plan.question_vi or "").lower()
+    marker = next((word for word in QUANTITY_MARKERS if word in question), None)
+    if marker is None or not plan.transcript_vi:
+        return []
+    substance = plan.transcript_vi[0]
+    shapes = (f"{marker} {substance} muỗng", f"muỗng cà phê {substance}")
+    return [
+        {"kind": "audio", "id": f"r1.q{index}", "text": text, "method": "keyword", "limit": 100}
+        for index, text in enumerate(shapes)
+    ]
+
+
 def initial_queries(plan: Plan, task, spoken_numbers: bool = False) -> list[dict]:
     """Round-1 batch: every channel the plan names, capped at the server's batch size.
 
@@ -152,6 +190,8 @@ def initial_queries(plan: Plan, task, spoken_numbers: bool = False) -> list[dict
         for index, text in enumerate(plan.readings_en)
     ]
     rest = [visual(index) for index in range(len(plan.scenes)) if index != plan.target_scene]
+    # Computed here because the spoken block below gives up its semantic twin for it.
+    quantity = quantity_queries(plan)
 
     temporal = []
     events = plan.events_en if task.kind == "trake" else [
@@ -177,7 +217,13 @@ def initial_queries(plan: Plan, task, spoken_numbers: bool = False) -> list[dict
         variant = transcript_text(phrase, spoken_numbers)
         spoken.append({"kind": "audio", "id": f"r1.a{index}", "text": variant,
                        "method": "keyword", "limit": 100})
-        if index == 0:
+        # The semantic twin of the first phrase gives up its slot to the quantity
+        # queries: it asks the same phrase again over a channel that measured worse
+        # than keyword on exactly this kind of question ("semantic: nước tương" did
+        # not return the target at all, keyword ranked it 30th and the quantity
+        # phrasings 7th and 9th), and the batch is full, so a query added is a query
+        # displaced -- three runs of it dropped the OCR query and a secondary scene.
+        if index == 0 and not quantity:
             spoken.append({"kind": "audio", "id": "r1.a0s", "text": variant,
                            "method": "semantic", "limit": 100})
     written = [
@@ -188,7 +234,10 @@ def initial_queries(plan: Plan, task, spoken_numbers: bool = False) -> list[dict
         {"kind": "caption", "id": f"r1.c{index}", "text": text, "limit": 100}
         for index, text in enumerate(plan.caption_en)
     ]
-    return (first + readings + temporal + described + spoken + written + rest)[:BATCH_LIMIT]
+    # Ahead of the captions and the other scenes: when the question asks for an amount,
+    # the channel that answers it is speech, and the batch is truncated in this order.
+    return (first + readings + temporal + quantity
+            + described + spoken + written + rest)[:BATCH_LIMIT]
 
 
 def expected_events(plan: Plan, task) -> int:
