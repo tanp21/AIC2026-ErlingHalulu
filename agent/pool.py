@@ -255,35 +255,22 @@ class CandidatePool:
     def unverified(self, limit: int) -> list[Candidate]:
         return [candidate for candidate in self.ordered() if candidate.verdict is None][:limit]
 
-    def to_verify(self, limit: int, quota_share: float = 0.6) -> list[Candidate]:
-        """Unverified candidates worth a Gemini look: each query's best hits, then by fusion.
+    def to_verify(self, limit: int) -> list[Candidate]:
+        """The top `limit` unverified candidates in the pool's own order.
 
-        Fusion alone favours moments many weak hits agree on (a transcript span, an
-        OCR'd shot, a temporal event), and on round 2 it left a caption's rank-1
-        keyframe -- the gold frame of p2-3 -- unverified at fused rank 32. Up to
-        `quota_share` of the slots therefore go round-robin to every query's best
-        unverified hits, visual queries first.
+        The fused order decides, because the judge is the strongest link in the chain and
+        the pool usually already ranks the answer: over the official 2026 set the right
+        moment is inside fused rank 100 for 99 of 114 queries, and when it is shown to the
+        judge the judge scores it highest 93% of the time. Spending the budget on anything
+        else is what lost queries -- replayed over every saved benchmark pool, filling
+        from the top admits the right moment for 86 of the 106 where it exists, against 81
+        for the rule this replaced, which spent up to `quota_share` of the slots on each
+        source query's best hit. That rule existed for one case: a caption channel's rank-1
+        keyframe left unverified at fused rank 32. The caption channel is not built in this
+        deployment, so the argument does not currently apply -- build it and re-measure
+        this before deciding which order is right.
         """
-        pending = [candidate for candidate in self.ordered() if candidate.verdict is None]
-        per_source: dict[str, list[tuple[int, Candidate]]] = defaultdict(list)
-        for candidate in pending:
-            for evidence in candidate.evidence.values():
-                if evidence.kind != "neighbour":
-                    per_source[evidence.source].append((evidence.rank, candidate))
-        sources = sorted(per_source, key=lambda source: (
-            -_weight(next(iter(per_source[source]))[1].evidence[source]), source))
-        queues = [[c for _, c in sorted(per_source[source], key=lambda item: item[0])]
-                  for source in sources]
-        chosen: list[Candidate] = []
-        quota = min(limit, round(limit * quota_share))
-        while len(chosen) < quota and any(queues):
-            for queue in queues:
-                while queue and queue[0] in chosen:
-                    queue.pop(0)
-                if queue and len(chosen) < quota:
-                    chosen.append(queue.pop(0))
-        chosen += [candidate for candidate in pending if candidate not in chosen][:limit - len(chosen)]
-        return chosen
+        return [candidate for candidate in self.ordered() if candidate.verdict is None][:limit]
 
     def ranked_sequences(self, count: int | None = None) -> list[Sequence]:
         """Unique temporal paths, best first, fused over every temporal query and the video.

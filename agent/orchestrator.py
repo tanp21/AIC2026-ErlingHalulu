@@ -61,6 +61,12 @@ class AgentOptions:
     #: way to more coverage: 30 candidates at chunk 5 take 5.8 s at eight workers against
     #: 9.5 s at four, and score the gold 10 either way.
     verify_workers: int = 4
+    #: How far down the fused order a second, wider pass reaches when the first one left
+    #: the run unsure. The official set's misses sat between fused rank 30 and 100 for a
+    #: third of the queries, and the judge scores the right moment highest 93% of the
+    #: time it is shown one, so this is the cheapest recovery there is -- and it costs
+    #: judge calls rather than seconds, because the chunks overlap.
+    verify_wide: int = 120
     verify_per_step: int = 8
     accept_score: float = 9.0  # fast: a verified match this good skips the rewrite round
     auto_web: bool = True  # background web searches for cooking queries and Q&A answers
@@ -98,7 +104,7 @@ FAST_DEFAULTS = dict(
     # nobody. Thirty at eight workers costs no more wall time than fifteen at four
     # (measured: 5.8 s against 6.0 s) because the chunks overlap; what it does cost is
     # Gemini calls per query, which is the scarcer resource on a free-tier key.
-    time_budget=20.0, verify_top=30, verify_chunk=5, verify_workers=8,
+    time_budget=20.0, verify_top=30, verify_chunk=5, verify_workers=8, verify_wide=120,
     answer_moments=2, trake_check=8, trake_refine=1,
 )
 
@@ -427,7 +433,8 @@ class _Run:
         self._plan()
         for question in self.plan.lookups:
             self._lookup_later(LOOKUP_PROMPT.format(question=question), question, about_the_query=True)
-        self._run_search(initial_queries(self.plan, self.task, self.options.spoken_numbers), "round1")
+        self._run_search(initial_queries(self.plan, self.task, self.options.spoken_numbers,
+                                         skip_kinds=self._unavailable_channels()), "round1")
         if self.task.kind == "trake":
             return  # paths are checked event by event in _finalize_sequences
         self._verify(self.pool.to_verify(self.options.verify_top))
@@ -437,8 +444,23 @@ class _Run:
         # A 9-10 must survive the falsifier (~5 s): on round 2, fast mode's misses were
         # mostly confident look-alikes it would have questioned. ~8 s is one DeepSeek
         # call, one batch and one parallel verification.
+        checked = best.cid if best is not None else None
+        falsified = (best is not None and best.verdict.score >= self.options.accept_score
+                     and self._falsified(best))
         confident = (best is not None and best.verdict.score >= self.options.accept_score
-                     and not self._falsified(best))
+                     and not falsified)
+        # Widen before rewriting: show the judge more of the order it already ranked.
+        if (not confident and not self.review.decided() and not self.over_budget()
+                and self.options.verify_wide > self.options.verify_top):
+            self._verify(self.pool.to_verify(self.options.verify_wide))
+            best = next((c for c in self.pool.ordered() if c.verdict), None)
+            if best is not None and best.cid != checked:
+                # A different candidate now leads, so the falsifier has not seen it; the
+                # one it did see keeps its verdict rather than paying for it twice.
+                falsified = (best.verdict.score >= self.options.accept_score
+                             and self._falsified(best))
+            confident = (best is not None and best.verdict.score >= self.options.accept_score
+                         and not falsified)
         # The rewrite is the only recovery this mode has, so it is not gated on the
         # budget being comfortable: a 12 s round 1 once cancelled it with 8.0 s left
         # and the run finished on a wrong video the rewrite would have questioned.
@@ -447,6 +469,18 @@ class _Run:
 
     def _best_score(self):
         return max((c.verdict.score for c in self.pool.candidates.values() if c.verdict), default=0.0)
+
+    def _unavailable_channels(self) -> frozenset:
+        """Channels this deployment cannot serve, so the batch does not spend slots on them.
+
+        The plan names channels, not deployments: a caption query against a server with no
+        caption index is a slot taken from a live channel and then lost. Probed once per
+        run, and a client that cannot be asked (tests, an older build) is assumed capable.
+        """
+        probe = getattr(self.agent.search, "caption_channel_available", None)
+        if probe is None or probe():
+            return frozenset()
+        return frozenset({"caption"})
 
     def _lookup_later(self, prompt, label, about_the_query=False):
         self.pending.append(self.background.submit(self._lookup, label, prompt, about_the_query))
@@ -474,8 +508,10 @@ class _Run:
         self._publish("rewriting")
         started = self.agent.clock()
         # A cooking lookup started before planning is usually back by now; its dish
-        # name is what the transcript channel needs.
-        self._collect_lookups(min(3.0, max(0.0, self.remaining() - 10)))
+        # name is what the transcript channel needs. Waited for even when the budget is
+        # spent: a lookup averages 11.5 s (measured over 18 runs) and dropping it cost 16
+        # of the 34 cooking queries their only source of the dish name.
+        self._collect_lookups(min(3.0, max(1.5, self.remaining() - 10)))
         messages = [
             {"role": "system", "content": REWRITE_SYSTEM},
             {"role": "user", "content": (
@@ -1064,8 +1100,10 @@ class _Run:
                 label = f"tra cứu đáp án ({top.video_id})"
                 prompt = fact_lookup(self.task.text, question, transcript_window(cues, top.time, 60.0))
             recipe = self.background.submit(self._lookup, label, prompt)
-        # Earlier lookups are hints for the reading when they are back in time.
-        self._collect_lookups(min(3.0, max(0.0, self.remaining() - 8)))
+        # Earlier lookups are hints for the reading when they are back in time -- and
+        # waited for, for the same reason as above: a 1.5 s floor costs less than the
+        # answer they carry.
+        self._collect_lookups(min(3.0, max(1.5, self.remaining() - 8)))
         video, evidence, confidence = self._read_answer()
         if self.review.answer:
             return self.review.answer, "typed by the reviewer"

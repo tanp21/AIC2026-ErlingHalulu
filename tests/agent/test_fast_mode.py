@@ -182,10 +182,15 @@ class WebHelperTests(unittest.TestCase):
         self.assertFalse(is_cooking("Hai con rồng vàng đang xoay vòng"))
 
 
-class VerificationQuotaTests(unittest.TestCase):
-    def test_each_query_gets_its_best_hit_verified(self):
+class VerificationOrderTests(unittest.TestCase):
+    def test_the_pools_own_order_decides_who_is_verified(self):
+        # The rule this replaced reserved up to 60% of the slots for each source query's
+        # best hit, and this fixture is the case that argued for it: the caption channel's
+        # lone rank-1 keyframe, beaten by fusion because a spoken passage lifts three of
+        # another video's moments. Replayed over the whole official set, filling from the
+        # top instead admits the right moment for 86 of the 106 queries that have one,
+        # against 81 the other way, so the caption hit loses its reserved slot.
         pool = CandidatePool()
-        # a spoken passage spanning moments 1-3 lifts them over the caption's lone rank-1 hit
         pool.add_results({
             "cap": {"kind": "visual", "hits": [
                 {"rank": 1, "video_id": "L01_V009", "frame_idx": 90, "time": 9.0}]},
@@ -197,7 +202,9 @@ class VerificationQuotaTests(unittest.TestCase):
                  "start": 5.0, "end": 35.0, "text": "x"}]},
         })
         self.assertNotEqual(pool.unverified(2)[0].video_id, "L01_V009")
-        self.assertIn("L01_V009", [c.video_id for c in pool.to_verify(2)])
+        self.assertNotIn("L01_V009", [c.video_id for c in pool.to_verify(2)])
+        # It is still in the pool, and a budget wide enough to reach it does verify it.
+        self.assertIn("L01_V009", [c.video_id for c in pool.to_verify(10)])
 
 
 class SceneCoherenceTests(unittest.TestCase):
