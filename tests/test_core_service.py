@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+import base64
 from unittest.mock import patch
 
 import httpx
@@ -239,6 +240,84 @@ class CoreProxyTests(unittest.TestCase):
         response = client.get("/videos")
 
         self.assertEqual(response.status_code, 502)
+
+
+class VisionJudgeTests(unittest.TestCase):
+    """The endpoint `AIC_VLM_URL` points a teammate's app at.
+
+    Its contract is `agent.vlm.HttpVLM`'s: labelled base64 images plus a prompt and
+    a response schema, answered with the parsed JSON the caller expects.
+    """
+
+    def setUp(self):
+        self.client = TestClient(core_app())
+
+    def post(self, **overrides):
+        payload = {
+            "prompt": "Đánh giá khung hình này",
+            "schema": {"type": "object", "properties": {"id": {}, "score": {}}},
+            "images": [{"label": "[C1] L21_V001 t=1.0s", "b64": base64.b64encode(b"jpeg").decode()}],
+            "job": "verify",
+        }
+        return self.client.post("/core/vision/judge", json={**payload, **overrides})
+
+    def test_a_judgement_round_trips_through_the_backend(self):
+        seen = {}
+
+        class Fake:
+            def judge(self, images, prompt, schema, **kwargs):
+                seen.update(images=images, prompt=prompt, schema=schema, **kwargs)
+                return {"id": "C1", "score": 7}
+
+        with patch.object(core_service, "_vision_backend", return_value=Fake()):
+            response = self.post()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"reply": {"id": "C1", "score": 7}})
+        self.assertEqual(seen["images"], [("[C1] L21_V001 t=1.0s", b"jpeg")])
+        self.assertEqual(seen["job"], "verify")
+        # The wire name is `schema`; the model attribute has to avoid the BaseModel
+        # method of that name.
+        self.assertEqual(seen["schema"]["type"], "object")
+
+    def test_an_unreadable_image_is_rejected_before_the_model_is_touched(self):
+        with patch.object(core_service, "_vision_backend") as backend:
+            response = self.post(images=[{"label": "[C1]", "b64": "not base64!!"}])
+
+        self.assertEqual(response.status_code, 422)
+        backend.assert_not_called()
+
+    def test_an_empty_image_list_is_rejected(self):
+        self.assertEqual(self.post(images=[]).status_code, 422)
+
+    def test_a_model_failure_is_reported_as_503_not_500(self):
+        # The caller treats 503 as a degraded job and keeps its other candidates.
+        from agent.vlm import VLMError
+
+        class Broken:
+            def judge(self, *_, **__):
+                raise VLMError("local vision backend disabled after a failure")
+
+        with patch.object(core_service, "_vision_backend", return_value=Broken()):
+            response = self.post()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("disabled", response.json()["detail"])
+
+    def test_the_backend_is_built_once_and_reused(self):
+        class Fake:
+            def judge(self, *_, **__):
+                return {"ok": True}
+
+        with (
+            patch("agent.vlm.LocalVLM") as constructor,
+            patch.object(core_service, "_vision", None),
+        ):
+            constructor.return_value = Fake()
+            self.post()
+            self.post()
+
+        self.assertEqual(constructor.call_count, 1, "a reload per call would dominate the query budget")
 
 
 if __name__ == "__main__":

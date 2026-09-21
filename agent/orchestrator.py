@@ -71,6 +71,11 @@ class AgentOptions:
         One Gemini call takes ~4 s whether it judges 2 or 8 frames, so fast mode
         splits work into more, smaller calls run side by side instead of fewer
         large ones run in turn.
+
+        `verify_chunk` is therefore a *network* knob and does nothing for
+        `AIC_AGENT_VISION=local`: a local backend fans a chunk out into one call per
+        frame and holds a lock across them, so the work is serial whatever this is
+        set to. Retuning it will not make the local path faster.
         """
         defaults = FAST_DEFAULTS if mode in ("fast", "auto") else {}
         return cls(mode=mode, **{**defaults, **overrides})
@@ -194,12 +199,18 @@ FINISH_TOOL = next(tool for tool in TOOLS if tool["function"]["name"] == "finish
 
 class Agent:
     def __init__(self, deepseek, gemini, search, options: AgentOptions | None = None,
-                 clock=time.monotonic):
+                 clock=time.monotonic, vision=None):
+        # `gemini` is still the web-search client whatever `vision` is: Google
+        # Search grounding has no local equivalent, and the vision backend only
+        # ever sees pixels.
         self.deepseek = deepseek
         self.gemini = gemini
+        self.vision = vision or gemini
         self.search = search
         self.options = options or AgentOptions()
-        self.inspector = Inspector(gemini, search, chunk_size=self.options.verify_chunk)
+        self.inspector = Inspector(
+            self.vision, search, chunk_size=self.options.verify_chunk
+        )
         self.clock = clock
 
     def run(self, task: Task) -> AgentResult:

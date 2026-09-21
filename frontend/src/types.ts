@@ -318,6 +318,9 @@ export interface AgentUsage {
   gemini_calls: number;
   gemini_input: number;
   gemini_output: number;
+  // Judgements made by a local vision backend (AIC_AGENT_VISION=local). No token
+  // counts: the local models do not bill.
+  vlm_calls: number;
 }
 export interface AgentRunResponse {
   run_id: string;

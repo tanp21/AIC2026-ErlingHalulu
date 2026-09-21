@@ -20,6 +20,10 @@ dependencies = [
     "sentence-transformers>=5.0.0",
     "google-genai>=1.0.0",
     "httpx>=0.27",
+    # InternVL-family checkpoints (`5CD-AI/Vintern-1B-v3_5`) import einops from
+    # their own remote code, which transformers executes at load time. Not
+    # pullable via any other pinned package; the Qwen VLMs do not need it.
+    "einops>=0.8.0",
 ]
 
 # The production image deliberately excludes notebooks, TensorFlow, and the
@@ -38,6 +42,7 @@ server = [
     "sentence-transformers>=5.0.0",
     "google-genai>=1.0.0",
     "httpx>=0.27",
+    "einops>=0.8.0",
 ]
 # The retrieval agent also runs in-process behind /api/agent/*, so the server group
 # pins the same packages; this group keeps CLI-only installs (`--group agent`) light.

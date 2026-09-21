@@ -91,6 +91,88 @@ class EsSearchRequest(BaseModel):
     body: dict
 
 
+class VisionImage(BaseModel):
+    label: str = Field(max_length=2000)
+    b64: str
+
+
+class VisionJudgeRequest(BaseModel):
+    """One vision judgement, forwarded from a teammate's app.
+
+    `AIC_VLM_URL` makes `agent/vlm.py` post here instead of loading the model
+    itself, which is how the vision work moves to the host that has the GPU
+    budget — the same arrangement as `/core/encode/text`.
+    """
+
+    prompt: str
+    # `schema` is a reserved name on BaseModel; the wire name is what the agent sends.
+    schema_: dict = Field(alias="schema")
+    images: list[VisionImage] = Field(min_length=1)
+    model: str | None = None
+    job: str | None = None
+    # The original Vietnamese query. The remote backend rebuilds its prompt from
+    # this the same way it would in-process; without it a forwarded call would be
+    # judged with the long English prompt a small model cannot follow. A list for
+    # `sequence`, where each frame is scored against its own event.
+    query: str | list[str] | None = None
+    scenes: str = ""
+    question: str | None = None
+    max_output_tokens: int = Field(default=8192, ge=1, le=16384)
+
+    model_config = {"populate_by_name": True}
+
+
+#: Loaded on first use and kept: a run makes dozens of judge calls and reloading a
+#: 1-3B checkpoint per call would dominate the query budget.
+_vision = None
+_vision_lock = threading.Lock()
+
+
+def _vision_backend(requested: str | None = None):
+    """The one model this process serves, loaded on first use.
+
+    `requested` is what a caller asked for. It cannot be honoured after the fact —
+    the backend is process-global and cached for the process lifetime, because
+    reloading a 1-3 GB checkpoint per request would dominate the query budget — so
+    a mismatch is refused rather than silently answered by a different model.
+    """
+    global _vision
+    with _vision_lock:
+        if _vision is None:
+            from agent.vlm import LocalVLM, spec
+
+            chosen = os.environ.get("AIC_VLM_MODEL")
+            _vision = LocalVLM(spec(chosen) if chosen else None)
+        loaded = getattr(getattr(_vision, "spec", None), "name", None)
+    if requested and loaded and requested not in (loaded, loaded.replace("/", "--")):
+        raise HTTPException(409, f"this host serves {loaded}, not {requested}")
+    return _vision
+
+
+def vision_judge_endpoint(req: VisionJudgeRequest):
+    import base64
+
+    from agent.vlm import VLMError
+
+    images = []
+    for item in req.images:
+        try:
+            images.append((item.label, base64.b64decode(item.b64, validate=True)))
+        except Exception as exc:
+            raise HTTPException(422, f"image {item.label!r} is not valid base64") from exc
+    try:
+        with _compute_slot():
+            reply = _vision_backend(req.model).judge(
+                images, req.prompt, req.schema_, job=req.job, query=req.query,
+                scenes=req.scenes, question=req.question,
+                max_output_tokens=req.max_output_tokens,
+            )
+    except VLMError as exc:
+        # 503, not 500: the caller treats this as a degraded job, not a bug.
+        raise HTTPException(503, str(exc)) from exc
+    return {"reply": reply}
+
+
 def healthz():
     return {
         "status": "ok",
@@ -245,6 +327,7 @@ CORE_ROUTES = (
     ("/core/frame/annotate", annotate_endpoint, ["POST"]),
     ("/core/audio/flat-search", audio_flat_endpoint, ["POST"]),
     ("/core/es/search", es_search_endpoint, ["POST"]),
+    ("/core/vision/judge", vision_judge_endpoint, ["POST"]),
 )
 
 

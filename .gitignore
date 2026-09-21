@@ -35,6 +35,13 @@ htmlcov/
 /artifacts/
 *.log
 
+# Transient files `bench_agent_vision`'s result writer leaves in benchmarks/visual/:
+# an flock target for concurrent sweeps (a full sweep is hours long, and the local
+# arms need the GPU while the remote ones only need the network), and the temp file
+# it renames into place so a crash mid-write cannot truncate the results.
+*.json.tmp
+benchmarks/visual/*.lock
+
 .DS_Store
 Thumbs.db
 .idea/

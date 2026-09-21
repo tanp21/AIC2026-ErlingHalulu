@@ -99,6 +99,38 @@ The cached search snapshot expired or was replaced by a newer successful query. 
 
 Set `AUDIO_EMBED_DEVICE=cpu` if PE-Core and Qwen cannot fit simultaneously. This lowers VRAM use but increases warm audio-query latency.
 
+With `AIC_AGENT_VISION=local` there is a third model on the same card, and it only
+loads when an agent run starts judging. In order of preference:
+
+1. `AIC_AGENT_VISION=gemini` — back to the baseline; no local weights at all.
+2. `AIC_VLM_URL=http://<other-host>:8000` — keep local vision but move it off this
+   GPU. This is what the mode is for.
+3. `AIC_VLM_MODEL=<a smaller candidate>` — see the table in
+   [the agent docs](agent.md#local-vision). `Qwen2.5-VL-3B` does load beside the
+   server's own models — it ran a full 91-case sweep with the container up — but
+   its 7.3 GB leaves under 0.5 GB of the 12 GB card (`nvidia-smi` reads ~4.2 GB
+   for the server's own models, so 4.2 + 7.3 against 12.0), which is one
+   allocation away from the failure this list exists to fix. Prefer
+   `Qwen3-VL-2B` (4.1 GB),
+   which is also the more accurate of the two.
+4. `AIC_VLM_DEVICE=cpu` — last resort. A 2B model on CPU costs seconds per frame
+   and only makes sense in `--mode deep`.
+
+A model that runs out of memory mid-run disables itself after one retry rather
+than retrying every candidate; the run finishes with unverified candidates, which
+the agent already handles, and logs one line.
+
+The weights themselves are not fetched at run time — the container is offline and
+read-only. Materialise them on the dev machine first:
+
+```bash
+uv run python -m scripts.vlm.fetch_models --list   # what is present, and where
+uv run python -m scripts.vlm.fetch_models          # downloads anything missing
+```
+
+`AIC_VLM_DIR` must be exported for `docker compose` the same way `AIC_HF_HUB_DIR`
+is; compose refuses to start without it.
+
 ## Emergency access shutdown
 
 Run this in elevated Windows PowerShell to immediately block ingress while leaving the local containers running:

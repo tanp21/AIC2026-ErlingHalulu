@@ -7,6 +7,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+#: The settings that describe *this deployment's* vision backend rather than one
+#: run. A server-hosted run has to inherit them: the GPU is on the server, so a
+#: teammate's browser cannot choose the backend, and the keys they paste are their
+#: own model credentials, not a statement about where the vision work happens.
+VISION_ENV = (
+    "AIC_AGENT_VISION", "AIC_VLM_URL", "AIC_VLM_MODEL", "AIC_VLM_DIR",
+    "AIC_VLM_DEVICE", "AIC_VLM_MAX_NEW_TOKENS", "AIC_VLM_IMAGE_SIDE",
+    "AIC_VLM_ANSWER_SIDE", "AIC_VLM_MAX_TILES", "AIC_AGENT_CAPTIONS",
+)
+
+
+def deployment_vision() -> str:
+    """Which vision backend this process was deployed with."""
+    return os.environ.get("AIC_AGENT_VISION", "gemini").strip().lower() or "gemini"
+
 
 def read_dotenv(path: Path) -> dict[str, str]:
     """`KEY=value` lines only; comments, blanks and malformed lines are skipped."""
@@ -51,6 +66,24 @@ class AgentSettings:
     spoken_numbers: bool = False
     # auto | batch | compat -- see SearchClient.
     search_api: str = "auto"
+    # gemini | local | deepseek -- which backend does the five vision jobs (see
+    # agent.vlm). `gemini` stays the default: it is the measured baseline, and it is
+    # what a run falls back to if a local model turns out not to hold up. `deepseek`
+    # is the same shape as gemini — a remote API — and exists because it may judge
+    # more accurately, not because it helps with a congested uplink.
+    vision: str = "gemini"
+    # Only read when vision == "local". Set it to run the model in another process
+    # or on another host, exactly as AIC_CORE_URL splits backend/search_core.
+    vlm_url: str | None = None
+    vlm_model: str | None = None
+    vlm_device: str | None = None
+    vlm_max_new_tokens: int = 128
+    vlm_image_side: int = 448
+    vlm_answer_side: int = 1280
+    vlm_max_tiles: int = 6
+    # Read the CapRL shot caption into each candidate's label. Ignored by Gemini,
+    # which looks at the frame itself; it is the local models that benefit.
+    captions: bool = True
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None, dotenv: Path = ROOT / ".env"):
@@ -62,6 +95,15 @@ class AgentSettings:
                 raise RuntimeError(f"{name} is not set (environment or {dotenv.name})")
             return value
 
+        def integer(name, default):
+            raw = merged.get(name, "").strip()
+            return int(raw) if raw else default
+
+        vision = merged.get("AIC_AGENT_VISION", "gemini").strip().lower()
+        if vision not in ("gemini", "local", "deepseek"):
+            raise RuntimeError(
+                f"AIC_AGENT_VISION must be 'gemini', 'local' or 'deepseek', not {vision!r}")
+
         return cls(
             server_url=merged.get("AIC_AGENT_URL", "http://127.0.0.1:8000").rstrip("/"),
             server_user=merged.get("AIC_AGENT_USER") or None,
@@ -72,9 +114,21 @@ class AgentSettings:
             deepseek_base_url=merged.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/"),
             deepseek_thinking=merged.get("DEEPSEEK_THINKING", "enabled").lower() != "disabled",
             deepseek_plan_thinking=merged.get("DEEPSEEK_PLAN_THINKING", "disabled").lower() == "enabled",
-            gemini_api_key=required("GEMINI_API_KEY"),
+            # Optional when the vision backend is local: an offline competition day
+            # has no Gemini anyway, and only the web lookup goes without.
+            gemini_api_key=(required("GEMINI_API_KEY") if vision == "gemini"
+                            else merged.get("GEMINI_API_KEY", "").strip()),
             gemini_model=merged.get("GEMINI_MODEL", "gemini-3.8-flash"),
             gemini_thinking_level=merged.get("GEMINI_THINKING_LEVEL", "low"),
             spoken_numbers=merged.get("AIC_AGENT_SPOKEN_NUMBERS", "0").lower() in ("1", "true", "yes"),
             search_api=merged.get("AIC_AGENT_SEARCH_API", "auto"),
+            vision=vision,
+            vlm_url=(merged.get("AIC_VLM_URL") or "").rstrip("/") or None,
+            vlm_model=merged.get("AIC_VLM_MODEL") or None,
+            vlm_device=merged.get("AIC_VLM_DEVICE") or None,
+            vlm_max_new_tokens=integer("AIC_VLM_MAX_NEW_TOKENS", 128),
+            vlm_image_side=integer("AIC_VLM_IMAGE_SIDE", 448),
+            vlm_answer_side=integer("AIC_VLM_ANSWER_SIDE", 1280),
+            vlm_max_tiles=integer("AIC_VLM_MAX_TILES", 6),
+            captions=merged.get("AIC_AGENT_CAPTIONS", "1").lower() not in ("0", "false", "no"),
         )

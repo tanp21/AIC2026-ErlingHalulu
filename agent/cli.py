@@ -12,13 +12,14 @@ import time
 
 from .config import ROOT, AgentSettings
 from .evaluate import DEFAULT_TOLERANCE, score_result, summarize
-from .llm import DeepSeekClient, GeminiClient, Usage
+from .llm import DeepSeekClient, GeminiClient, OfflineGemini, Usage
 from .orchestrator import Agent, AgentOptions
 from .plan import analysis_messages, initial_queries, parse_plan
 from .report import render
 from .search_client import SearchClient
 from .submission import result_rows, to_csv, write_submission
 from .tasks import load_answers, load_tasks, task_from_text
+from .vlm import build_vision
 
 DEFAULT_OUT = ROOT / "artifacts" / "agent"
 
@@ -33,13 +34,22 @@ def build_agent(settings, options):
         thinking=settings.deepseek_thinking, usage=usage,
         **({"timeout": 30.0, "retries": 2} if fast else {}),
     )
-    gemini = GeminiClient(
-        settings.gemini_api_key, settings.gemini_model,
-        thinking_level=settings.gemini_thinking_level, usage=usage,
-        **({"timeout": 40.0, "retries": 2, "max_backoff": 4.0, "hedge_after": 8.0} if fast else {}),
-    )
+    # Gemini is still needed for the web lookup whatever `vision` is, but with a
+    # local vision backend it stops being required to start a run.
+    if settings.gemini_api_key:
+        gemini = GeminiClient(
+            settings.gemini_api_key, settings.gemini_model,
+            thinking_level=settings.gemini_thinking_level, usage=usage,
+            **({"timeout": 40.0, "retries": 2, "max_backoff": 4.0, "hedge_after": 8.0} if fast else {}),
+        )
+    else:
+        gemini = OfflineGemini()
+    # Pass the tuned client through: rebuilding it inside `build_vision` would judge
+    # with untuned timeouts and no hedging while the web lookup kept them.
+    vision = build_vision(settings, usage=usage,
+                          gemini=gemini if settings.gemini_api_key else None)
     search = SearchClient.from_settings(settings)
-    return Agent(deepseek, gemini, search, options), usage
+    return Agent(deepseek, gemini, search, options, vision=vision), usage
 
 
 def options_from(args, settings):
@@ -85,6 +95,18 @@ def command_check(args, settings):
                               settings.deepseek_base_url, thinking=False)
     reply = deepseek.chat([{"role": "user", "content": "Reply with the single word: ok"}], max_tokens=10)
     print(f"deepseek {settings.deepseek_model}: {reply.get('content')!r}")
+    # Which backend a run would actually judge with is the thing AIC_AGENT_VISION
+    # changes, so report it rather than assuming Gemini. Built but not loaded: the
+    # local model is lazy and this command must work before the weights are on disk.
+    try:
+        vision = build_vision(settings)
+        detail = getattr(getattr(vision, "spec", None), "name", "") or type(vision).__name__
+        print(f"vision {settings.vision}: {detail}")
+    except Exception as exc:
+        print(f"vision {settings.vision}: UNAVAILABLE ({exc})")
+    if not settings.gemini_api_key:
+        print("gemini: no GEMINI_API_KEY, so the web lookup is unavailable")
+        return
     gemini = GeminiClient(settings.gemini_api_key, settings.gemini_model,
                           thinking_level=settings.gemini_thinking_level)
     grounded = gemini.web_search("Thủ đô của Việt Nam là gì? Trả lời một từ.")

@@ -23,13 +23,22 @@ class LLMError(RuntimeError):
 
 @dataclass
 class Usage:
-    """Running token totals for one agent run, shared across threads."""
+    """Running token totals for one agent run, shared across threads.
+
+    Every counter a backend may `add()` has to be declared here: `add` resolves
+    each name with `getattr`, so an undeclared one raises rather than being
+    silently dropped — which is how `vlm_calls` was caught missing.
+    """
     deepseek_input: int = 0
     deepseek_output: int = 0
     gemini_input: int = 0
     gemini_output: int = 0
     gemini_calls: int = 0
     deepseek_calls: int = 0
+    #: Judgements made by a local or forwarded vision backend. Token counts are not
+    #: reported: the local models do not bill, and the HTTP backend would have to
+    #: round-trip its own usage for it to mean anything.
+    vlm_calls: int = 0
 
     def __post_init__(self):
         self._lock = threading.Lock()
@@ -42,7 +51,7 @@ class Usage:
     def as_dict(self):
         return {name: getattr(self, name) for name in (
             "deepseek_calls", "deepseek_input", "deepseek_output",
-            "gemini_calls", "gemini_input", "gemini_output",
+            "gemini_calls", "gemini_input", "gemini_output", "vlm_calls",
         )}
 
 
@@ -133,12 +142,73 @@ class DeepSeekClient:
         except (json.JSONDecodeError, ValueError) as exc:
             raise LLMError(f"deepseek returned invalid JSON: {message.get('content', '')[:300]}") from exc
 
+    def judge(self, images: list[tuple[str, bytes]], prompt: str, schema: dict,
+              *, max_output_tokens=8192, job=None, query=None, scenes="", question=None):
+        """Labelled JPEGs + instructions -> JSON matching `schema`.
+
+        The same contract as `GeminiClient.judge`, so the five jobs in
+        `agent.vision` run unchanged against DeepSeek (`AIC_AGENT_VISION=deepseek`).
+        Vision is not documented for this API, but the OpenAI-compatible endpoint
+        accepts `image_url` parts and answers correctly; whether it is accurate
+        enough to rely on is measured, not assumed —
+        `scripts/benchmarks/bench_agent_vision.py` scores it on the same pool as
+        Gemini and the local models.
+
+        Thinking is off: a 0-10 score is a bounded judgement, and this model
+        otherwise spends its whole output budget on `reasoning_content` and returns
+        an empty `content`.
+        """
+        import base64
+
+        from .vlm import format_instruction
+
+        content: list = []
+        for label, data in images:
+            content.append({"type": "text", "text": label})
+            content.append({"type": "image_url", "image_url": {
+                "url": "data:image/jpeg;base64," + base64.b64encode(data).decode(),
+            }})
+        content.append({"type": "text", "text": prompt + "\n\n" + format_instruction(schema)})
+        message = self.chat([{"role": "user", "content": content}], json_mode=True,
+                            max_tokens=max_output_tokens, thinking=False)
+        text = message.get("content") or ""
+        if not text.strip():
+            # `deepseek-v4-pro` does not read images: it answers a vision call with an
+            # empty `content`, or with schema-shaped JSON whose every score is 0. Both
+            # look like a judge that works and scores badly, so say what actually
+            # happened instead.
+            raise LLMError(
+                f"{self.model} returned no content for a vision request; it may not "
+                f"support image input"
+            )
+        try:
+            return parse_json(text)
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise LLMError(f"deepseek returned invalid JSON: {text[:300]}") from exc
+
 
 @dataclass(frozen=True)
 class GroundedAnswer:
     text: str
     sources: tuple[tuple[str, str], ...]
     queries: tuple[str, ...]
+
+
+class OfflineGemini:
+    """Stands in for Gemini when the run has no API key.
+
+    With ``AIC_AGENT_VISION=local`` nothing in the five vision jobs needs Gemini —
+    but the web lookup still does, and refusing to start over a missing key would
+    make the offline path unusable on the day it exists for. `web_search` raises
+    the same `LLMError` a failing call would, which `_lookup` already turns into a
+    note on the ranking rather than a failed query.
+    """
+
+    def web_search(self, question: str) -> GroundedAnswer:
+        raise LLMError("GEMINI_API_KEY is not set; web lookup is unavailable")
+
+    def judge(self, images, prompt, schema, **_):
+        raise LLMError("GEMINI_API_KEY is not set and the vision backend is not Gemini")
 
 
 class GeminiClient:
@@ -204,11 +274,14 @@ class GeminiClient:
         raise AssertionError("unreachable")
 
     def judge(self, images: list[tuple[str, bytes]], prompt: str, schema: dict,
-              *, max_output_tokens=8192):
+              *, max_output_tokens=8192, job=None, query=None, scenes="", question=None):
         """Labelled JPEGs + instructions -> JSON matching `schema`.
 
         Each label is emitted as text right before its image so the model can refer
-        to candidates by id.
+        to candidates by id. `job`, `query`, `scenes` and `question` name the vision
+        job and the original Vietnamese inputs; Gemini needs none of them because the
+        prompt it is given is already complete — they are what the local backends
+        rebuild a prompt they can follow from.
         """
         from google.genai import types
 

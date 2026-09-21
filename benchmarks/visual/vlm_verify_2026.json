@@ -1,0 +1,107 @@
+{
+  "source": "scripts/benchmarks/bench_agent_vision.py",
+  "metric": "separation AUC of 0-10 verdicts, gold vs non-gold, same pool per model",
+  "tolerance_frames": 250,
+  "top_k": 20,
+  "cases": 137,
+  "usable_cases": 91,
+  "models": {
+    "5CD-AI/Vintern-1B-v3_5": {
+      "cases": 91,
+      "cases_with_both_classes": 90,
+      "separation_auc": 0.6047,
+      "top1_gold_rate": 0.5,
+      "answer_rate": 0.9989,
+      "seconds_mean": 21.45,
+      "seconds_p95": 26.02,
+      "peak_vram_mb": 2040.2900390625,
+      "device": "cuda",
+      "errors": 1,
+      "prompt_language": "vi"
+    },
+    "Qwen/Qwen3-VL-2B-Instruct": {
+      "cases": 91,
+      "cases_with_both_classes": 91,
+      "separation_auc": 0.6624,
+      "top1_gold_rate": 0.5055,
+      "answer_rate": 1.0,
+      "seconds_mean": 28.76,
+      "seconds_p95": 31.65,
+      "peak_vram_mb": 4127.77587890625,
+      "device": "cuda",
+      "errors": 0,
+      "prompt_language": "vi"
+    },
+    "Qwen/Qwen2.5-VL-3B-Instruct": {
+      "cases": 91,
+      "cases_with_both_classes": 88,
+      "separation_auc": 0.5815,
+      "top1_gold_rate": 0.5,
+      "answer_rate": 0.9972,
+      "seconds_mean": 25.39,
+      "seconds_p95": 27.08,
+      "peak_vram_mb": 7334.91455078125,
+      "device": "cuda",
+      "errors": 3,
+      "prompt_language": "vi"
+    },
+    "gemini": {
+      "cases": 91,
+      "cases_with_both_classes": 91,
+      "separation_auc": 0.8091,
+      "top1_gold_rate": 0.6813,
+      "answer_rate": 1.0,
+      "seconds_mean": 6.92,
+      "seconds_p95": 10.6,
+      "peak_vram_mb": null,
+      "device": "remote",
+      "errors": 0,
+      "prompt_language": null,
+      "captions": 0
+    },
+    "deepseek:deepseek-flash": {
+      "cases": 91,
+      "cases_with_both_classes": 91,
+      "separation_auc": 0.7037,
+      "top1_gold_rate": 0.5714,
+      "answer_rate": 1.0,
+      "seconds_mean": 4.19,
+      "seconds_p95": 5.14,
+      "peak_vram_mb": null,
+      "device": "remote",
+      "errors": 0,
+      "prompt_language": null,
+      "captions": 0
+    },
+    "deepseek:deepseek-v4-pro": {
+      "excluded": true,
+      "reason": "Does not read images: empty content, or schema-shaped JSON with every score 0. bench_agent_vision now probes any remote judge with a solid-colour image before scoring it."
+    },
+    "gemini:gemini-flash-lite-latest": {
+      "cases": 91,
+      "cases_with_both_classes": 91,
+      "separation_auc": 0.7456,
+      "top1_gold_rate": 0.6044,
+      "answer_rate": 0.9995,
+      "seconds_mean": 7.65,
+      "seconds_p95": 9.73,
+      "peak_vram_mb": null,
+      "device": "remote",
+      "errors": 0,
+      "prompt_language": null
+    },
+    "Qwen/Qwen3-VL-2B-Instruct [en]": {
+      "cases": 91,
+      "cases_with_both_classes": 91,
+      "separation_auc": 0.6498,
+      "top1_gold_rate": 0.5275,
+      "answer_rate": 1.0,
+      "seconds_mean": 27.19,
+      "seconds_p95": 28.34,
+      "peak_vram_mb": 4126.7470703125,
+      "device": "cuda",
+      "errors": 0,
+      "prompt_language": "en"
+    }
+  }
+}

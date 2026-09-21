@@ -228,5 +228,114 @@ class GeminiTests(unittest.TestCase):
         self.assertEqual(answer.queries, ("jaws 1975",))
 
 
+class CaptionFetchTests(unittest.TestCase):
+    def test_captions_come_back_keyed_by_frame_index(self):
+        client = search_client(lambda request: httpx.Response(200, json={
+            "video_id": "L21_V001", "available": True,
+            "captions": {"100": {"caption": "A red boat.", "shot_index": 3}},
+        }))
+        self.assertEqual(client.captions("L21_V001", [100]),
+                         {100: {"caption": "A red boat.", "shot_index": 3}})
+
+    def test_a_video_without_captions_returns_empty_rather_than_raising(self):
+        # Every 2025 K* video. The route answers available:false so this must not
+        # look like the route is missing.
+        client = search_client(lambda request: httpx.Response(200, json={
+            "video_id": "K01_V001", "available": False, "captions": {}}))
+        self.assertEqual(client.captions("K01_V001", [10, 20]), {})
+
+    def test_a_server_without_the_route_is_asked_exactly_once_per_run(self):
+        paths = []
+
+        def handler(request):
+            paths.append(request.url.path)
+            return httpx.Response(404, json={"detail": "not found"})
+
+        client = search_client(handler)
+        self.assertEqual(client.captions("L21_V001", [100]), {})
+        self.assertEqual(client.captions("L21_V002", [200]), {})
+        self.assertEqual(len(paths), 1, "the latch should stop the second request")
+
+    def test_no_frames_means_no_request_at_all(self):
+        def handler(request):
+            raise AssertionError("a caption request should not be made")
+
+        self.assertEqual(search_client(handler).captions("L21_V001", []), {})
+
+    def test_captions_can_be_turned_off_entirely(self):
+        # AIC_AGENT_CAPTIONS=0 has to stop the request, not just discard the answer.
+        def handler(request):
+            raise AssertionError("a disabled caption lookup should not reach the server")
+
+        self.assertEqual(search_client(handler, captions=False).captions("L21_V001", [1]), {})
+
+    def test_the_setting_reaches_the_client(self):
+        from types import SimpleNamespace
+
+        settings = SimpleNamespace(server_url="http://server", server_user=None,
+                                   server_password=None, trusted_user=None,
+                                   search_api="batch", captions=False)
+        self.assertEqual(SearchClient.from_settings(settings).captions("L21_V001", [1]), {})
+
+    def test_a_malformed_frame_key_is_skipped(self):
+        client = search_client(lambda request: httpx.Response(200, json={
+            "video_id": "L21_V001", "available": True,
+            "captions": {"100": {"caption": "ok"}, "not-a-frame": {"caption": "x"}},
+        }))
+        self.assertEqual(list(client.captions("L21_V001", [100])), [100])
+
+
+class DeepSeekVisionTests(unittest.TestCase):
+    """`DeepSeekClient.judge` — DeepSeek used as a vision backend.
+
+    Only some of its models read images. `deepseek-v4-pro` answers a vision call
+    with an empty `content`, and the schema-shaped zeros it can return instead look
+    like a working judge scoring badly, so the empty reply has to be an error.
+    """
+
+    def client(self, content, *, status=200, model="deepseek-flash"):
+        def handler(request):
+            return httpx.Response(status, json={
+                "choices": [{"message": {"role": "assistant", "content": content}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            })
+
+        http = httpx.Client(base_url="https://api.deepseek.com",
+                            transport=httpx.MockTransport(handler))
+        return DeepSeekClient("k", model, http=http, sleep=lambda _: None)
+
+    def test_a_vision_call_sends_the_image_and_parses_the_reply(self):
+        seen = {}
+
+        def handler(request):
+            seen.update(json.loads(request.content))
+            return httpx.Response(200, json={
+                "choices": [{"message": {"content": '{"candidates": [{"id": "C1", "score": 7}]}'}}],
+                "usage": {},
+            })
+
+        http = httpx.Client(base_url="https://api.deepseek.com",
+                            transport=httpx.MockTransport(handler))
+        reply = DeepSeekClient("k", "deepseek-flash", http=http, sleep=lambda _: None).judge(
+            [("[C1] L21_V001 t=1.0s", b"jpeg")], "prompt",
+            {"type": "object", "properties": {"candidates": {}}})
+        self.assertEqual(reply["candidates"][0]["score"], 7)
+        parts = seen["messages"][0]["content"]
+        self.assertEqual(parts[0]["text"], "[C1] L21_V001 t=1.0s")
+        self.assertTrue(parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
+
+    def test_an_empty_reply_is_an_error_not_a_zero_score(self):
+        with self.assertRaisesRegex(LLMError, "may not support image input"):
+            self.client("").judge([("x", b"jpeg")], "p", {})
+
+    def test_a_whitespace_reply_is_also_an_error(self):
+        with self.assertRaisesRegex(LLMError, "may not support image input"):
+            self.client("   \n  ").judge([("x", b"jpeg")], "p", {})
+
+    def test_invalid_json_surfaces_as_an_llm_error(self):
+        with self.assertRaisesRegex(LLMError, "invalid JSON"):
+            self.client("not json at all").judge([("x", b"jpeg")], "p", {})
+
+
 if __name__ == "__main__":
     unittest.main()

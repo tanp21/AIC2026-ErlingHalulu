@@ -56,6 +56,15 @@ class RuntimeMountTests(unittest.TestCase):
         self.assertIn("AIC_AGENT_OUT_DIR: /workspace/agent", compose)
         self.assertIn("backend/agent_runner.py", dockerfile)
 
+    def test_local_vlm_snapshots_have_a_read_only_mount(self):
+        """A local vision backend loads weights from a materialised directory, not
+        the blob cache, and the container is offline — so the mount is the only way
+        it sees them."""
+        compose = (ROOT / "compose.yaml").read_text()
+        self.assertIn("AIC_VLM_DIR: /models/vlm", compose)
+        self.assertIn(":/models/vlm:ro", compose)
+        self.assertIn("AIC_VLM_DIR:?Set AIC_VLM_DIR", compose)
+
     def test_agent_runs_have_an_egress_network(self):
         compose = (ROOT / "compose.yaml").read_text()
         app = compose.split("  app:\n", 1)[1].split("  ingress:\n", 1)[0]

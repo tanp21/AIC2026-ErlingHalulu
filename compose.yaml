@@ -35,6 +35,7 @@ services:
       AIC_COLLAB_DB: /workspace/aic-collab.sqlite3
       AIC_SHOT_LABEL_DIR: /labels
       AIC_AGENT_OUT_DIR: /workspace/agent
+      AIC_VLM_DIR: /models/vlm
       ELASTICSEARCH_URL: http://elasticsearch:9200
       HF_HOME: /models
       HF_HUB_CACHE: /models/hub
@@ -49,6 +50,9 @@ services:
       - ./data:/data:ro
       - ./indexes:/indexes:ro
       - ${AIC_HF_HUB_DIR:?Set AIC_HF_HUB_DIR to the host Hugging Face hub directory}:/models/hub:ro
+      # Materialised VLM snapshots for AIC_AGENT_VISION=local. Real files, not the
+      # blob cache: InternVL's remote code resolves modules relative to __file__.
+      - ${AIC_VLM_DIR:?Set AIC_VLM_DIR to the host directory holding the local VLM snapshots}:/models/vlm:ro
       - ./.thumb_cache:/cache
       - collab-data:/workspace
       - type: bind

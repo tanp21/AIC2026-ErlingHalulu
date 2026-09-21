@@ -41,7 +41,7 @@ export AIC_ADMIN_USER=owner@example.com
 uv run uvicorn backend.app:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-Full stack (production path): `export AIC_UID=$(id -u) AIC_GID=$(id -g) AIC_HF_HUB_DIR="$HOME/.cache/huggingface/hub"` then `docker compose up -d --build --wait`.
+Full stack (production path): `export AIC_UID=$(id -u) AIC_GID=$(id -g) AIC_HF_HUB_DIR="$HOME/.cache/huggingface/hub" AIC_VLM_DIR="$HOME/.cache/aic/vlm"` then `docker compose up -d --build --wait`.
 
 Offline tooling runs as modules, never as file paths:
 
@@ -52,6 +52,11 @@ uv run python -m scripts.indexing.build_ocr_index --help      # populates the OC
 uv run python -m scripts.indexing.build_frame_maps --help     # creates indexes/frame_maps/*.npz
 uv run python -m scripts.extraction.detect_shots --help       # creates data/<year>/shots/*.json
 uv run python -m scripts.embedding.embed_keyframes --help
+
+# Local VLM snapshots for AIC_AGENT_VISION=local (needs the network; the container
+# is offline and read-only, so this runs here and the result is mounted in)
+uv run python -m scripts.vlm.fetch_models --help              # creates ~/.cache/aic/vlm/*
+uv run python -m scripts.benchmarks.bench_agent_vision --help # measures candidates on the agent's own job
 ```
 
 The retrieval agent is an HTTP client of the server. The team runs it from the **Retrieval agent** UI tab (server-side, keys pasted per run); as a CLI it runs on a laptop (`uv sync --group agent`, keys in that machine's `.env`; see `docs/agent.md`):
@@ -98,10 +103,16 @@ Hybrid degrades gracefully: if the audio branch raises, the visual results are r
   offline by `scripts.extraction.detect_shots`; the 2026 dataset has none until that runs. Also
   owns `media_catalogue()`, the on-disk video scan that `backend.app.resolve()` falls back to — this is
   why every media route serves the 2025 `K*` videos that no embedding profile covers. See
-  `docs/clip-export.md` for the shot-dashboard/clip-export UI this backs.
+  `docs/clip-export.md` for the shot-dashboard/clip-export UI this backs. Also serves the CapRL shot
+  captions (`caption_for_frame`, `GET /captions/{video_id}`) that the retrieval agent reads as text
+  context. Read one video's `data/2026/captions/parts/<group>/<id>.parquet` at a time behind an LRU:
+  the corpus-wide `shot_captions.parquet` is a single row group, so filtering it does not help and it
+  costs ~5 s and ~900 MB resident. Only 2026 was captioned; `K*` videos answer `available: false`.
 - `backend/shot_labels.py` — reviewer-facing shot exclusions (`intro`/`preview`/`presenter`/`outro`/`other`), stored one JSON-per-video under `artifacts/shot-labels/` and served through `PATCH /shots/{video_id}/labels`. Optimistic concurrency via a `revision` counter; a `shots_digest` hash ties a label document to the exact shot boundaries it was made against, so re-detecting shots invalidates stale labels (`LabelConflict`) instead of silently mislabeling. `scripts/indexing/suggest_shot_exclusions.py` pre-populates suggestions for a reviewer to confirm — see `docs/shot-exclusions.md`. This excludes shots from the visual index without touching their embeddings or the transcript/OCR indexes.
 - `backend/frame_maps.py` — PTS arrays per video; the source of truth for frame ↔ time.
-- `agent/` — the LLM retrieval agent (`python -m agent` and the UI's server-hosted runs). DeepSeek plans and drives tools, Gemini verifies keyframes and does Google-Search lookups; it talks to the server only through `POST /agent/search` (a parallel multi-channel batch in `backend/app.py`, run under the coordinator identity `<login>#agent` so it never supersedes the human's own searches) plus the `/thumb`, `/frame`, `/context` and `/transcript` routes. `agent/pool.py` (moment fusion) and `agent/plan.py` (plan → round-1 batch) are pure and carry most of the logic. See `docs/agent.md`.
+- `agent/` — the LLM retrieval agent (`python -m agent` and the UI's server-hosted runs). DeepSeek plans and drives tools, Gemini verifies keyframes and does Google-Search lookups; it talks to the server only through `POST /agent/search` (a parallel multi-channel batch in `backend/app.py`, run under the coordinator identity `<login>#agent` so it never supersedes the human's own searches) plus the `/thumb`, `/frame`, `/context`, `/captions` and `/transcript` routes. `agent/pool.py` (moment fusion) and `agent/plan.py` (plan → round-1 batch) are pure and carry most of the logic. See `docs/agent.md`.
+- `agent/vlm.py` — the vision backends: `GeminiClient`'s judgement role, or a VLM on this machine (`AIC_AGENT_VISION=local`), in-process or over HTTP (`AIC_VLM_URL`, the same local/remote split as `backend/search_core.py`). All five jobs in `agent/vision.py` reach a model through one `judge()` call, so the backend is swappable without touching them. It renders the response schema back into words (the prompts leave the output shape to Gemini's `response_json_schema`), fans the per-image jobs out one frame per call with a short Vietnamese prompt, and stamps ids from the label rather than trusting the reply. `agent/vlm_models.py` loads the three candidates. Weights are materialised by `scripts/vlm/fetch_models.py` and mounted read-only — the container cannot download them.
+- `scripts/benchmarks/bench_agent_vision.py` — measures candidate local VLMs on the agent's own verification job: one shared candidate pool built from real searches, scored by how well each model's 0-10 verdicts separate gold from non-gold. End-to-end R@1 is deliberately not the metric; the agent's own docs record it varying 40-56% across runs of identical code.
 - `backend/thumb.py` — exact-PTS ffmpeg thumbnail extraction with a bounded semaphore and a size-capped LRU disk cache.
 
 ### Snapshot pagination (not offset pagination)
@@ -151,4 +162,4 @@ Frame ↔ time conversion goes through `backend.frame_maps.FrameMap` (PTS + time
 
 ## Further reading
 
-`docs/getting-started.md` (setup, indexing, local dev) · `docs/audio-search.md` · `docs/temporal-search.md` · `docs/clip-export.md` (per-shot clips for captioning) · `docs/shot-exclusions.md` (reviewer shot labelling) · `docs/caprl-shot-captioning.md` · `docs/agent.md` (retrieval agent) · `docs/team-deployment.md` (direct-IP deployment) · `docs/operations.md` (failure playbook). Methodology write-ups for offline decisions (audio cleaning, OCR engine choice, hybrid fusion tuning) live under `docs/reports/`.
+`docs/getting-started.md` (setup, indexing, local dev) · `docs/audio-search.md` · `docs/temporal-search.md` · `docs/clip-export.md` (per-shot clips for captioning) · `docs/shot-exclusions.md` (reviewer shot labelling) · `docs/caprl-shot-captioning.md` · `docs/agent.md` (retrieval agent) · `docs/team-deployment.md` (direct-IP deployment) · `docs/operations.md` (failure playbook). Methodology write-ups for offline decisions (audio cleaning, OCR engine choice, hybrid fusion tuning, **which vision backend the agent should judge with**) live under `docs/reports/` — the last is `docs/reports/agent-vision-backends-2026.md`.

@@ -30,11 +30,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from agent.cli import save_run
-from agent.config import AgentSettings
-from agent.llm import DeepSeekClient, GeminiClient, Usage
+from agent.config import VISION_ENV, AgentSettings, deployment_vision
+from agent.llm import DeepSeekClient, GeminiClient, OfflineGemini, Usage
 from agent.orchestrator import Agent, AgentOptions
 from agent.search_client import SearchClient
 from agent.tasks import Task, task_from_text
+from agent.vlm import build_vision
 
 from .core import ROOT
 
@@ -58,7 +59,10 @@ class AgentRunReq(BaseModel):
     kind: Literal["kis", "qa", "trake"] = "kis"
     mode: Literal["fast", "auto", "deep"] = "fast"
     deepseek_api_key: str = Field(min_length=1, max_length=512)
-    gemini_api_key: str = Field(min_length=1, max_length=512)
+    # Optional: a deployment on a local vision backend needs no Gemini key, and a
+    # required field here would reject the request before the guard below can allow
+    # it. The frontend still collects both.
+    gemini_api_key: str = Field(default="", max_length=512)
     max_steps: int = Field(default=6, ge=1, le=12)
     time_budget: float | None = Field(default=None, ge=30.0, le=900.0)
     deepseek_model: str | None = Field(default=None, max_length=100)
@@ -150,10 +154,11 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
         settings.deepseek_api_key, settings.deepseek_model, settings.deepseek_base_url,
         thinking=settings.deepseek_thinking, usage=usage,
     )
-    gemini = GeminiClient(
+    gemini = (GeminiClient(
         settings.gemini_api_key, settings.gemini_model,
         thinking_level=settings.gemini_thinking_level, usage=usage,
-    )
+    ) if settings.gemini_api_key else OfflineGemini())
+    vision = build_vision(settings, usage=usage, gemini=gemini if settings.gemini_api_key else None)
     search = SearchClient.from_settings(settings)
     overrides = {
         "max_steps": max_steps,
@@ -163,7 +168,8 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
     if time_budget is not None:
         overrides["time_budget"] = time_budget
     try:
-        agent = Agent(deepseek, gemini, search, AgentOptions.for_mode(mode, **overrides))
+        agent = Agent(deepseek, gemini, search, AgentOptions.for_mode(mode, **overrides),
+                      vision=vision)
         result = agent.run(task).to_dict()
     finally:
         search.close()
@@ -184,6 +190,10 @@ def execute_run(store: AgentRunStore, run: AgentRun, req: AgentRunReq, internal_
             env["DEEPSEEK_MODEL"] = req.deepseek_model
         if req.gemini_model:
             env["GEMINI_MODEL"] = req.gemini_model
+        # The vision backend belongs to the deployment, not to the requester.
+        for name in VISION_ENV:
+            if os.environ.get(name):
+                env[name] = os.environ[name]
         settings = AgentSettings.from_env(env, dotenv=_NO_DOTENV)
         result, usage = run_query(
             run.task, settings, req.mode, req.max_steps, req.time_budget,
@@ -219,8 +229,12 @@ def install_agent_routes(app) -> None:
 
     @app.post("/api/agent/runs")
     async def start_run(req: AgentRunReq, request: Request):
-        if not req.deepseek_api_key.strip() or not req.gemini_api_key.strip():
-            raise HTTPException(422, "both API keys are required")
+        # A Gemini key is only needed when this deployment judges with Gemini. On a
+        # local vision backend a run works without one; the web lookup goes without.
+        if not req.deepseek_api_key.strip():
+            raise HTTPException(422, "a DeepSeek API key is required")
+        if deployment_vision() == "gemini" and not req.gemini_api_key.strip():
+            raise HTTPException(422, "a Gemini API key is required")
         run_id = secrets.token_hex(8)
         task = task_from_text(run_id, req.text, req.kind)
         runs = store(request)

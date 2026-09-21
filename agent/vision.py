@@ -89,7 +89,14 @@ ANSWER_SCHEMA = {
 }
 
 
-def candidate_label(candidate) -> str:
+#: How much of a shot caption reaches a judge. The corpus averages ~3400 characters;
+#: a verify chunk of five candidates would spend ~4k tokens of context on prose that
+#: is only a hint. The head is the right end to keep because the caption describes the
+#: window the frame sits in, and that window is at most 20 s.
+MAX_CAPTION_CHARS = 600
+
+
+def candidate_label(candidate, caption: str | None = None) -> str:
     parts = [f"[{candidate.cid}] {candidate.video_id} t={candidate.time:.1f}s"]
     spoken = next((e.text for e in candidate.evidence.values()
                    if e.kind == "audio" and e.text), None)
@@ -99,6 +106,11 @@ def candidate_label(candidate) -> str:
         parts.append(f'speech nearby: "{spoken[:200]}"')
     if written:
         parts.append(f'on-screen text in this shot: "{written[:150]}"')
+    if caption:
+        # Quoted and disclaimed on purpose: this comes from another model looking at
+        # the same frames, so it can be confidently wrong, and the judge must weight
+        # what it can see over what it is told.
+        parts.append(f'shot caption (auto, may be wrong): "{caption[:MAX_CAPTION_CHARS]}"')
     return " | ".join(parts)
 
 
@@ -111,14 +123,40 @@ def transcript_window(cues, center, seconds=40.0) -> str:
 
 
 class Inspector:
-    def __init__(self, gemini, search, *, chunk_size=8, workers=4, image_width=640):
-        self.gemini = gemini
+    def __init__(self, vision, search, *, chunk_size=8, workers=4, image_width=640,
+                 observer=None):
+        # `vision` is whichever backend `AIC_AGENT_VISION` selected — Gemini, a
+        # local model, or one reached over HTTP. They differ only inside `judge`.
+        self.vision = vision
         self.search = search
         self.chunk_size = chunk_size
         self.image_width = image_width
         self._workers = workers
+        self.observer = observer
         self._images = {}
+        self._captions: dict[tuple[str, int], str] = {}
         self._lock = threading.Lock()
+
+    def _judge(self, job, prompt, schema, images, *, max_output_tokens=8192, query=None,
+               scenes="", question=None):
+        """The one place any of the five jobs reaches a vision model.
+
+        `observer` is for the benchmark harness, which records the exact inputs a
+        real run produced so the same calls can be replayed through other models.
+        It is None in every production path.
+
+        `query` is the original Vietnamese question — or, for `sequence`, one per
+        frame — and `scenes`/`question` are the caller's own renderings of the scene
+        list and the Q&A question. Only the local backends use them, to build a short
+        prompt in place of the long English one Gemini is given.
+        """
+        reply = self.vision.judge(
+            images, prompt, schema, max_output_tokens=max_output_tokens, job=job,
+            query=query, scenes=scenes, question=question,
+        )
+        if self.observer is not None:
+            self.observer(job=job, prompt=prompt, schema=schema, images=images, reply=reply)
+        return reply
 
     def _image(self, video_id, frame_idx, width):
         key = (video_id, int(frame_idx), width)
@@ -143,14 +181,53 @@ class Inspector:
         with ThreadPoolExecutor(self._workers) as pool:
             return list(pool.map(fetch, frames))
 
+    def captions(self, frames) -> dict[tuple[str, int], str]:
+        """Shot captions per `(video, frame)`, for the frames that have one.
+
+        One request per video, so a chunk of five neighbours costs one round trip
+        rather than five. Returns `{}` against a server without the route, and for
+        2025 videos, which were never captioned.
+        """
+        if not getattr(self.search, "captions", None):
+            return {}
+        hits, want = {}, {}
+        for video_id, frame_idx in frames:
+            key = (video_id, int(frame_idx))
+            with self._lock:
+                if key in self._captions:
+                    hits[key] = self._captions[key]
+                    continue
+            want.setdefault(video_id, []).append(int(frame_idx))
+
+        def fetch(item):
+            video_id, indices = item
+            try:
+                return video_id, self.search.captions(video_id, indices)
+            except Exception:  # a caption is context; never let it cost the round
+                return video_id, {}
+
+        with ThreadPoolExecutor(self._workers) as pool:
+            for video_id, found in pool.map(fetch, list(want.items())):
+                for frame_idx, value in (found or {}).items():
+                    text = (value or {}).get("caption") or ""
+                    if text:
+                        hits[(video_id, frame_idx)] = text
+        with self._lock:
+            self._captions.update(hits)
+        return hits
+
     def verify(self, task, plan, candidates, question=None) -> tuple[dict[str, Verdict], list[str]]:
         """Judge candidates in chunks; returns verdicts by id and any chunk errors."""
         if not candidates:
             return {}, []
         question = question or plan.question_vi
+        # Only rendered when there is more than one scene: with one, `pool.py`'s
+        # scene bonus cannot move anything, and asking for the index would spend
+        # tokens on a field nothing reads.
+        scenes = (describe_scenes(plan) + SCENE_RULE) if len(plan.scenes) > 1 else ""
         prompt = VERIFY_PROMPT.format(
             query=task.text,
-            scenes=(describe_scenes(plan) + SCENE_RULE) if len(plan.scenes) > 1 else "",
+            scenes=scenes,
             question=f"Question to answer: {question}\n" if question else "",
             answer_rule=QA_ANSWER_RULE if question else "",
         )
@@ -158,12 +235,16 @@ class Inspector:
                   for i in range(0, len(candidates), self.chunk_size)]
 
         def judge(chunk):
-            data = self.images([(c.video_id, c.frame_idx) for c in chunk])
+            frames = [(c.video_id, c.frame_idx) for c in chunk]
+            data = self.images(frames)
+            captions = self.captions(frames)
             # A candidate without an image stays unverified instead of failing its chunk.
-            labelled = [(candidate_label(c), image) for c, image in zip(chunk, data) if image]
+            labelled = [(candidate_label(c, captions.get((c.video_id, c.frame_idx))), image)
+                        for c, image in zip(chunk, data) if image]
             if not labelled:
                 raise RuntimeError("no candidate image could be fetched")
-            return self.gemini.judge(labelled, prompt, VERIFY_SCHEMA)
+            return self._judge("verify", prompt, VERIFY_SCHEMA, labelled, query=task.text,
+                               scenes=scenes, question=question)
 
         verdicts, errors = {}, []
         known = {candidate.cid for candidate in candidates}
@@ -198,9 +279,9 @@ class Inspector:
         if not labelled:
             return None, 0, "no frame image could be fetched"
         try:
-            reply = self.gemini.judge(
-                labelled, PICK_FRAME_PROMPT.format(query=query, event=event), PICK_SCHEMA,
-                max_output_tokens=4096,
+            reply = self._judge(
+                "pick", PICK_FRAME_PROMPT.format(query=query, event=event), PICK_SCHEMA,
+                labelled, max_output_tokens=4096,
             )
         except LLMError as exc:
             return None, 0, str(exc)
@@ -222,8 +303,8 @@ class Inspector:
             ("[CANDIDATE]" if frame == candidate.frame_idx else f"[frame {frame}]", image)
             for (_, frame), image in zip(frames, data) if image
         ]
-        reply = self.gemini.judge(labelled, FALSIFY_PROMPT.format(query=task.text), FALSIFY_SCHEMA,
-                                  max_output_tokens=4096)
+        reply = self._judge("falsify", FALSIFY_PROMPT.format(query=task.text), FALSIFY_SCHEMA,
+                            labelled, max_output_tokens=4096)
         contradicted = [str(item.get("detail", "")) for item in reply.get("details", [])
                         if item.get("status") == "contradicted"]
         rejected = reply.get("verdict") == "reject" or bool(contradicted)
@@ -244,9 +325,13 @@ class Inspector:
         labelled = [(f"[E{index + 1}] {video_id} frame {frame}", image)
                     for index, (frame, image) in enumerate(zip(frames, data)) if image]
         listing = "\n".join(f"E{index + 1}: {event}" for index, event in enumerate(events))
-        reply = self.gemini.judge(
-            labelled, SEQUENCE_PROMPT.format(query=task.text, events=listing), SEQUENCE_SCHEMA,
-            max_output_tokens=4096,
+        reply = self._judge(
+            "sequence", SEQUENCE_PROMPT.format(query=task.text, events=listing), SEQUENCE_SCHEMA,
+            labelled, max_output_tokens=4096,
+            # One query per frame: each is scored against its own event, so handing
+            # the compact prompt the joined event list would ask whether one frame
+            # starts all of them at once.
+            query=[str(event) for event in events],
         )
         scores = {str(item.get("id", "")).strip("[] "): float(item.get("score", 0) or 0)
                   for item in reply.get("events", [])}
@@ -267,4 +352,4 @@ class Inspector:
             transcript=transcript_window(cues, candidate.time),
             hints=hints or "(none)",
         )
-        return self.gemini.judge(labelled, prompt, ANSWER_SCHEMA, max_output_tokens=4096)
+        return self._judge("answer", prompt, ANSWER_SCHEMA, labelled, max_output_tokens=4096)

@@ -39,6 +39,11 @@ import numpy as np
 
 from scripts.ocr.engines import cluster_boxes, polygon_bbox
 
+# Re-exported: the tiling rule now lives in `agent/vlm_models.py`, which is the
+# copy the production image carries (scripts/ocr is not in it). The OCR tests
+# import it from here, and keeping one definition avoids the two drifting apart.
+from agent.vlm_models import tile_image  # noqa: F401  (re-export)
+
 #: Short, in Vietnamese, and purely an instruction — no embedded text. Long
 #: prompts are what this model echoes back instead of following.
 READ_PROMPT = (
@@ -99,44 +104,6 @@ def text_blocks(
             )
         blocks.append(((x0, y0, x1, y1), crop))
     return blocks
-
-
-def tile_image(image, max_tiles: int = 6, size: int = 448, thumbnail: bool = True):
-    """Split a PIL image into the aspect-matched 448px tile grid InternVL expects."""
-    width, height = image.size
-    ratio = width / height
-    grids = sorted(
-        {(cols, rows)
-         for total in range(1, max_tiles + 1)
-         for cols in range(1, total + 1)
-         for rows in range(1, total + 1)
-         if cols * rows <= max_tiles},
-        key=lambda g: g[0] * g[1],
-    )
-    area = width * height
-    best, best_diff = (1, 1), float("inf")
-    for grid in grids:
-        diff = abs(ratio - grid[0] / grid[1])
-        if diff < best_diff:
-            best, best_diff = grid, diff
-        elif diff == best_diff and grid[0] * grid[1] > best[0] * best[1]:
-            # On a tie prefer more tiles only when there are pixels to justify
-            # them. Without this a 448x448 crop is split into four tiles plus a
-            # thumbnail — five times the compute for no extra detail.
-            if area > 0.5 * size * size * max_tiles:
-                best = grid
-    cols, rows = best
-    resized = image.resize((size * cols, size * rows))
-    tiles = [
-        resized.crop((
-            (index % cols) * size, (index // cols) * size,
-            (index % cols + 1) * size, (index // cols + 1) * size,
-        ))
-        for index in range(cols * rows)
-    ]
-    if thumbnail and len(tiles) != 1:
-        tiles.append(image.resize((size, size)))
-    return tiles
 
 
 class VinternBlockReader:
