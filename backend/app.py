@@ -1689,6 +1689,30 @@ def get_transcript(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
     return {"videoId": video_id, "cues": cues}
 
 
+@app.get("/captions/{video_id}/windows")
+def get_caption_windows(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
+    """Every caption window of one video, in time order, whether or not the index exists.
+
+    Where `/captions/{video_id}` answers from Elasticsearch (503 on a deployment that has
+    not built the caption index), this reads the per-video parquet on disk and only then
+    tries the index. It is a separate route on purpose: the retrieval agent decides
+    whether the caption *search channel* exists by probing `/captions/{video_id}`, and
+    captions that can be read are not captions that can be searched.
+    """
+    windows = shots.captions_for_video(video_id)
+    if not windows:
+        try:
+            windows = [
+                {"shot_idx": hit.shot_idx, "window_idx": hit.window_idx, "frame_idx": hit.frame_idx,
+                 "start": round(hit.start_sec, 3), "end": round(hit.end_sec, 3),
+                 "time": round(hit.anchor_sec, 3), "text": hit.text}
+                for hit in caption_search.captions_for_video(video_id)
+            ]
+        except Exception:  # neither on disk nor indexed: this video has no captions
+            windows = []
+    return {"videoId": video_id, "available": bool(windows), "captions": windows}
+
+
 @app.get("/captions/{video_id}")
 def get_captions(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
     """Every shot caption of one video, in time order (empty when not indexed)."""
@@ -1698,6 +1722,25 @@ def get_captions(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
         raise HTTPException(503, f"caption data unavailable: {type(exc).__name__}") from exc
     return {"videoId": video_id, "captions": [
         {"shot_idx": hit.shot_idx, "window_idx": hit.window_idx, "frame_idx": hit.frame_idx,
+         "start": round(hit.start_sec, 3), "end": round(hit.end_sec, 3),
+         "time": round(hit.anchor_sec, 3), "text": hit.text}
+        for hit in hits
+    ]}
+
+
+@app.get("/ocr/{video_id}")
+def get_ocr(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
+    """The on-screen text of every OCR'd shot of one video, in time order.
+
+    Read by the review view of the retrieval agent, which shows the text of a
+    candidate's shot whether or not any search matched it.
+    """
+    try:
+        hits = ocr_search.ocr_for_video(video_id)
+    except Exception as exc:  # no OCR index on this deployment
+        raise HTTPException(503, f"ocr data unavailable: {type(exc).__name__}") from exc
+    return {"videoId": video_id, "shots": [
+        {"shot_idx": hit.shot_idx, "frame_idx": hit.frame_idx,
          "start": round(hit.start_sec, 3), "end": round(hit.end_sec, 3),
          "time": round(hit.anchor_sec, 3), "text": hit.text}
         for hit in hits

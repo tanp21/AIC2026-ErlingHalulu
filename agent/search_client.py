@@ -176,6 +176,23 @@ class SearchClient:
             for frame in response.json()["frames"]
         ]
 
+    def shots(self, video_id: str) -> list[dict]:
+        """A video's shot boundaries with the indexed keyframes inside each -- a story's own shots.
+
+        The checklist reads this to place a candidate's moment in its shots
+        (`agent.evidence._context_frames`): a keyframe neighbourhood is ~3 keyframes per shot, so
+        choosing among them by time can step over a whole shot, and the beats of a query's story
+        ("the man wakes", "he shakes the animal") each live in one shot.
+        """
+        response = self._request("GET", f"/shots/{video_id}", timeout=LOOKUP_TIMEOUT)
+        return [
+            {"index": int(shot["index"]), "start": float(shot["start"]), "end": float(shot["end"]),
+             "start_frame": int(shot["startFrame"]), "end_frame": int(shot["endFrame"]),
+             "keyframes": [{"video_id": video_id, "frame_idx": int(key["frameId"]), "time": float(key["time"])}
+                           for key in shot.get("keyframes") or []]}
+            for shot in response.json().get("shots") or []
+        ]
+
     def caption_channel_available(self) -> bool:
         """Whether this server can answer caption queries at all, probed once per run.
 
@@ -209,9 +226,33 @@ class SearchClient:
         except (SearchError, KeyError, ValueError):
             return []
 
+    def caption_windows(self, video_id: str) -> list[dict]:
+        """Every caption window of a video, in time order, from disk or the index.
+
+        Unlike `captions`, this does not need the caption *index*: a deployment that has
+        not built it still has the captions on disk, and a human checking a candidate
+        wants to read them. `[]` when the video was never captioned.
+        """
+        try:
+            return self._request("GET", f"/captions/{video_id}/windows",
+                                 timeout=LOOKUP_TIMEOUT).json()["captions"]
+        except (SearchError, KeyError, ValueError):
+            return []
+
     def transcript(self, video_id: str) -> list[dict]:
         """`[{"start", "end", "text"}]` cues for the whole video."""
         return self._request("GET", f"/transcript/{video_id}", timeout=LOOKUP_TIMEOUT).json()["cues"]
+
+    def ocr(self, video_id: str) -> list[dict]:
+        """`[{"shot_idx", "frame_idx", "start", "end", "time", "text"}]` for every OCR'd shot.
+
+        Empty when the deployment has no OCR index: on-screen text is context for a
+        human's check, so a missing index must not cost the run.
+        """
+        try:
+            return self._request("GET", f"/ocr/{video_id}", timeout=LOOKUP_TIMEOUT).json()["shots"]
+        except (SearchError, KeyError, ValueError):
+            return []
 
     def captions_for_frames(self, video_id: str, frames: list[int]) -> dict[int, dict]:
         """CapRL shot captions for `frames`, keyed by frame index.

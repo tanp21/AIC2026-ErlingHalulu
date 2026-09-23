@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import httpx
 
-from agent.llm import DeepSeekClient, GeminiClient, LLMError, parse_json
+from agent.llm import DeepSeekClient, GeminiClient, LLMError, parse_json, repair_truncated_json
 from agent.search_client import SearchClient, SearchError
 
 
@@ -168,6 +168,31 @@ class DeepSeekTests(unittest.TestCase):
         self.assertEqual((bodies[1]["thinking"], bodies[1]["temperature"]), ({"type": "disabled"}, 0.3))
         self.assertEqual(client.usage.deepseek_calls, 2)
 
+    def test_a_caller_can_ask_a_judgement_at_temperature_zero(self):
+        bodies = []
+
+        def handler(request):
+            bodies.append(json.loads(request.content))
+            return completion('{"ok": true}')
+
+        client = deepseek(handler)
+        client.chat_json([{"role": "user", "content": "json"}], thinking=False, temperature=0)
+        client.chat_json([{"role": "user", "content": "json"}], thinking=False)
+        client.chat_json([{"role": "user", "content": "json"}], thinking=True, temperature=0)
+        self.assertEqual([b.get("temperature") for b in bodies], [0, 0.3, None])  # thinking mode takes none
+
+    def test_a_reply_cut_off_by_the_token_limit_keeps_what_is_complete_only_when_asked(self):
+        cut = '{"details": [{"detail": 0, "judgements": [{"id": "e1", "why": "a \\"b\\" }", "verdict": "exact"}, {"id": "e2", "wh'
+        self.assertEqual(repair_truncated_json(cut),
+                         {"details": [{"detail": 0, "judgements": [{"id": "e1", "why": 'a "b" }', "verdict": "exact"}]}]})
+        self.assertEqual(repair_truncated_json('```json\n{"a": [1, {"b": 2}, {"c"'), {"a": [1, {"b": 2}]})
+        with self.assertRaises(ValueError):
+            repair_truncated_json('{"a": "unfinished')   # nothing complete to keep
+        client = deepseek(lambda request: completion(cut))
+        with self.assertRaises(LLMError):
+            client.chat_json([{"role": "user", "content": "json"}])     # a plan must never be a prefix
+        self.assertEqual(client.chat_json([{"role": "user", "content": "json"}], salvage=True)["details"][0]["detail"], 0)
+
     def test_retries_empty_json_and_server_errors(self):
         replies = iter([httpx.Response(503), completion(""), completion('```json\n{"a": 1}\n```')])
         self.assertEqual(deepseek(lambda request: next(replies)).chat_json([]), {"a": 1})
@@ -226,6 +251,23 @@ class GeminiTests(unittest.TestCase):
         self.assertEqual(answer.text, "Cá mập (shark)")
         self.assertEqual(answer.sources, (("Wiki", "https://example.org"),))
         self.assertEqual(answer.queries, ("jaws 1975",))
+
+
+class CaptionWindowFetchTests(unittest.TestCase):
+    def test_every_window_of_a_video_comes_back_from_the_windows_route(self):
+        paths = []
+
+        def handler(request):
+            paths.append(request.url.path)
+            return httpx.Response(200, json={"videoId": "L26_V254", "available": True, "captions": [
+                {"shot_idx": 6, "window_idx": 0, "frame_idx": None, "start": 12.0, "end": 19.3, "time": 15.6, "text": "A woman."}]})
+
+        self.assertEqual(search_client(handler).caption_windows("L26_V254")[0]["text"], "A woman.")
+        self.assertEqual(paths, ["/captions/L26_V254/windows"])
+
+    def test_a_server_without_the_route_or_the_captions_is_an_empty_list(self):
+        self.assertEqual(search_client(lambda request: httpx.Response(404, json={"detail": "nf"})).caption_windows("L26_V254"), [])
+        self.assertEqual(search_client(lambda request: httpx.Response(200, json={"oops": 1})).caption_windows("L26_V254"), [])
 
 
 class CaptionFetchTests(unittest.TestCase):
@@ -335,6 +377,18 @@ class DeepSeekVisionTests(unittest.TestCase):
     def test_invalid_json_surfaces_as_an_llm_error(self):
         with self.assertRaisesRegex(LLMError, "invalid JSON"):
             self.client("not json at all").judge([("x", b"jpeg")], "p", {})
+
+    def test_salvage_keeps_the_complete_part_of_a_reply_the_cap_cut_off(self):
+        """Measured on the checklist: a call shown ONE candidate's images answered with a dozen
+        invented ones, ran past the token limit and was dropped whole -- the candidate lost every
+        check it had just earned. Its first entries were complete, and those are worth keeping.
+        """
+        cut = ('{"candidates": [{"id": "C1", "details": [{"detail": 0, "verdict": "exact"}]}, '
+               '{"id": "C2", "details": [{"detail": 1, "verdict": "unrel')
+        reply = self.client(cut).judge([("x", b"jpeg")], "p", {}, salvage=True)
+        self.assertEqual(reply, {"candidates": [{"id": "C1", "details": [{"detail": 0, "verdict": "exact"}]}]})
+        with self.assertRaisesRegex(LLMError, "invalid JSON"):     # off unless a caller asks
+            self.client(cut).judge([("x", b"jpeg")], "p", {})
 
 
 if __name__ == "__main__":

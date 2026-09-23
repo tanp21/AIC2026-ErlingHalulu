@@ -55,6 +55,16 @@ class AgentRunStoreTests(unittest.TestCase):
         with self.assertRaises(LookupError):
             store.get(TEAMMATE, "a")
 
+    def test_active_reports_only_the_owners_live_run(self):
+        store = self.store()
+        self.create(store, run_id="a")
+
+        self.assertEqual(store.active(OWNER).run_id, "a")
+        self.assertIsNone(store.active(TEAMMATE))
+
+        store.finish("a", result=fake_result(), usage=None, error=None)
+        self.assertIsNone(store.active(OWNER))
+
     def test_expires_runs_after_the_ttl(self):
         now = [0.0]
         store = self.store(clock=lambda: now[0])
@@ -119,6 +129,23 @@ class ExecuteRunTests(unittest.TestCase):
             self.assertEqual(finished.usage, {"calls": 1})
             self.assertTrue((run.output_dir / "submission.zip").exists())
             self.assertTrue((run.output_dir / f"{run.run_id}.json").exists())
+
+    def test_a_human_judged_run_needs_no_gemini_key_and_builds_no_vision_backend(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, run, _ = self.run_in(directory)
+            req = AgentRunReq(text="a red boat", kind="kis", judge="human", deepseek_api_key="dsk-test")
+            with (
+                patch("backend.agent_runner.run_query",
+                      return_value=(fake_result(run.run_id), Mock(as_dict=lambda: {}))) as query,
+                patch.dict(os.environ, {"AIC_AGENT_OUT_DIR": directory, "AIC_AGENT_VISION": "gemini",
+                                        "AIC_AGENT_HUMAN_TIMEOUT": "120"}),
+            ):
+                execute_run(store, run, req, INT_URL)
+
+            self.assertEqual(store.get(OWNER, run.run_id).status, "done")
+            self.assertEqual(query.call_args.kwargs["judge"], "human")
+            self.assertEqual(query.call_args.kwargs["human_idle_timeout"], 120.0)
+            self.assertEqual(query.call_args.args[1].gemini_api_key, "")
 
     def test_forwards_the_mode_and_explicit_time_budget(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -284,6 +311,24 @@ class AgentRunEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(again.status_code, 409)
         self.assertEqual(self.executor.call_count, 1)
 
+    async def test_the_active_route_hands_back_the_callers_live_run(self):
+        # What a reloaded page adopts: without it the only way back to a run in progress
+        # is the 409 above, with nothing to look at or stop.
+        empty = await self.client.get("/api/agent/runs/active", headers=self.headers)
+        self.assertIsNone(empty.json()["run"])
+
+        started = (await self.start()).json()
+        mine = await self.client.get("/api/agent/runs/active", headers=self.headers)
+
+        self.assertEqual(mine.json()["run"]["run_id"], started["run_id"])
+        theirs = await self.client.get(
+            "/api/agent/runs/active", headers={"X-AIC-User": TEAMMATE}
+        )
+        self.assertIsNone(theirs.json()["run"])
+        self.assertEqual(
+            (await self.client.get("/api/agent/runs/active")).status_code, 401
+        )
+
     async def test_other_users_cannot_see_or_download_a_run(self):
         run_id = (await self.start()).json()["run_id"]
 
@@ -307,7 +352,8 @@ class AgentRunEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(typed.json()["review"],
                          {"decisions": {"C3": "accept"}, "answer": "2.15", "stopped": False,
-                          "decided": True})
+                          "decided": True, "judge": "model", "scores": {}, "sequence": None,
+                          "finished": False, "pending_commands": 0})
         self.assertTrue(review.event.is_set())  # the agent stops waiting on Gemini
 
     async def test_review_is_validated_private_and_only_while_running(self):
@@ -324,6 +370,90 @@ class AgentRunEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((no_candidate.status_code, bad_id.status_code), (422, 422))
         self.assertEqual((foreign.status_code, late.status_code), (404, 409))
         self.assertFalse(self.runs.get(OWNER, run_id).review.stopped)
+
+    async def test_a_human_judged_run_needs_no_gemini_key(self):
+        blank = await self.start(gemini_api_key="")
+        human = await self.start(gemini_api_key="", judge="human", headers={"X-AIC-User": TEAMMATE})
+
+        self.assertEqual(blank.status_code, 422)  # a model judge still wants one
+        self.assertEqual(human.status_code, 202)
+        run = self.runs.get(TEAMMATE, human.json()["run_id"])
+        self.assertEqual(run.review.judge, "human")
+
+    async def test_a_human_judged_run_takes_scores_commands_a_sequence_and_finish(self):
+        run_id = (await self.start(judge="human")).json()["run_id"]
+        url = f"/api/agent/runs/{run_id}/review"
+        review = self.runs.get(OWNER, run_id).review
+
+        scored = await self.client.post(url, headers=self.headers, json={"candidate_id": "C2", "score": 5})
+        more = await self.client.post(url, headers=self.headers, json={"command": {"type": "more", "hint": "đỏ"}})
+        exact = await self.client.post(url, headers=self.headers, json={"command": {
+            "type": "add_frame", "video_id": "L21_V001", "frame_idx": 1234, "time": 49.4, "accept": True}})
+        path = await self.client.post(url, headers=self.headers, json={"sequence": {
+            "video_id": "L21_V001", "frames": [10, 20], "times": [0.4, 0.8]}})
+
+        self.assertEqual([r.status_code for r in (scored, more, exact, path)], [200, 200, 200, 200])
+        self.assertEqual(review.verdicts(), {"C2": 5.0})
+        self.assertEqual([c["type"] for c in review.take_commands()], ["more", "add_frame"])
+        self.assertEqual(review.sequence, {"video_id": "L21_V001", "frames": [10, 20], "times": [0.4, 0.8]})
+        self.assertFalse(review.decided())
+        finished = await self.client.post(url, headers=self.headers, json={"finish": True})
+        self.assertTrue(finished.json()["review"]["finished"] and review.event.is_set())
+
+    async def test_the_reviewers_order_arrives_before_the_finish_that_ends_the_wait(self):
+        run_id = (await self.start(judge="human")).json()["run_id"]
+        review = self.runs.get(OWNER, run_id).review
+        seen = []
+        original = review.finish
+        review.finish = lambda: (seen.append(review.order), original())[1]
+
+        response = await self.client.post(f"/api/agent/runs/{run_id}/review", headers=self.headers,
+                                          json={"finish": True, "order": ["C7", "C3"]})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(seen, [["C7", "C3"]])     # the run wakes up to an order that is already there
+
+    async def test_an_order_is_for_a_human_judged_run_and_holds_candidate_ids(self):
+        model = (await self.start()).json()["run_id"]
+        refused = await self.client.post(f"/api/agent/runs/{model}/review", headers=self.headers,
+                                         json={"order": ["C1"]})
+        self.assertEqual(refused.status_code, 422)
+        self.runs.finish(model, result=fake_result(model), usage=None, error=None)
+
+        human = (await self.start(judge="human")).json()["run_id"]
+        url = f"/api/agent/runs/{human}/review"
+        for body in ({"order": ["../x"]}, {"order": ["C1", 5]}, {"order": [f"C{n}" for n in range(301)]}):
+            self.assertEqual((await self.client.post(url, headers=self.headers, json=body)).status_code, 422, body)
+        self.assertEqual(self.runs.get(OWNER, human).review.order, [])
+
+    async def test_human_only_actions_are_refused_on_a_model_judged_run(self):
+        run_id = (await self.start()).json()["run_id"]
+        url = f"/api/agent/runs/{run_id}/review"
+        for body in ({"candidate_id": "C1", "score": 5}, {"finish": True},
+                     {"command": {"type": "more"}},
+                     {"sequence": {"video_id": "L21_V001", "frames": [1]}}):
+            response = await self.client.post(url, headers=self.headers, json=body)
+            self.assertEqual(response.status_code, 422, body)
+
+    async def test_commands_and_sequences_are_validated(self):
+        run_id = (await self.start(judge="human")).json()["run_id"]
+        url = f"/api/agent/runs/{run_id}/review"
+        for body in (
+            {"command": {"type": "scope"}},                                   # needs a video
+            {"command": {"type": "scope", "video_id": "../etc"}},              # not a video id
+            {"command": {"type": "neighbours", "cid": "x"}},
+            {"command": {"type": "add_frame", "video_id": "L21_V001", "frame_idx": -1}},
+            {"command": {"type": "more", "hint": "x" * 301}},
+            {"command": {"type": "reboot"}},
+            {"candidate_id": "C1", "score": 11},
+            {"score": 5},                                                      # no candidate
+            {"sequence": {"video_id": "L21_V001", "frames": []}},
+            {"sequence": {"video_id": "L21_V001", "frames": [1, 2], "times": [1.0]}},
+            {"sequence": {"video_id": "L21_V001", "frames": [-3]}},
+        ):
+            response = await self.client.post(url, headers=self.headers, json=body)
+            self.assertEqual(response.status_code, 422, body)
+        self.assertEqual(self.runs.get(OWNER, run_id).review.take_commands(), [])
 
     async def test_polls_carry_the_live_view(self):
         run_id = (await self.start()).json()["run_id"]

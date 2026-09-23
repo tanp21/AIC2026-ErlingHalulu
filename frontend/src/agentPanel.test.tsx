@@ -69,7 +69,7 @@ describe("agent panel", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(fetchMock.mock.calls[0][0]).toBe("/api/agent/runs");
     expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({
-      text: "a red boat", kind: "kis", mode: "fast",
+      text: "a red boat", kind: "kis", mode: "fast", judge: "model",
       deepseek_api_key: "dsk", gemini_api_key: "gmk",
     });
   });
@@ -114,6 +114,39 @@ describe("agent panel", () => {
 
     expect(await screen.findByRole("alert"))
       .toHaveTextContent("a DeepSeek API key is required");
+  });
+
+  it("shows the run already in progress instead of a dead-end error", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/agent/runs/abc") return jsonResponse(live);
+      if (url === "/api/agent/runs/active") return jsonResponse({ run: live });
+      return jsonResponse({ detail: "an agent run is already in progress" }, { ok: false, status: 409 });
+    });
+    render(<AgentPanel />);
+    fillForm("a blue car");
+
+    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/already have a run in progress/);
+    expect(await screen.findByLabelText("Live review")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop and use the current ranking" })).toBeEnabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.slice(0, 2).map((call) => call[0]))
+      .toEqual(["/api/agent/runs", "/api/agent/runs/active"]);
+  });
+
+  it("keeps the conflict message when nothing is actually running", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input) === "/api/agent/runs/active"
+      ? jsonResponse({ run: null })
+      : jsonResponse({ detail: "an agent run is already in progress" }, { ok: false, status: 409 }));
+    render(<AgentPanel />);
+    fillForm();
+
+    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("an agent run is already in progress");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("polls until the run finishes and renders the verified ranking", async () => {

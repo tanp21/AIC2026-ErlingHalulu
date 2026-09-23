@@ -61,9 +61,17 @@ class FrontendServingTests(unittest.TestCase):
         # path silently dropped whichever FastAPI did not match first.
         self.assertIn("/captions/{video_id}", paths)
         self.assertIn("/captions/{video_id}/frames", paths)
+        self.assertIn("/captions/{video_id}/windows", paths)
         # Split development forwards media/data routes to the compute host; a route
         # missing here works locally and 404s for a teammate.
         self.assertIn("/captions/", PROXY_PREFIXES)
+
+    def test_app_registers_the_ocr_route_and_forwards_it(self):
+        """The agent's review view reads a shot's on-screen text whether or not a query matched it."""
+        from backend.core_service import PROXY_PREFIXES
+
+        self.assertIn("/ocr/{video_id}", {route.path for route in app.routes})
+        self.assertIn("/ocr/", PROXY_PREFIXES)
 
 
 if __name__ == "__main__":

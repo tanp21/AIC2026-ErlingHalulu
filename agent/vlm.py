@@ -502,8 +502,12 @@ class LocalVLM:
         return self._backend
 
     def judge(self, images, prompt, schema, *, max_output_tokens=8192, job=None,
-              query=None, scenes="", question=None):
+              query=None, scenes="", question=None, salvage=False):
         """Same contract as ``GeminiClient.judge``: labelled images + prompt -> JSON.
+
+        `salvage` is accepted and ignored: a reply cut off by a token limit is a
+        DeepSeek endpoint quirk (see `DeepSeekClient.judge`), not something this
+        backend can produce.
 
         For the per-image jobs this fans out into one call per frame and reassembles
         the array the caller expects. A 1-3B model handed five frames and a
@@ -672,7 +676,9 @@ class HttpVLM:
         )
 
     def judge(self, images, prompt, schema, *, max_output_tokens=8192, job=None,
-              query=None, scenes="", question=None):
+              query=None, scenes="", question=None, salvage=False):
+        """Forwarded to the host running the model, which ignores `salvage` like the local
+        backend does -- the flag only means something to a backend that can be cut off."""
         import base64
 
         payload = {

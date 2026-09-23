@@ -12,7 +12,8 @@ const backend = {
   headers: process.env.AIC_DEV_USER ? { "X-AIC-User": process.env.AIC_DEV_USER } : undefined,
 };
 const routes = ["/search", "/compare", "/thumb", "/frame", "/video", "/transcript",
-  "/shots", "/clip", "/indexes", "/profiles", "/session", "/api"];
+  "/shots", "/clip", "/indexes", "/profiles", "/session", "/api",
+  "/context", "/captions", "/ocr", "/frame-map", "/videos"];
 
 export default defineConfig({
   base: "/static/",

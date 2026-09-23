@@ -72,6 +72,47 @@ def parse_json(text: str):
         return json.loads(text[start:end + 1])
 
 
+def repair_truncated_json(text: str):
+    """Parse a JSON document that was cut off by a token limit, keeping what is complete.
+
+    Walks back from the end to the last place a `}` or `]` closed a whole element and closes
+    whatever was still open there. `{"a": [{"x": 1}, {"x": 2}, {"x"` gives `{"a": [{"x": 1}, {"x": 2}]}`.
+    Only for callers that can use a prefix (a list of judgements can; a plan cannot).
+    """
+    text = (text or "").strip()
+    fenced = re.search(r"```(?:json)?\s*(.*)", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1).replace("```", "").strip()
+    start = text.find("{")
+    if start < 0:
+        raise ValueError("no JSON object to repair")
+    text = text[start:]
+    stack, in_string, escaped, cuts = [], False, False, []
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append("}" if char == "{" else "]")
+        elif char in "}]":
+            if not stack:
+                break
+            stack.pop()
+            cuts.append((index, "".join(reversed(stack))))
+    for index, closers in reversed(cuts[-60:]):
+        try:
+            return json.loads(text[:index + 1] + closers)
+        except json.JSONDecodeError:
+            continue
+    raise ValueError("nothing complete to keep")
+
+
 class DeepSeekClient:
     """OpenAI-compatible chat completions against api.deepseek.com."""
 
@@ -88,7 +129,7 @@ class DeepSeekClient:
         self._retries = retries
         self._sleep = sleep
 
-    def chat(self, messages, *, tools=None, json_mode=False, max_tokens=8192, thinking=None):
+    def chat(self, messages, *, tools=None, json_mode=False, max_tokens=8192, thinking=None, temperature=None):
         """Return the assistant message dict (content, tool_calls, reasoning_content).
 
         In thinking mode with tools, DeepSeek requires every earlier assistant message
@@ -103,7 +144,9 @@ class DeepSeekClient:
             "thinking": {"type": "enabled" if thinking else "disabled"},
         }
         if not thinking:
-            body["temperature"] = 0.3
+            # A judgement that will be shown to a person is asked at 0: the same sentence
+            # was "exact" on one call and "partial" on the next at the default.
+            body["temperature"] = 0.3 if temperature is None else temperature
         if tools:
             body["tools"] = tools
         if json_mode:
@@ -135,15 +178,23 @@ class DeepSeekClient:
             return {key: value for key, value in message.items() if value is not None}
         raise LLMError("deepseek: no usable response")
 
-    def chat_json(self, messages, **kwargs):
+    def chat_json(self, messages, *, salvage=False, **kwargs):
+        """The reply as JSON. With `salvage`, a reply cut off by the token limit keeps its complete part."""
         message = self.chat(messages, json_mode=True, **kwargs)
+        content = message.get("content", "")
         try:
-            return parse_json(message.get("content", ""))
+            return parse_json(content)
         except (json.JSONDecodeError, ValueError) as exc:
-            raise LLMError(f"deepseek returned invalid JSON: {message.get('content', '')[:300]}") from exc
+            if salvage:
+                try:
+                    return repair_truncated_json(content)
+                except ValueError:
+                    pass
+            raise LLMError(f"deepseek returned invalid JSON: {content[:300]}") from exc
 
     def judge(self, images: list[tuple[str, bytes]], prompt: str, schema: dict,
-              *, max_output_tokens=8192, job=None, query=None, scenes="", question=None):
+              *, max_output_tokens=8192, job=None, query=None, scenes="", question=None,
+              salvage=False):
         """Labelled JPEGs + instructions -> JSON matching `schema`.
 
         The same contract as `GeminiClient.judge`, so the five jobs in
@@ -157,6 +208,11 @@ class DeepSeekClient:
         Thinking is off: a 0-10 score is a bounded judgement, and this model
         otherwise spends its whole output budget on `reasoning_content` and returns
         an empty `content`.
+
+        `salvage` keeps the complete part of a reply the token limit cut off, for callers whose
+        answer is a list of separate judgements (the checklist's is). Measured on the checklist: a
+        call that had been shown ONE candidate's images answered with a dozen invented ones, ran past
+        the cap and was thrown away whole — the candidate lost every check it had just earned.
         """
         import base64
 
@@ -184,6 +240,11 @@ class DeepSeekClient:
         try:
             return parse_json(text)
         except (json.JSONDecodeError, ValueError) as exc:
+            if salvage:
+                try:
+                    return repair_truncated_json(text)
+                except ValueError:
+                    pass
             raise LLMError(f"deepseek returned invalid JSON: {text[:300]}") from exc
 
 
@@ -274,7 +335,8 @@ class GeminiClient:
         raise AssertionError("unreachable")
 
     def judge(self, images: list[tuple[str, bytes]], prompt: str, schema: dict,
-              *, max_output_tokens=8192, job=None, query=None, scenes="", question=None):
+              *, max_output_tokens=8192, job=None, query=None, scenes="", question=None,
+              salvage=False):
         """Labelled JPEGs + instructions -> JSON matching `schema`.
 
         Each label is emitted as text right before its image so the model can refer
@@ -282,6 +344,10 @@ class GeminiClient:
         job and the original Vietnamese inputs; Gemini needs none of them because the
         prompt it is given is already complete — they are what the local backends
         rebuild a prompt they can follow from.
+
+        `salvage` is accepted and ignored: it exists for backends that can come back
+        cut off by a token limit (see `DeepSeekClient.judge`), and a schema-constrained
+        reply here either parses or is an error.
         """
         from google.genai import types
 

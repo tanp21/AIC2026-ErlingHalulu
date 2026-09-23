@@ -5,6 +5,7 @@ from backend.ocr_search import (
     build_filter_request,
     build_index_definition,
     contains_folded_phrase,
+    ocr_for_video,
     parse_search_response,
     search_ocr_filter,
     search_ocr_keyword,
@@ -182,3 +183,24 @@ class SearchOcrFilterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OcrForVideoTests(unittest.TestCase):
+    def test_reads_every_shot_of_one_video_in_time_order(self):
+        calls = []
+
+        class Client:
+            def search(self, **kwargs):
+                calls.append(kwargs)
+                return {"hits": {"hits": [
+                    {"_score": 1.0, "_source": {
+                        "video_id": "L21_V001", "shot_idx": 3, "frame_idx": 300, "start_sec": 30.0,
+                        "end_sec": 40.0, "anchor_sec": 35.0, "text": "GIÁ 15.000đ"}},
+                ]}}
+
+        hits = ocr_for_video("L21_V001", client=Client())
+
+        body = calls[0]["body"]
+        self.assertEqual(body["query"], {"term": {"video_id": "L21_V001"}})
+        self.assertEqual(body["sort"], [{"start_sec": "asc"}])
+        self.assertEqual([(h.shot_idx, h.text) for h in hits], [(3, "GIÁ 15.000đ")])

@@ -104,6 +104,35 @@ class CaptionLookupTests(unittest.TestCase):
         self.assertIsNone(shots.caption_for_frame("L21_V001", 5.0, data_dir=self.root))
 
 
+class CaptionWindowsTests(unittest.TestCase):
+    """Every window of a video, from disk, so a deployment with no caption index still has them."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_every_window_comes_back_in_time_order_with_the_lead_in_stripped(self):
+        write_part(self.root, "L21_V001", [
+            window(1, 10.0, 20.0, "The video opens with a woman in a white apron."),
+            window(0, 0.0, 10.0, "The following is a detailed description of the video: a red boat."),
+            window(2, 20.0, 30.0, ""),  # an empty caption is no window at all
+        ])
+
+        windows = shots.captions_for_video("L21_V001", data_dir=self.root)
+
+        self.assertEqual([(w["shot_idx"], w["start"], w["end"], w["time"]) for w in windows],
+                         [(0, 0.0, 10.0, 5.0), (1, 10.0, 20.0, 15.0)])
+        self.assertEqual(windows[0]["text"], "a red boat.")
+        self.assertIsNone(windows[0]["frame_idx"])  # a window has no keyframe of its own
+
+    def test_a_video_never_captioned_has_no_windows(self):
+        self.assertEqual(shots.captions_for_video("L21_V404", data_dir=self.root), [])
+        self.assertEqual(shots.captions_for_video("K01_V001", data_dir=self.root), [])
+
+
 class CaptionRouteTests(unittest.TestCase):
     """The route the agent reads captions through.
 
@@ -156,6 +185,22 @@ class CaptionRouteTests(unittest.TestCase):
         response = self.get("/captions/K01_V001/frames?frames=1000")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["captions"], {})
+
+    def test_the_windows_route_reads_every_caption_of_a_video_without_the_index(self):
+        """The reported bug: the review view asked `/captions/{id}`, which needs Elasticsearch."""
+        response = self.get("/captions/L22_V001/windows")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["available"])
+        starts = [w["start"] for w in body["captions"]]
+        self.assertEqual(starts, sorted(starts))
+        self.assertTrue(all(w["text"] and w["end"] >= w["start"] for w in body["captions"]))
+
+    def test_the_windows_route_says_unavailable_for_a_video_with_no_captions(self):
+        for video in ("K01_V001", "L99_V999"):
+            response = self.get(f"/captions/{video}/windows")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"videoId": video, "available": False, "captions": []})
 
     def test_a_malformed_frame_list_is_rejected(self):
         self.assertEqual(self.get("/captions/L22_V001/frames?frames=abc").status_code, 422)

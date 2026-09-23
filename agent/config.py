@@ -84,6 +84,9 @@ class AgentSettings:
     # Read the CapRL shot caption into each candidate's label. Ignored by Gemini,
     # which looks at the frame itself; it is the local models that benefit.
     captions: bool = True
+    # human judge only: show DeepSeek each candidate's own frame while building the checklist
+    # (agent/evidence.py). A caption is a guess made once offline; the pixels are ground truth.
+    checklist_vision: bool = True
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None, dotenv: Path = ROOT / ".env"):
@@ -131,4 +134,5 @@ class AgentSettings:
             vlm_answer_side=integer("AIC_VLM_ANSWER_SIDE", 1280),
             vlm_max_tiles=integer("AIC_VLM_MAX_TILES", 6),
             captions=merged.get("AIC_AGENT_CAPTIONS", "1").lower() not in ("0", "false", "no"),
+            checklist_vision=merged.get("AIC_AGENT_CHECKLIST_VISION", "1").lower() not in ("0", "false", "no"),
         )

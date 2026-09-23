@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -35,7 +36,7 @@ from typing import Literal
 
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent.cli import save_run
 from agent.config import VISION_ENV, AgentSettings, deployment_vision
@@ -51,12 +52,16 @@ from .core import ROOT
 logger = logging.getLogger("uvicorn.error")
 
 AGENT_RUN_TTL_SECONDS = 3600
-# One run already fans out its own pools; two keeps the loopback search batches
-# from crowding out human searches.
-_AGENT_RUN_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="agent-run")
+# One run already fans out its own pools; the bound keeps the loopback search batches
+# from crowding out human searches. A run with a human judge holds its worker for as
+# long as the person takes, so it is wider than the model-only runs ever needed.
+_AGENT_RUN_EXECUTOR = ThreadPoolExecutor(max_workers=5, thread_name_prefix="agent-run")
 # from_env() falls back to the repository .env when it can; server-hosted runs
 # must use exactly the keys from the request.
 _NO_DOTENV = Path("/nonexistent")
+
+
+VIDEO_ID_PATTERN = r"^[A-Z]\d{2}_V\d{3}$"
 
 
 class AgentRunConflict(RuntimeError):
@@ -67,6 +72,9 @@ class AgentRunReq(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
     kind: Literal["kis", "qa", "trake"] = "kis"
     mode: Literal["fast", "auto", "deep"] = "fast"
+    # `human`: no model sees a frame, the person does (agent/review.py). Needs no Gemini
+    # key; a key given anyway is only used for the Google-Search lookups.
+    judge: Literal["model", "human"] = "model"
     # Both may be empty: the owner's runs fall back to the keys this deployment
     # holds (see `_deployment_key`), so a field left blank is a question the server
     # answers, not a client-side error.
@@ -78,12 +86,67 @@ class AgentRunReq(BaseModel):
     gemini_model: str | None = Field(default=None, max_length=100)
 
 
+class AgentSequenceReq(BaseModel):
+    """The TRAKE path a human assembled: one frame per event, in order."""
+    video_id: str = Field(pattern=VIDEO_ID_PATTERN)
+    frames: list[int] = Field(min_length=1, max_length=12)
+    times: list[float] | None = Field(default=None, max_length=12)
+
+    @field_validator("frames")
+    @classmethod
+    def _non_negative(cls, frames):
+        if any(frame < 0 for frame in frames):
+            raise ValueError("frame indices must not be negative")
+        return frames
+
+    @model_validator(mode="after")
+    def _one_time_each(self):
+        if self.times is not None and len(self.times) != len(self.frames):
+            raise ValueError("one time per frame")
+        return self
+
+
+class AgentCommandReq(BaseModel):
+    """A search a human asks the run to do: more, inside a video, around a frame, or an exact frame."""
+    type: Literal["more", "scope", "neighbours", "add_frame"]
+    hint: str | None = Field(default=None, max_length=300)
+    video_id: str | None = Field(default=None, pattern=VIDEO_ID_PATTERN)
+    cid: str | None = Field(default=None, pattern=r"^C\d{1,6}$")
+    frame_idx: int | None = Field(default=None, ge=0)
+    time: float | None = Field(default=None, ge=0)
+    accept: bool = False
+
+    @model_validator(mode="after")
+    def _has_what_it_needs(self):
+        needs = {"more": (), "scope": ("video_id",), "neighbours": ("cid",),
+                 "add_frame": ("video_id", "frame_idx")}[self.type]
+        missing = [name for name in needs if getattr(self, name) is None]
+        if missing:
+            raise ValueError(f"{self.type} needs {', '.join(missing)}")
+        return self
+
+
 class AgentReviewReq(BaseModel):
     """One reviewer action; any combination of the fields may be sent at once."""
     candidate_id: str | None = Field(default=None, pattern=r"^C\d{1,6}$")
     decision: Literal["accept", "reject", "clear"] | None = None
+    #: A 0-10 verdict between accept and reject (a human judge only).
+    score: float | None = Field(default=None, ge=0, le=10)
     answer: str | None = Field(default=None, max_length=100)
+    sequence: AgentSequenceReq | None = None
+    command: AgentCommandReq | None = None
     stop: bool = False
+    #: Submit: the reviewer is done (a human judge only).
+    finish: bool = False
+    #: The candidate order on the reviewer's screen when they submit or stop (a human judge only).
+    order: list[str] | None = Field(default=None, max_length=300)
+
+    @field_validator("order")
+    @classmethod
+    def _candidate_ids(cls, order):
+        if order is not None and any(not re.fullmatch(r"C\d{1,6}", cid) for cid in order):
+            raise ValueError("order holds candidate ids")
+        return order
 
 
 @dataclass
@@ -132,7 +195,8 @@ class AgentRunStore:
         self._lock = threading.Lock()
         self._runs: dict[str, AgentRun] = {}
 
-    def create(self, run_id, owner, task, output_dir, report_url, deployment_keys=False):
+    def create(self, run_id, owner, task, output_dir, report_url, deployment_keys=False,
+               judge="model"):
         with self._lock:
             self._purge()
             if any(run.owner == owner and run.status == "running"
@@ -142,7 +206,7 @@ class AgentRunStore:
             run = AgentRun(
                 run_id=run_id, owner=owner, task=task, output_dir=output_dir,
                 report_url=report_url, started=now, expires_at=now + self.ttl_seconds,
-                deployment_keys=deployment_keys,
+                deployment_keys=deployment_keys, review=HumanReview(judge=judge),
             )
             self._runs[run_id] = run
             return run
@@ -155,6 +219,19 @@ class AgentRunStore:
                 raise LookupError("agent run not found")
             run.expires_at = self.clock() + self.ttl_seconds
             return run
+
+    def active(self, owner):
+        """The owner's live run, or None.
+
+        A reloaded page (or a second tab) holds no run id to poll, and without this its
+        only way back to a run it started is a 409 from the start route.
+        """
+        with self._lock:
+            self._purge()
+            for run in self._runs.values():
+                if run.owner == owner and run.status == "running":
+                    return run
+            return None
 
     def update_progress(self, run_id, snapshot):
         with self._lock:
@@ -180,7 +257,8 @@ class AgentRunStore:
 
 
 def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
-              time_budget: float | None, *, review: HumanReview | None = None, progress=None):
+              time_budget: float | None, *, review: HumanReview | None = None, progress=None,
+              judge: str = "model", human_idle_timeout: float | None = None):
     """Build the clients and run one task; split out so tests can stub it."""
     usage = Usage()
     deepseek = DeepSeekClient(
@@ -198,7 +276,10 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
         thinking_level=settings.gemini_thinking_level, usage=usage,
         **({"timeout": 40.0, "retries": 2, "max_backoff": 4.0} if fast else {}),
     ) if settings.gemini_api_key else OfflineGemini())
-    vision = build_vision(settings, usage=usage, gemini=gemini if settings.gemini_api_key else None)
+    # A human judge never reaches a vision model, so none is built: OfflineGemini raises
+    # if anything ever tried to hand it a frame, which is the guarantee the mode makes.
+    vision = (OfflineGemini() if judge == "human" else
+              build_vision(settings, usage=usage, gemini=gemini if settings.gemini_api_key else None))
     search = SearchClient.from_settings(settings)
     overrides = {
         "max_steps": max_steps,
@@ -207,6 +288,11 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
     }
     if time_budget is not None:
         overrides["time_budget"] = time_budget
+    if judge == "human":
+        overrides["judge"] = "human"
+        overrides["checklist_vision"] = settings.checklist_vision
+        if human_idle_timeout is not None:
+            overrides["human_idle_timeout"] = human_idle_timeout
     try:
         agent = Agent(deepseek, gemini, search, AgentOptions.for_mode(mode, **overrides),
                       vision=vision)
@@ -251,17 +337,31 @@ def execute_run(store: AgentRunStore, run: AgentRun, req: AgentRunReq, internal_
         for name in VISION_ENV:
             if os.environ.get(name):
                 env[name] = os.environ[name]
+        if req.judge == "human":
+            # `AgentSettings` demands a Gemini key for a Gemini vision backend, and a
+            # human-judged run has no vision backend at all (`run_query` builds none).
+            env["AIC_AGENT_VISION"] = "deepseek"
         settings = AgentSettings.from_env(env, dotenv=_NO_DOTENV)
         result, usage = run_query(
             run.task, settings, req.mode, req.max_steps, req.time_budget,
             review=run.review,
             progress=lambda snapshot: store.update_progress(run.run_id, snapshot),
+            **({"judge": "human", "human_idle_timeout": human_idle_timeout()}
+               if req.judge == "human" else {}),
         )
         save_run([result], run.output_dir, run.report_url, usage)
         store.finish(run.run_id, result=result, usage=usage.as_dict(), error=None)
     except Exception as exc:  # reported to the owner; message never includes the keys
         logger.warning("agent run %s failed: %s", run.run_id, type(exc).__name__)
         store.finish(run.run_id, result=None, usage=None, error=f"{type(exc).__name__}: {exc}")
+
+
+def human_idle_timeout() -> float:
+    """Seconds of reviewer silence after which a human-judged run finishes on its own."""
+    try:
+        return max(30.0, float(os.environ.get("AIC_AGENT_HUMAN_TIMEOUT", "900")))
+    except ValueError:
+        return 900.0
 
 
 def agent_output_dir(run_id: str) -> Path:
@@ -302,7 +402,8 @@ def install_agent_routes(app) -> None:
         # A Gemini key is only needed when this deployment judges with Gemini: on a
         # local vision backend a run works without one, and only the web lookup goes
         # without.
-        if deployment_vision() == "gemini" and not usable(req.gemini_api_key, "gemini"):
+        if (req.judge == "model" and deployment_vision() == "gemini"
+                and not usable(req.gemini_api_key, "gemini")):
             raise HTTPException(422, "a Gemini API key is required")
         run_id = secrets.token_hex(8)
         task = task_from_text(run_id, req.text, req.kind)
@@ -310,12 +411,19 @@ def install_agent_routes(app) -> None:
         try:
             run = runs.create(
                 run_id, request.state.login, task, agent_output_dir(run_id),
-                str(request.base_url).rstrip("/"), deployment_keys=admin,
+                str(request.base_url).rstrip("/"), deployment_keys=admin, judge=req.judge,
             )
         except AgentRunConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         _AGENT_RUN_EXECUTOR.submit(execute_run, runs, run, req, agent_internal_url())
         return JSONResponse(run.to_payload(time.monotonic()), status_code=202)
+
+    @app.get("/api/agent/runs/active")
+    async def active_run(request: Request):
+        """The caller's own live run, so a reloaded page adopts it instead of hitting the
+        start route's "already in progress" wall with nothing to look at."""
+        run = store(request).active(request.state.login)
+        return {"run": run.to_payload(time.monotonic()) if run else None}
 
     @app.get("/api/agent/runs/{run_id}")
     async def get_run(run_id: str, request: Request):
@@ -327,12 +435,26 @@ def install_agent_routes(app) -> None:
         run = owned(request, run_id)
         if run.status != "running":
             raise HTTPException(409, "the agent run has already finished")
+        human = run.review.judge == "human"
+        if (req.decision is not None or req.score is not None) and req.candidate_id is None:
+            raise HTTPException(422, "a decision needs a candidate_id")
+        if req.score is not None or req.sequence or req.command or req.finish or req.order is not None:
+            if not human:
+                raise HTTPException(422, "scores, sequences, commands and finish need a human judge")
         if req.decision is not None:
-            if req.candidate_id is None:
-                raise HTTPException(422, "a decision needs a candidate_id")
             run.review.decide(req.candidate_id, req.decision)
+        if req.score is not None:
+            run.review.score(req.candidate_id, req.score)
         if req.answer is not None:
             run.review.set_answer(req.answer)
+        if req.sequence is not None:
+            run.review.set_sequence(req.sequence.video_id, req.sequence.frames, req.sequence.times)
+        if req.command is not None:
+            run.review.push(req.command.model_dump(exclude_none=True))
+        if req.order is not None:
+            run.review.set_order(req.order)  # before finish or stop, which end the wait
+        if req.finish:
+            run.review.finish()
         if req.stop:
             run.review.stop()
         return run.to_payload(time.monotonic())

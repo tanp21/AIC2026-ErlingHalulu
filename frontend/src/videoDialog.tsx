@@ -13,10 +13,20 @@ export interface ExactFrameCapture {
   onCapture(frameId: number, rowIndex: number, eventIndex: number): number;
 }
 
-export function VideoDialog({ result, onClose, capture, initialFrameId, initialRowIndex, initialEventIndex, startPaused = false }: {
+/**
+ * Exact-frame stepping for a caller that is not the collaboration workspace: whatever the
+ * buttons do with a frame (the agent's review view adds it to the candidates, or assigns
+ * it to a TRAKE event) is theirs, the dialog only finds the frame and its time.
+ */
+export interface FramePicker {
+  actions: Array<{ label: string; onPick(frameId: number, time: number): void }>;
+}
+
+export function VideoDialog({ result, onClose, capture, picker, initialFrameId, initialRowIndex, initialEventIndex, startPaused = false }: {
   result: SearchResult;
   onClose(): void;
   capture?: ExactFrameCapture;
+  picker?: FramePicker;
   initialFrameId?: number;
   initialRowIndex?: number;
   initialEventIndex?: number;
@@ -156,6 +166,13 @@ export function VideoDialog({ result, onClose, capture, initialFrameId, initialR
   }
 
   const canCapture = Boolean(capture?.active && paused && !seeking && liveFrameId !== null);
+  const canPick = Boolean(picker && paused && !seeking && liveFrameId !== null && mapping);
+  function pick(action: FramePicker["actions"][number]) {
+    if (!canPick || liveFrameId === null || !mapping) return;
+    action.onPick(liveFrameId, frameTime(mapping, liveFrameId));
+    setMessageIsError(false);
+    setMessage(`${action.label}: frame ${liveFrameId}`);
+  }
   const activeCue = cues.findIndex((cue) => cue.start <= playbackTime && playbackTime < cue.end);
   const nextCue = cues.findIndex((cue) => cue.start > playbackTime);
   const followedCue = activeCue >= 0 ? activeCue : nextCue >= 0 ? nextCue : Math.max(0, cues.length - 1);
@@ -216,7 +233,7 @@ export function VideoDialog({ result, onClose, capture, initialFrameId, initialR
               videoRef.current.currentTime = result.time; setPlaybackTime(result.time);
             }
           }} />
-        {capture && <section className="exact-frame-controls" aria-label="Select exact frame">
+        {(capture || picker) && <section className="exact-frame-controls" aria-label="Select exact frame">
           <div className="frame-stepper">
             <button disabled={!paused || seeking || liveFrameId === null} aria-label="Back 10 frames" onClick={() => step(-10)}>−10</button>
             <button disabled={!paused || seeking || liveFrameId === null} aria-label="Back 1 frame" onClick={() => step(-1)}>−1</button>
@@ -224,7 +241,7 @@ export function VideoDialog({ result, onClose, capture, initialFrameId, initialR
             <button disabled={!paused || seeking || liveFrameId === null} aria-label="Forward 1 frame" onClick={() => step(1)}>+1</button>
             <button disabled={!paused || seeking || liveFrameId === null} aria-label="Forward 10 frames" onClick={() => step(10)}>+10</button>
           </div>
-          <div className="capture-destination">
+          {capture && <div className="capture-destination">
             <label>Answer row<select disabled={!capture.active} aria-label="Answer row" value={rowIndex} onChange={(event) => setRowIndex(Number(event.target.value))}>
               <option value={-1}>{capture.query.kind === "trake" ? "New row" : "Add new prediction"}</option>
               {capture.answers.map((answer, index) => <option key={index} value={index}>Row #{index + 1} · {answer.video_id || "empty"}</option>)}
@@ -236,8 +253,13 @@ export function VideoDialog({ result, onClose, capture, initialFrameId, initialR
             <button className="use-exact-frame" disabled={!canCapture} onClick={useFrame}>
               {liveFrameId === null ? "Use this frame" : `Use frame ${liveFrameId}`}
             </button>
-          </div>
-          {!capture.active && <p className="message warning">Historical round · cannot record frame</p>}
+          </div>}
+          {picker && <div className="capture-destination">
+            {picker.actions.map((action) =>
+              <button key={action.label} type="button" className="use-exact-frame" disabled={!canPick}
+                onClick={() => pick(action)}>{action.label}</button>)}
+          </div>}
+          {capture && !capture.active && <p className="message warning">Historical round · cannot record frame</p>}
           {message && <p className={`capture-message${messageIsError ? " error" : ""}`} role={messageIsError ? "alert" : "status"}>{message}</p>}
         </section>}
           </div>
@@ -251,7 +273,7 @@ export function VideoDialog({ result, onClose, capture, initialFrameId, initialR
             <header><span className="eyebrow">TRANSCRIPT</span><strong>Currently playing</strong>
               {!followTranscript && <button type="button" onClick={() => setFollowTranscript(true)}>Follow video</button>}
             </header>
-            <section className="video-ranking-evidence" aria-label="Ranking evidence">
+            {!picker && <section className="video-ranking-evidence" aria-label="Ranking evidence">
               <strong>{evidenceLabel}</strong>
               {result.transcript_snippet && <p>{result.transcript_snippet}</p>}
               {result.source === "both" && result.transcript_start !== undefined && result.transcript_end !== undefined &&
@@ -263,7 +285,7 @@ export function VideoDialog({ result, onClose, capture, initialFrameId, initialR
                 {result.scores.semantic_rank != null ? ` · Semantic #${result.scores.semantic_rank}` : ""}
               </small>}
               {result.matched_keywords?.length ? <small>Match: {result.matched_keywords.join(", ")}</small> : null}
-            </section>
+            </section>}
             {transcriptLoading && <p className="transcript-state">Loading transcript…</p>}
             {!transcriptLoading && transcriptError && <p className="transcript-state">Failed to load transcript.</p>}
             {!transcriptLoading && !transcriptError && cues.length === 0 && <p className="transcript-state">This video has no transcript.</p>}

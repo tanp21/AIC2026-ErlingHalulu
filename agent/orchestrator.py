@@ -24,13 +24,17 @@ import re
 import time
 
 from .evaluate import normalize_answer
+from .evidence import (
+    TIE_BAND, EvidenceStore, QueryDetails, detail_weights, evidence_of, query_details, suggest_answers,
+    summarize_all, video_coverage,
+)
 from .llm import LLMError
 from .plan import (
     TRAKE_TIGHT_GAP, Plan, analysis_messages, expected_events, initial_queries, parse_plan,
     transcript_text,
 )
 from .pool import VERIFIED_MATCH, Candidate, CandidatePool, Sequence, Verdict, local_path
-from .prompts import AGENT_SYSTEM, LOOKUP_PROMPT, REWRITE_SYSTEM
+from .prompts import AGENT_SYSTEM, HUMAN_REWRITE_NOTE, LOOKUP_PROMPT, REWRITE_SYSTEM
 from .review import HUMAN_ACCEPT, HUMAN_REJECT, HumanReview
 from .tasks import Task
 from .vision import Inspector, caption_at, label_context, transcript_window
@@ -41,6 +45,19 @@ VIDEO_ID = re.compile(r"^[A-Z]\d{2}_V\d{3}$")
 OBSERVE_TOP = 12
 #: How many candidates the live review view shows (every pending one is added on top).
 PROGRESS_TOP = 24
+#: A person judging scans a grid rather than a handful, so the view carries far more.
+PROGRESS_TOP_HUMAN = 80
+#: How many candidates get a checklist. Every one shown, not a leading slice of the retrieval order:
+#: a p2-6 report found the gold candidate at rank 25 by retrieval fusion sitting with no checklist at
+#: all, because only the top 20 of that order ever got one -- the ordering this checklist itself is
+#: meant to fix never got the chance to see it. Retrieval only proposes candidates and can rank the
+#: right one anywhere in what is shown, so the checklist has to reach all of it, not a leading slice.
+SUMMARY_TOP = PROGRESS_TOP_HUMAN
+#: Calls in flight at once (each is one video's candidates -- captions, speech and OCR together, and
+#: up to three of that video's candidates judged by vision in parallel within it). Raised alongside
+#: `SUMMARY_TOP`: checklisting every shown candidate instead of a leading 20 is roughly four times the
+#: work, and this is what keeps it roughly the same wall-clock time instead of four times as long.
+SUMMARY_WORKERS = 12
 #: How often a wait on a model call looks at the human's decisions.
 REVIEW_POLL_SECONDS = 0.25
 # A reading whose evidence is the narration: its names went through ASR.
@@ -81,6 +98,20 @@ class AgentOptions:
     max_rows: int = 100
     plan_thinking: bool = False
     spoken_numbers: bool = False
+    #: `model` sends frames to a vision model to decide; `human` never does for a decision -- a
+    #: person looks at every candidate through the UI and the run waits for them (see agent/review.py).
+    judge: str = "model"
+    #: `human` only: seconds of the reviewer doing nothing before the run finishes with
+    #: what it has, so an abandoned tab does not hold a worker forever.
+    human_idle_timeout: float = 900.0
+    #: `human` only: also show DeepSeek the pixels of each candidate's own moment while building the
+    #: checklist (`agent.evidence.vision_summarize`). A caption is one model's guess about a frame, made
+    #: once, offline, and can misname or miscount; the candidate's own pixels, plus the frames of the
+    #: shots around it, are ground truth the text-only checklist never had. This never decides anything
+    #: by itself -- the checklist stays a hint, and the person still accepts, rejects or scores every
+    #: candidate -- and it costs one more DeepSeek call per candidate, server to DeepSeek, not the
+    #: reviewer's own bandwidth.
+    checklist_vision: bool = True
 
     @classmethod
     def for_mode(cls, mode="fast", **overrides):
@@ -124,6 +155,8 @@ class AgentResult:
     notes: str = ""
     elapsed: float = 0.0
     error: str | None = None
+    #: Every reviewer action with its timestamp (human judge only), for measuring the person.
+    review_log: list[dict] = field(default_factory=list)
 
     def to_dict(self):
         def candidate(c):
@@ -142,6 +175,7 @@ class AgentResult:
             "sequences": [vars(s) for s in self.sequences],
             "lookups": self.lookups, "trace": self.trace, "notes": self.notes,
             "elapsed": round(self.elapsed, 1), "error": self.error,
+            **({"review_log": self.review_log} if self.review_log else {}),
         }
 
 
@@ -266,8 +300,21 @@ class _Run:
         self.background = ThreadPoolExecutor(max_workers=3)
         self.pending: list = []
         self.budget = agent.options.time_budget
-        self.review = review or HumanReview()
+        self.human = agent.options.judge == "human"
+        self.review = review or HumanReview(judge=agent.options.judge)
         self.progress = progress
+        #: Candidates the reviewer asked for by hand (neighbours, exact frames), kept in
+        #: the view however low the fusion ranks them.
+        self.pinned: list[str] = []
+        #: The query as checkable details, and DeepSeek's per-candidate checklist against
+        #: them (agent/evidence.py). Written by one background job at a time.
+        self.details: QueryDetails | None = None
+        self.summaries: dict[str, dict] = {}
+        self.suggestions: list[dict] = []
+        self.summarizing = False
+        self._summary_tried: set[str] = set()
+        self._suggest_tried = False
+        self.evidence = EvidenceStore(agent.search)
         #: A stage code the UI translates: planning, searching, judging, second_look,
         #: rewriting, agent_loop, reading_answer, checking_paths, finalizing, done.
         self.stage = "planning"
@@ -299,7 +346,9 @@ class _Run:
     def execute(self) -> AgentResult:
         self._publish("planning")
         try:
-            if self.options.mode in ("fast", "auto"):
+            if self.human:
+                self._human()
+            elif self.options.mode in ("fast", "auto"):
                 self._fast()
                 if (self.options.mode == "auto" and self.task.kind != "trake"
                         and not self.review.decided()
@@ -324,6 +373,7 @@ class _Run:
             self.background.shutdown(wait=False, cancel_futures=True)
             self.waiter.shutdown(wait=False, cancel_futures=True)
         self.result.elapsed = self.elapsed()
+        self.result.review_log = self.review.log() if self.human else []
         self.stage = "done"
         self._publish()
         return self.result
@@ -343,8 +393,15 @@ class _Run:
     def snapshot(self) -> dict:
         """What Gemini is shown, as it is shown, for a teammate to judge alongside it."""
         ordered = self.pool.ordered()
-        shown = ordered[:PROGRESS_TOP]
+        agent_rank = {c.cid: index + 1 for index, c in enumerate(ordered)}
+        weights, common = self._detail_weights()
+        coverage = self._video_coverage(weights)
+        if self.human and not self.summarizing:
+            # Not while the checklist is still arriving: candidates would jump about under the cursor.
+            ordered = self._by_evidence(ordered, weights, coverage)
+        shown = ordered[:PROGRESS_TOP_HUMAN if self.human else PROGRESS_TOP]
         shown += [c for c in ordered if c.cid in self.judging and c not in shown]
+        shown += [c for c in ordered if c.cid in self.pinned and c not in shown]
         plan = None
         if self.plan is not None:
             plan = {
@@ -354,12 +411,11 @@ class _Run:
                 "question_vi": self.plan.question_vi,
                 "events": self.plan.events_en,
             }
-        return {
-            "stage": self.stage,
-            "step": self.step,
-            "elapsed": round(self.elapsed(), 1),
-            "plan": plan,
-            "candidates": [{
+            if self.human:
+                plan["keywords"] = self._keywords()
+
+        def candidate(c):
+            item = {
                 "id": c.cid, "video_id": c.video_id, "frame_idx": c.frame_idx,
                 "time": round(c.time, 3), "judging": c.cid in self.judging,
                 "verdict": None if c.verdict is None else vars(c.verdict),
@@ -368,31 +424,79 @@ class _Run:
                 "context": label_context(
                     c, self.agent.inspector.caption_for(c.video_id, c.frame_idx)),
                 "sources": sorted({e.kind for e in c.evidence.values()}),
-            } for c in shown],
+            }
+            if self.human:
+                # Which query found it and how high: a moment three channels agree on is
+                # a different bet from one visual hit at rank 90.
+                item["channels"] = sorted(
+                    ({"kind": e.kind, "source": e.source, "rank": e.rank}
+                     for e in c.evidence.values() if e.kind != "neighbour"),
+                    key=lambda channel: channel["rank"])
+                item["fused"] = round(c.fused, 5)
+                item["pinned"] = c.cid in self.pinned
+                item["summary"] = self.summaries.get(c.cid)
+                item["evidence"] = evidence_of(item["summary"], weights, c.time, coverage.get(c.video_id, 0.0))
+                item["agent_rank"] = agent_rank[c.cid]
+            return item
+
+        snapshot = {
+            "stage": self.stage,
+            "step": self.step,
+            "elapsed": round(self.elapsed(), 1),
+            "plan": plan,
+            "candidates": [candidate(c) for c in shown],
             "sequences": [{
                 "video_id": s.video_id, "frames": list(s.frames),
                 "event_scores": s.event_scores, "refined": s.refined,
+                **({"source": s.source, "times": list(s.times)} if self.human else {}),
             } for s in self.result.sequences or self.pool.ranked_sequences()[:8]],
             "answer": self.result.answer,
             "review": self.review.snapshot(),
         }
+        if self.human:
+            snapshot["lookups"] = [
+                {"question": entry["question"], "answer": entry.get("answer"),
+                 "error": entry.get("error"), "sources": entry.get("sources", [])}
+                for entry in self.result.lookups]
+            snapshot["total_candidates"] = len(self.pool)
+            snapshot["details"] = self.details.texts if self.details else []
+            snapshot["detail_weights"], snapshot["common_details"] = weights, common
+            snapshot["summarizing"] = self.summarizing
+            if self.task.kind == "qa":
+                snapshot["suggested_answers"] = self._answer_suggestions()
+        return snapshot
+
+    def _keywords(self) -> dict:
+        """The words a reviewer should see lit up in a transcript, an OCR line or a caption."""
+        plan = self.plan
+        vietnamese = [*plan.transcript_vi, *plan.ocr, plan.question_vi or ""]
+        english = [*plan.caption_en, *plan.readings_en]
+        for scene in plan.scenes:
+            english += scene.visual_en[:1]
+        if self.details:  # the words the checklist looked for, so what is lit is what was searched
+            for detail in self.details.details:
+                vietnamese += detail["terms_vi"]
+                english += detail["terms_en"]
+        return {"vi": [t for t in dict.fromkeys(vietnamese) if t],
+                "en": [t for t in dict.fromkeys(english) if t]}
 
     def _apply_review(self):
         """A teammate's decisions become verdicts no model reply can overwrite."""
         self.review.changed.clear()
-        decisions = self.review.decisions()
-        for cid, decision in decisions.items():
+        decisions = self.review.verdicts()
+        for cid, value in decisions.items():
             candidate = self.pool.get(cid)
             if candidate is None:
                 continue
             if candidate.verdict is None or candidate.verdict.by != "human":
                 self.model_verdicts[cid] = candidate.verdict
-            accepted = decision == "accept"
-            candidate.verdict = Verdict(
-                HUMAN_ACCEPT if accepted else HUMAN_REJECT,
-                "Accepted by the reviewer" if accepted else "Rejected by the reviewer",
-                by="human",
-            )
+            if value >= HUMAN_ACCEPT:
+                reason = "Accepted by the reviewer"
+            elif value <= HUMAN_REJECT:
+                reason = "Rejected by the reviewer"
+            else:
+                reason = f"Scored {value:.0f}/10 by the reviewer"
+            candidate.verdict = Verdict(value, reason, by="human")
         for cid, verdict in list(self.model_verdicts.items()):
             if cid not in decisions:  # a withdrawn decision gives the model its verdict back
                 candidate = self.pool.get(cid)
@@ -401,7 +505,7 @@ class _Run:
                 del self.model_verdicts[cid]
 
     def _human_says(self, cid) -> bool:
-        return cid in self.review.decisions()
+        return cid in self.review.verdicts()
 
     def _await(self, futures, give_up):
         """Wait for model calls, re-applying decisions, until done or `give_up()`.
@@ -418,6 +522,162 @@ class _Run:
                 self._publish()
             if not pending or give_up():
                 return done
+
+    # -- human judge mode ------------------------------------------------------------
+    def _human(self):
+        """Plan and search, then let a person judge; no model ever sees a frame.
+
+        Round 1 is the same batch every mode runs. After it the run waits for the
+        reviewer, who steers: `more` asks DeepSeek for a rewrite that takes their
+        verdicts and note into account, `scope` searches inside one video,
+        `neighbours` and `add_frame` put exact keyframes in front of them. It ends
+        on `finish`/`stop`, or after `human_idle_timeout` seconds of silence.
+        """
+        if self.cooking:
+            self._lookup_later(cooking_lookup(self.task.text, None),
+                               "món ăn (Món ngon mỗi ngày)", about_the_query=True)
+        self._plan()
+        for question in self.plan.lookups:
+            self._lookup_later(LOOKUP_PROMPT.format(question=question), question, about_the_query=True)
+        self._run_search(initial_queries(self.plan, self.task, self.options.spoken_numbers,
+                                         skip_kinds=self._unavailable_channels()), "round1")
+        if self.task.kind == "trake":
+            self._local_paths_for_review()
+        self._kick_summaries()
+        self._publish("awaiting_review")
+        self._human_loop()
+
+    def _human_loop(self):
+        quiet_since, seen = self.agent.clock(), len(self.review.log())
+        while not self.review.decided():
+            self._collect_lookups(0)
+            woken = self.review.changed.wait(REVIEW_POLL_SECONDS)
+            # A background summary also wakes the loop, but only the person counts as activity.
+            if len(self.review.log()) != seen:
+                seen, quiet_since = len(self.review.log()), self.agent.clock()
+            elif self.agent.clock() - quiet_since > self.options.human_idle_timeout:
+                self.log("human", {}, "no reviewer activity; finishing with the current ranking",
+                         self.agent.clock())
+                return
+            if not woken:
+                continue
+            self._apply_review()
+            for command in self.review.take_commands():
+                if self.review.decided():
+                    break
+                self._run_command(command)
+            self._kick_summaries()
+            self._publish("awaiting_review")
+
+    def _run_command(self, command):
+        """One reviewer request to search; a failure is a note in the trace, never the run."""
+        started = self.agent.clock()
+        kind = command.get("type")
+        try:
+            if kind == "more":
+                self._rewrite_round(hint=command.get("hint"))
+            elif kind == "scope":
+                video_id = str(command.get("video_id", ""))
+                if VIDEO_ID.match(video_id):
+                    self._publish("searching")
+                    self._run_search(self._scoped_queries(room=6, only=[video_id]), f"scope.{video_id}")
+            elif kind == "neighbours":
+                candidate = self.pool.get(str(command.get("cid", "")))
+                if candidate is not None:
+                    self._publish("searching")
+                    radius = min(max(int(command.get("radius") or self.options.neighbour_radius), 1), 10)
+                    for frame in self.agent.search.neighbours(candidate.video_id, candidate.frame_idx, radius):
+                        added = self.pool.add_frame(frame["video_id"], frame["frame_idx"], frame["time"],
+                                                    source=f"n.{candidate.cid}")
+                        if added.cid not in self.pinned:
+                            self.pinned.append(added.cid)
+            elif kind == "add_frame":
+                video_id = str(command.get("video_id", ""))
+                if VIDEO_ID.match(video_id):
+                    added = self.pool.add_frame(video_id, int(command["frame_idx"]),
+                                                float(command.get("time") or 0.0), source="human")
+                    if added.cid not in self.pinned:
+                        self.pinned.append(added.cid)
+                    if command.get("accept"):
+                        self.review.decide(added.cid, "accept")
+                    self._apply_review()
+            self.log("human", command, "ok", started)
+        except Exception as exc:  # a search that fails must not end the review
+            logger.exception("%s reviewer command %s failed", self.task.query_id, kind)
+            self.log("human", command, f"failed: {type(exc).__name__}: {exc}", started)
+
+    def _kick_summaries(self):
+        """Start the text checklist for candidates that have none, unless one is running.
+
+        Runs on the background pool and reads only words: the transcript, OCR text and
+        caption around each moment. The orchestrator thread does the publishing -- a
+        background thread that published would walk the pool while a command is
+        adding to it -- so the job only nudges the loop to look again.
+        """
+        if not self.human or self.summarizing:
+            return
+        ordered = self.pool.ordered()
+        wanted = ordered[:SUMMARY_TOP] + [c for c in ordered if c.cid in self.pinned]
+        fresh = [c for c in wanted if c.cid not in self._summary_tried]
+        suggest = self.task.kind == "qa" and not self._suggest_tried
+        if not fresh and not suggest:
+            return
+        items = [{"id": c.cid, "video_id": c.video_id, "frame_idx": c.frame_idx, "time": c.time} for c in fresh]
+        self._summary_tried.update(item["id"] for item in items)
+        self._suggest_tried = self._suggest_tried or suggest
+        top = ([{"id": c.cid, "video_id": c.video_id, "frame_idx": c.frame_idx, "time": c.time} for c in ordered[:2]]
+               if suggest else [])
+        self.summarizing = True
+        self.background.submit(self._summary_job, items, top)
+
+    def _summary_job(self, items, top):
+        started = self.agent.clock()
+        try:
+            if self.details is None:
+                self.details = query_details(self.agent.deepseek, self.task, self.plan)
+
+            def store(found):
+                self.summaries.update(found)
+                self.review.changed.set()  # the loop publishes; see _kick_summaries
+
+            vision = self.agent.deepseek if self.options.checklist_vision else None
+            summarize_all(self.agent.deepseek, self.details, self.evidence, items, workers=SUMMARY_WORKERS,
+                          on_batch=store, vision=vision, search=self.agent.search)
+            if top:
+                question = (self.plan.question_vi if self.plan else None) or self.task.text
+                self.suggestions = suggest_answers(self.agent.deepseek, question, self.details, self.evidence, top)
+        except Exception:  # a checklist is a hint; the person can judge without it
+            logger.exception("%s evidence summary failed", self.task.query_id)
+        finally:
+            self.summarizing = False
+            self.review.changed.set()
+            self.log("summaries", {"n": len(items)}, f"{len(self.summaries)} summarised", started)
+
+    def _answer_suggestions(self) -> list[dict]:
+        """Answers for a Q&A question that the words around the top moments or the web offer."""
+        found = [{**s, "source": s.get("source") or "video"} for s in self.suggestions]
+        for entry in self.result.lookups:
+            web = tagged(entry.get("answer", "") or "", "ĐÁP ÁN")
+            if web:
+                found.append({"answer": web, "source": "web", "quote": entry["question"],
+                              "cid": None, "confidence": 0.0})
+        return found
+
+    def _local_paths_for_review(self):
+        """TRAKE: paths found by searching each event inside the leading videos, as candidates.
+
+        The reviewer assembles the sequence from frames, so these paths' frames have to
+        be in the grid, and the paths themselves offered as a starting point.
+        """
+        count = expected_events(self.plan, self.task)
+        sequences = self.pool.ranked_sequences(count)
+        events = (self.plan.events_en or [scene.visual_en[0] for scene in self.plan.scenes])[:count]
+        events += [""] * (count - len(events))
+        local = self._local_sequences(sequences, events)
+        for sequence in local:
+            for frame, time in zip(sequence.frames, sequence.times):
+                self.pool.add_frame(sequence.video_id, frame, time, source="local", kind="temporal")
+        self.result.sequences = local + sequences
 
     # -- fast mode -----------------------------------------------------------------
     def _fast(self):
@@ -504,9 +764,13 @@ class _Run:
             for entry in self.result.lookups
         ) or "(none)"
 
-    def _rewrite_round(self):
-        """DeepSeek (no thinking, one call) rewrites what round 1 missed; runs and verifies it."""
-        self.step = 1
+    def _rewrite_round(self, hint=None):
+        """DeepSeek (no thinking, one call) rewrites what round 1 missed; runs and verifies it.
+
+        With a human judge nothing is verified: the new candidates go to the reviewer,
+        `hint` is what they typed, and the round can repeat, so it gets its own step.
+        """
+        self.step = self.step + 1 if self.human else 1
         self._publish("rewriting")
         started = self.agent.clock()
         # A cooking lookup started before planning is usually back by now; its dish
@@ -520,6 +784,7 @@ class _Run:
                 f"Task type: {self.task.kind}\nQuery:\n{self.task.text}\n\n"
                 f"Round-1 plan:\n{json.dumps(self.plan.to_dict(), ensure_ascii=False)}\n\n"
                 f"Web notes:\n{self._web_notes()}\n\nRound-1 result:\n{self.observation()}"
+                + (HUMAN_REWRITE_NOTE.format(hint=hint or "(none)") if self.human else "")
             )},
         ]
         try:
@@ -538,6 +803,8 @@ class _Run:
         self.log("rewrite", {"queries": queries},
                  "; ".join(str(q.get("text") or q.get("events"))[:60] for q in queries), started)
         self._run_search(queries, "rewrite")
+        if self.human:
+            return
         fresh = self._best_neighbours()
         self._verify(fresh + self.pool.to_verify(self.options.verify_top - len(fresh)))
 
@@ -568,7 +835,7 @@ class _Run:
                  "method": "keyword", "limit": 100}
                 for index, name in enumerate(names[:max(0, room)])]
 
-    def _scoped_queries(self, room, videos=3):
+    def _scoped_queries(self, room, videos=3, only=None):
         """Each scene searched inside the videos round 1 favoured.
 
         Right video, wrong moment is the commonest miss, and on a multi-scene query
@@ -576,7 +843,7 @@ class _Run:
         that did can be generic ("two women with a phone") while the distinctive
         scene ("a Black woman walking past") is never searched inside it.
         """
-        leading = self.pool.video_ranking()[:videos]
+        leading = list(only) if only else self.pool.video_ranking()[:videos]
         if not leading or room <= 0:
             return []
         order = [self.plan.target_scene] + [index for index in range(len(self.plan.scenes))
@@ -666,7 +933,7 @@ class _Run:
         show (finishing order), hence the prompt's not_visible rule and a rejection
         that never lowers the score.
         """
-        if not self.options.falsify or self.review.decided():
+        if not self.options.falsify or self.review.decided() or self.human:
             return False
         started = self.agent.clock()
         self.judging = {candidate.cid}
@@ -737,7 +1004,7 @@ class _Run:
         """
         self._apply_review()
         candidates = [c for c in candidates if not self._human_says(c.cid)]
-        if not candidates or self.review.decided():
+        if not candidates or self.review.decided() or self.human:
             return
         started = self.agent.clock()
         self.judging = {c.cid for c in candidates}
@@ -882,8 +1149,9 @@ class _Run:
             best = sorted(self.pool.sequences, key=lambda s: s.rank)[:3]
             lines.append("Temporal paths: " + "; ".join(
                 f"{s.video_id} frames={s.frames} candidates={s.candidate_ids}" for s in best))
-        lines.append(f"Budget: step {self.step}/{self.options.max_steps}, "
-                     f"{self.elapsed():.0f}s/{self.budget:.0f}s used.")
+        if not self.human:
+            lines.append(f"Budget: step {self.step}/{self.options.max_steps}, "
+                         f"{self.elapsed():.0f}s/{self.budget:.0f}s used.")
         return "\n".join(lines)
 
     def _initial_message(self):
@@ -989,10 +1257,88 @@ class _Run:
                     and c.verdict.score >= VERIFIED_MATCH]
         chosen = accepted + [c for c in chosen if c not in accepted]
         self.result.ranking = chosen + [c for c in ordered if c not in chosen]
+        if self.human:
+            # The order on the reviewer's screen if they sent it; else the evidence's, never retrieval's alone.
+            self.result.ranking = (self._in_the_order_seen(self.result.ranking) if self.review.order
+                                   else self._by_evidence(self.result.ranking))
         if self.task.kind == "qa":
             self._finalize_answer()
         if self.task.kind == "trake":
-            self._finalize_sequences()
+            self._finalize_sequences_human() if self.human else self._finalize_sequences()
+
+    def _detail_weights(self):
+        entries = self.details.details if self.details else []
+        return detail_weights(self.summaries.values(), len(entries), entries)
+
+    @staticmethod
+    def _split(ranking):
+        """Accepted candidates, the ones nobody has settled, and rejected ones, each in its given order.
+
+        What a reviewer accepted leads and what they rejected trails whatever any other order says.
+        """
+        def bucket(candidate):
+            verdict = candidate.verdict
+            if verdict is not None and verdict.by == "human":
+                return 0 if verdict.score >= VERIFIED_MATCH else 2 if verdict.score <= 3 else 1
+            return 1
+
+        return ([c for c in ranking if bucket(c) == 0], [c for c in ranking if bucket(c) == 1],
+                [c for c in ranking if bucket(c) == 2])
+
+    def _video_coverage(self, weights):
+        return video_coverage([(c.video_id, self.summaries[c.cid]) for c in self.pool.candidates.values()
+                               if c.cid in self.summaries], weights)
+
+    def _by_evidence(self, ranking, weights=None, coverage=None):
+        """The unsettled candidates ordered by what the words around them support, not by retrieval.
+
+        The searches (visual, audio, OCR, temporal) only find candidates, and each of them can be
+        wrong: three visual queries ranked a frame of blue bowls first for a query about clams
+        beside a vase of ginger. So a candidate is ranked by its checklist -- the weighted share of
+        the query's details the transcript, OCR and captions around it support, and the share its
+        whole video supports -- and retrieval order is only what separates candidates the evidence
+        cannot: those within `TIE_BAND` of each other, and those with a checklist that says nothing
+        or none. Only support counts; a contradiction is shown but does not lower a candidate
+        (see `agent.evidence.STATUS_VALUE`).
+
+        Within a tie, the candidate's OWN share settles it before retrieval does -- video coverage
+        LIFTS a tie, it does not decide one. Reported on p2-6: two videos of the same real event, one
+        with the query's distinctive graphic (a candidate's own share .66) and one without it (a
+        different candidate's own share .63, from a duplicate broadcast whose own narration happened
+        to state a headcount the first video's did not); the second video's every candidate still
+        scored the detail it lacks as `not_mentioned`, so it added nothing there, but scored fuller on
+        two others, and the blended score put it in the same band, one place ahead by retrieval alone.
+        Retrieval had no opinion on either video's story -- it is not evidence of which one is right --
+        so it is not what should break a tie the checklist can: the candidate whose own moment supports
+        more of the query leads, and only candidates tied on that too fall back to retrieval.
+        """
+        weights = self._detail_weights()[0] if weights is None else weights
+        coverage = self._video_coverage(weights) if coverage is None else coverage
+        head, middle, tail = self._split(ranking)
+
+        def key(pair):
+            position, candidate = pair
+            found = evidence_of(self.summaries.get(candidate.cid), weights, candidate.time,
+                                coverage.get(candidate.video_id, 0.0))
+            if found is None or found["tier"] == 1:
+                return (1, 0, 0, position)
+            # Bands, not raw scores: a difference smaller than TIE_BAND is a tie for retrieval to settle.
+            return (0, -round(found["score"] / TIE_BAND), -found["share"], position)
+
+        return head + [c for _, c in sorted(enumerate(middle), key=key)] + tail
+
+    def _in_the_order_seen(self, ranking):
+        """Candidates nobody judged, in the order the reviewer's screen showed them.
+
+        The view re-ranks those by their checklist; a submission that ignored it would put on
+        top what the reviewer was looking at fifth. What they accepted still leads, what they
+        rejected still trails, and a candidate the screen never listed follows the listed ones
+        in the agent's own order.
+        """
+        position = {cid: index for index, cid in enumerate(self.review.order)}
+        head, middle, tail = self._split(ranking)
+        middle = sorted(enumerate(middle), key=lambda pair: (0, position[pair[1].cid]) if pair[1].cid in position else (1, pair[0]))
+        return head + [c for _, c in middle] + tail
 
     def _finalize_answer(self):
         """Agent's committed answer, else a dedicated reading of the top moment.
@@ -1007,11 +1353,17 @@ class _Run:
             return
         answer = str((self.finished or {}).get("answer") or "").strip()
         evidence = "agent (finish)"
-        if not answer and self.result.ranking and not self.review.decided():
+        if not answer and self.result.ranking and not self.review.decided() and not self.human:
             if self.options.mode != "deep":
                 answer, evidence = self._answer_with_web()
             else:
                 answer, evidence, _ = self._read_answer()
+        if not answer and self.human:
+            # The person submitted without typing one: a suggestion read from the words
+            # around the top moments beats an empty answer cell, and is labelled as unconfirmed.
+            suggestion = next(iter(self._answer_suggestions()), None)
+            if suggestion:
+                answer, evidence = suggestion["answer"], f"suggested from {suggestion['source']} (unconfirmed)"
         if not answer:
             top = next((c for c in self.result.ranking if c.verdict and c.verdict.answer), None)
             if top is not None:
@@ -1189,6 +1541,22 @@ class _Run:
             else:
                 final.append(sequence)
         self.result.sequences = final
+
+    def _finalize_sequences_human(self):
+        """The reviewer's path first; the paths the run found follow, as alternatives.
+
+        Nothing is checked or refined: a model picking frames is what the person is
+        replacing, and re-picking their frames would undo the point of choosing them.
+        """
+        found = self.result.sequences or self.pool.ranked_sequences(expected_events(self.plan, self.task))
+        chosen = self.review.sequence
+        if chosen:
+            by_frame = {(c.video_id, c.frame_idx): c.time for c in self.pool.candidates.values()}
+            times = chosen.get("times") or [by_frame.get((chosen["video_id"], f), 0.0) for f in chosen["frames"]]
+            found = [Sequence("human", 0, chosen["video_id"], list(chosen["frames"]),
+                              [float(t) for t in times], 10.0, [])] + [
+                s for s in found if (s.video_id, tuple(s.frames)) != (chosen["video_id"], tuple(chosen["frames"]))]
+        self.result.sequences = found
 
     def _local_sequences(self, sequences, events, videos=4):
         """One tight path per leading video, from each event searched inside that video.

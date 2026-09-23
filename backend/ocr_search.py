@@ -267,3 +267,18 @@ def search_ocr_filter(text: str, k: int = 100, *, client=None, index: str = OCR_
         for rank, hit in enumerate(parse_search_response(response), 1)
     ]
     return ranked[:k]
+
+
+def ocr_for_video(video_id: str, k: int = 500, *, client=None, index: str = OCR_INDEX) -> list[OcrHit]:
+    """Every OCR'd shot of one video, in time order.
+
+    A ranked hit only exists for a query that matched it; a reviewer checking a
+    candidate needs the on-screen text of its shot whether or not any query did.
+    """
+    client = client or get_client()
+    response = client.search(index=index, body={
+        "size": k,
+        "query": {"term": {"video_id": video_id}},
+        "sort": [{"start_sec": "asc"}],
+    })
+    return parse_search_response(response)

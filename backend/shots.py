@@ -231,6 +231,32 @@ def caption_for_frame(video_id, seconds, *, data_dir=DATA):
     return best[1] if best else None
 
 
+def captions_for_video(video_id, *, data_dir=DATA):
+    """Every caption window of one video, in time order, read straight from disk.
+
+    The per-video parquet holds what the Elasticsearch caption index was built from, so
+    a deployment whose index has not been built still has every caption. `[]` for a video
+    that was never captioned (any 2025 `K*` video, or a 2026 one the shot pass has not
+    reached). A window carries no keyframe of its own, so `frame_idx` is None and `time`
+    is its midpoint.
+    """
+    path = captions_path(video_id, data_dir=data_dir)
+    if path is None or not path.exists():
+        return []
+    windows = []
+    for start, end, shot_index, window_index, window_count, caption in _caption_rows(str(path)):
+        text = strip_caption_lead_in(caption or "").strip()
+        if start is None or end is None or not text:
+            continue
+        windows.append({
+            "shot_idx": int(shot_index), "window_idx": int(window_index),
+            "window_count": int(window_count), "frame_idx": None,
+            "start": round(float(start), 3), "end": round(float(end), 3),
+            "time": round((float(start) + float(end)) / 2, 3), "text": text,
+        })
+    return sorted(windows, key=lambda window: (window["start"], window["window_idx"]))
+
+
 def frame_duration(mapping, frame_idx):
     """Seconds one source frame occupies, from the neighbouring PTS delta."""
     pts = mapping.pts

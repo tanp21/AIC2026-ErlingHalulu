@@ -1,4 +1,4 @@
-import type { CompareResult, ImageSearchRequest, IndexProfile, SearchRequest, SearchResponse, Session, TemporalSearchRequest, TemporalSearchResponse, TranscriptResponse, SearchResult } from "./types";
+import type { CaptionsResponse, CompareResult, ImageSearchRequest, IndexProfile, OcrResponse, SearchRequest, SearchResponse, Session, TemporalSearchRequest, TemporalSearchResponse, TranscriptResponse, SearchResult } from "./types";
 
 async function readJson<T>(response: Response): Promise<T> {
   const data = await response.json();
@@ -88,11 +88,23 @@ export async function fetchTranscript(videoId: string): Promise<TranscriptRespon
   return readJson<TranscriptResponse>(response);
 }
 
-export async function fetchKeyframeContext(videoId: string, frameId: number, profile?: string): Promise<{ video_id: string; frame_idx: number; frames: SearchResult[] }> {
-  const params = new URLSearchParams({ radius: "10" });
+export async function fetchKeyframeContext(videoId: string, frameId: number, profile?: string, radius = 10): Promise<{ video_id: string; frame_idx: number; frames: SearchResult[] }> {
+  const params = new URLSearchParams({ radius: String(radius) });
   if (profile) params.set("profile", profile);
   const response = await fetch(`/context/${encodeURIComponent(videoId)}/${frameId}?${params}`, {
     cache: "no-store",
   });
   return readJson(response);
+}
+
+export async function fetchOcr(videoId: string): Promise<OcrResponse> {
+  return readJson<OcrResponse>(await fetch(`/ocr/${encodeURIComponent(videoId)}`));
+}
+
+/**
+ * Every caption window of a video. `/captions/{id}` answers from Elasticsearch, which a
+ * deployment may not have built; the captions themselves are on disk either way.
+ */
+export async function fetchCaptions(videoId: string): Promise<CaptionsResponse> {
+  return readJson<CaptionsResponse>(await fetch(`/captions/${encodeURIComponent(videoId)}/windows`));
 }

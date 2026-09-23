@@ -1,10 +1,14 @@
 import { FormEvent, useEffect, useState } from "react";
 
-import { downloadAgentSubmission, fetchAgentRun, reviewAgentRun, startAgentRun } from "./agentApi";
+import {
+  AgentApiError, downloadAgentSubmission, fetchActiveAgentRun, fetchAgentRun, reviewAgentRun,
+  startAgentRun,
+} from "./agentApi";
+import { AgentReviewWorkspace } from "./agentReview";
 import { formatTimestamp } from "./results";
 import { VideoDialog } from "./videoDialog";
 import type {
-  AgentCandidate, AgentLiveCandidate, AgentMode, AgentProgress, AgentReviewRequest,
+  AgentCandidate, AgentJudge, AgentLiveCandidate, AgentMode, AgentProgress, AgentReviewRequest,
   AgentReviewState, AgentRunResponse, AgentRunResult, AgentStage, AgentVerdict, QueryKind, SearchResult,
 } from "./types";
 
@@ -23,6 +27,7 @@ const STAGE_LABELS: Record<AgentStage, string> = {
   reading_answer: "Gemini is reading the answer",
   checking_paths: "Gemini is checking TRAKE paths",
   finalizing: "Finishing",
+  awaiting_review: "Waiting for your review",
   done: "Done",
 };
 
@@ -49,8 +54,10 @@ export function AgentPanel() {
   const [text, setText] = useState("");
   const [kind, setKind] = useState<QueryKind>("kis");
   const [mode, setMode] = useState<AgentMode>("fast");
+  const [judge, setJudge] = useState<AgentJudge>("model");
   const [run, setRun] = useState<AgentRunResponse | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [openCandidate, setOpenCandidate] = useState<SearchResult | null>(null);
@@ -62,7 +69,11 @@ export function AgentPanel() {
     let cancelled = false;
     const timer = window.setInterval(() => {
       fetchAgentRun(runId)
-        .then((next) => { if (!cancelled) setRun(next); })
+        .then((next) => {
+          if (cancelled) return;
+          setRun(next);
+          if (next.status !== "running") setNotice("");
+        })
         .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "Request failed"); });
     }, POLL_MS);
     return () => { cancelled = true; window.clearInterval(timer); };
@@ -76,16 +87,26 @@ export function AgentPanel() {
     // client is how this panel came to demand a Gemini key that the server had
     // stopped requiring. The server answers 422 naming the key that is missing.
     if (!text.trim()) { setError("Enter a query."); return; }
-    if (!text.trim()) { setError("Enter a query."); return; }
     setBusy(true);
     setError("");
+    setNotice("");
     setRun(null);
     try {
       setRun(await startAgentRun({
-        text: text.trim(), kind, mode,
+        text: text.trim(), kind, mode, judge,
         deepseek_api_key: deepseekKey.trim(), gemini_api_key: geminiKey.trim(),
       }));
     } catch (err) {
+      // The server allows one live run per user. Rather than dead-ending on that
+      // conflict, show the run that is holding the slot: it carries the stop button.
+      if (err instanceof AgentApiError && err.status === 409) {
+        const active = await fetchActiveAgentRun().catch(() => null);
+        if (active) {
+          setRun(active);
+          setNotice("You already have a run in progress — it is shown below. Stop it to run this query.");
+          return;
+        }
+      }
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {
       setBusy(false);
@@ -126,9 +147,12 @@ export function AgentPanel() {
     setRun(null);
   }
 
+  // A run judged by the person needs the whole width for the grid and the inspector, and
+  // nothing of the form: its keys and query are already spent.
+  const humanLive = running && run?.review?.judge === "human";
   return (
-    <div className="agent-panel">
-      <form className="agent-form" onSubmit={submit}>
+    <div className={`agent-panel${humanLive ? " wide" : ""}`}>
+      {!humanLive && <form className="agent-form" onSubmit={submit}>
         <div className="agent-key-grid">
           <label className="field"><span>DeepSeek API key</span>
             <input type="password" autoComplete="off" aria-label="DeepSeek API key"
@@ -139,7 +163,8 @@ export function AgentPanel() {
               value={geminiKey} onChange={(event) => updateKey(setGeminiKey, event.target.value)} />
           </label>
         </div>
-        <p className="agent-key-note">Keys are used only for this run, are never stored, and are cleared when you reload the page. Leave a field empty to use the deployment's own key, if it has one.</p>
+        <p className="agent-key-note">Keys are used only for this run, are never stored, and are cleared when you reload the page. Leave a field empty to use the deployment's own key, if it has one.
+          {judge === "human" && " With you as the judge, Gemini is only used for Google-Search lookups, so its key is optional."}</p>
         <label className="field"><span>Query</span>
           <textarea rows={3} maxLength={4000} aria-label="Agent query" value={text}
             placeholder="Vietnamese KIS/Q&A/TRAKE query. TRAKE events go on E1:, E2:, ... lines."
@@ -153,21 +178,30 @@ export function AgentPanel() {
               <option value="trake">TRAKE</option>
             </select>
           </label>
-          <label className="field"><span>Mode</span>
+          <label className="field"><span>Judge</span>
+            <select aria-label="Agent judge" value={judge} onChange={(event) => setJudge(event.target.value as AgentJudge)}>
+              <option value="model">Gemini (automatic)</option>
+              <option value="human">You (human review)</option>
+            </select>
+          </label>
+          {judge === "model" && <label className="field"><span>Mode</span>
             <select aria-label="Agent mode" value={mode} onChange={(event) => setMode(event.target.value as AgentMode)}>
               <option value="fast">Fast (~20 s)</option>
               <option value="auto">Auto (fast, deep if unsure)</option>
               <option value="deep">Deep (minutes)</option>
             </select>
-          </label>
+          </label>}
           <button type="submit" className="search-button" disabled={busy || running}>
             {busy ? "Starting…" : running ? "Running…" : "Run agent"}
           </button>
         </div>
-      </form>
+      </form>}
       {error && <div className="message error" role="alert">{error}</div>}
+      {notice && <div className="message" role="status">{notice}</div>}
       {run && (running
-        ? <AgentLiveView run={run} onReview={review} onOpen={setOpenCandidate} />
+        ? (run.review?.judge === "human"
+          ? <AgentReviewWorkspace run={run} onReview={review} />
+          : <AgentLiveView run={run} onReview={review} onOpen={setOpenCandidate} />)
         : <AgentRunView run={run} downloading={downloading} onDownload={download} onOpen={setOpenCandidate} />)}
       {openCandidate && <VideoDialog result={openCandidate} onClose={() => setOpenCandidate(null)} startPaused />}
     </div>
