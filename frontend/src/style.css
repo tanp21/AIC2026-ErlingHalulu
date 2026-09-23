@@ -572,6 +572,25 @@ kbd { padding: 2px 5px; border: 1px solid #ffffff20; border-radius: 4px; backgro
 }
 .clip-state { margin: 0; color: var(--muted); font-size: 11px; }
 .clip-state.error { color: var(--danger); }
+
+.shot-caption { border-top: 1px solid var(--line); }
+.shot-caption > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.shot-caption-meta { display: flex; align-items: center; gap: 10px; }
+.shot-caption-meta strong { color: var(--text); font-size: 11px; }
+.shot-caption-meta button { padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); color: var(--accent); font-size: 9px; }
+.shot-caption-meta button:disabled { color: var(--muted); }
+.shot-caption > .clip-state { padding: 12px 14px; }
+.shot-caption-text {
+  margin: 0;
+  padding: 12px 14px;
+  color: #c4ced8;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
 .shot-overview, .shot-detail, .full-transcript { margin-top: 16px; border: 1px solid var(--line); border-radius: 10px; background: rgba(13, 18, 25, .72); }
 .shot-overview > header, .shot-detail > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .shot-overview > header strong { font-size: 12px; }

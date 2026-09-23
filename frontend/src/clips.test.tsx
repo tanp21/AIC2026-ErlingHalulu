@@ -1,8 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ClipStudio, shotAt } from "./clips";
-import type { Shot } from "./types";
+import { ClipStudio, captionAt, shotAt } from "./clips";
+import type { CaptionWindow, Shot } from "./types";
 
 const TIME_BASE_DEN = 90000;
 const DELTA = 3003;
@@ -13,6 +13,19 @@ const shots: Shot[] = [
     keyframes: [{ frameId: 15, time: 15 * DELTA / TIME_BASE_DEN, thumb: "/thumb/L21_V001/15", frame: "/frame/L21_V001/15" }] },
   { index: 2, startFrame: 30, endFrame: 49, start: 30 * DELTA / TIME_BASE_DEN, end: 50 * DELTA / TIME_BASE_DEN,
     keyframes: [{ frameId: 35, time: 35 * DELTA / TIME_BASE_DEN, thumb: "/thumb/L21_V001/35", frame: "/frame/L21_V001/35" }] },
+];
+
+const shotSeconds = (frame: number) => frame * DELTA / TIME_BASE_DEN;
+
+const captions: CaptionWindow[] = [
+  { shot_idx: 0, window_idx: 0, window_count: 1, frame_idx: null, start: shotSeconds(0), end: shotSeconds(10),
+    time: shotSeconds(5), text: "A chef plates a dish." },
+  { shot_idx: 1, window_idx: 0, window_count: 2, frame_idx: null, start: shotSeconds(10), end: shotSeconds(20),
+    time: shotSeconds(15), text: "A woman walks past the first stall." },
+  { shot_idx: 1, window_idx: 1, window_count: 2, frame_idx: null, start: shotSeconds(16), end: shotSeconds(24),
+    time: shotSeconds(20), text: "The camera pans to a second stall." },
+  { shot_idx: 2, window_idx: 0, window_count: 1, frame_idx: null, start: shotSeconds(30), end: shotSeconds(49),
+    time: shotSeconds(40), text: "Two boats cross the harbour." },
 ];
 
 const frameMapPayload = {
@@ -30,6 +43,7 @@ function json(data: unknown, init: Partial<Response> = {}): Response {
 
 let frameCallback: VideoFrameRequestCallback | null = null;
 let writeText: ReturnType<typeof vi.fn>;
+let captionScenario: "captions" | "partial" | "none" | "error";
 
 function presentFrame(frameId: number) {
   const callback = frameCallback;
@@ -41,6 +55,7 @@ function presentFrame(frameId: number) {
 
 beforeEach(() => {
   frameCallback = null;
+  captionScenario = "captions";
   writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
   Object.defineProperty(HTMLMediaElement.prototype, "requestVideoFrameCallback", {
@@ -70,6 +85,14 @@ beforeEach(() => {
       return json({ videoId: "L21_V001", labelRevision: 2, labels: {
         "1": { state: "excluded", reason: "presenter", reviewed_by: "owner@example.com" },
       }});
+    }
+    if (url === "/captions/L21_V001/windows") {
+      if (captionScenario === "error") {
+        return json({ detail: "caption data unavailable" }, { ok: false, status: 503 });
+      }
+      const payload = captionScenario === "captions" ? captions
+        : captionScenario === "partial" ? captions.filter((caption) => caption.shot_idx === 0) : [];
+      return json({ videoId: "L21_V001", available: payload.length > 0, captions: payload });
     }
     if (url.startsWith("/shots/L21_V001")) {
       const selectedSource = url.includes("keyframe_source=l2026") ? "l2026" : "l2025";
@@ -116,6 +139,33 @@ describe("shotAt", () => {
     expect(shotAt(shots, -1)).toBe(-1);
     expect(shotAt(shots, null)).toBe(-1);
     expect(shotAt([], 0)).toBe(-1);
+  });
+});
+
+describe("captionAt", () => {
+  const windows: CaptionWindow[] = [
+    { shot_idx: 1, window_idx: 0, frame_idx: null, start: 10, end: 20, time: 15, text: "first" },
+    { shot_idx: 1, window_idx: 1, frame_idx: null, start: 16, end: 24, time: 20, text: "second" },
+    { shot_idx: 2, window_idx: 0, frame_idx: null, start: 30, end: 40, time: 35, text: "third" },
+  ];
+
+  it("returns nothing when the video has no windows", () => {
+    expect(captionAt([], 5)).toBeNull();
+  });
+
+  it("picks the window holding the time, deepest one where windows overlap", () => {
+    expect(captionAt(windows, 12)?.text).toBe("first");
+    expect(captionAt(windows, 23)?.text).toBe("second");
+    expect(captionAt(windows, 17)?.text).toBe("first");
+    expect(captionAt(windows, 19)?.text).toBe("second");
+  });
+
+  it("includes the window bounds and falls back to the nearest window", () => {
+    expect(captionAt(windows, 10)?.text).toBe("first");
+    expect(captionAt(windows, 24)?.text).toBe("second");
+    expect(captionAt(windows, 27)?.text).toBe("second");
+    expect(captionAt(windows, 900)?.text).toBe("third");
+    expect(captionAt([windows[2], windows[1], windows[0]], 12)?.text).toBe("first");
   });
 });
 
@@ -195,6 +245,84 @@ describe("clip studio", () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith("/clip/L21_V001/2");
     expect(await screen.findByText("Downloaded clip.mp4")).toBeInTheDocument();
+  });
+
+  it("shows the caption of the shot under the playhead below the keyframes", async () => {
+    await openVideo();
+    presentFrame(15);
+
+    const caption = screen.getByLabelText("Shot caption");
+    expect(await within(caption).findByText("A woman walks past the first stall.")).toBeInTheDocument();
+    expect(within(caption).getByText(/Shot #1 · window 1\/2/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Caption for shot")).not.toBeInTheDocument();
+
+    presentFrame(35);
+
+    expect(await within(caption).findByText("Two boats cross the harbour.")).toBeInTheDocument();
+    expect(within(caption).queryByText("A woman walks past the first stall.")).not.toBeInTheDocument();
+  });
+
+  it("follows the caption window the playhead sits deepest inside", async () => {
+    await openVideo();
+    presentFrame(17);
+
+    const caption = screen.getByLabelText("Shot caption");
+    expect(await within(caption).findByText("A woman walks past the first stall.")).toBeInTheDocument();
+
+    presentFrame(19);
+
+    expect(await within(caption).findByText("The camera pans to a second stall.")).toBeInTheDocument();
+    expect(within(caption).queryByText("A woman walks past the first stall.")).not.toBeInTheDocument();
+  });
+
+  it("copies the whole caption of the shot under the playhead", async () => {
+    await openVideo();
+    presentFrame(15);
+    const caption = screen.getByLabelText("Shot caption");
+
+    await act(async () => {
+      fireEvent.click(await within(caption).findByRole("button", { name: "Copy" }));
+    });
+
+    expect(writeText).toHaveBeenCalledWith("A woman walks past the first stall.");
+    expect(within(caption).getByRole("button", { name: "Copied" })).toBeInTheDocument();
+  });
+
+  it("disables the caption copy button when there is nothing to copy", async () => {
+    captionScenario = "none";
+    await openVideo();
+    presentFrame(15);
+
+    expect(within(screen.getByLabelText("Shot caption")).getByRole("button", { name: "Copy" }))
+      .toBeDisabled();
+  });
+
+  it("says the video has no captions when the endpoint returns none", async () => {
+    captionScenario = "none";
+    await openVideo();
+    presentFrame(15);
+
+    expect(await within(screen.getByLabelText("Shot caption")).findByText("This video has no captions."))
+      .toBeInTheDocument();
+  });
+
+  it("says a shot has no caption when the video only captioned other shots", async () => {
+    captionScenario = "partial";
+    await openVideo();
+    presentFrame(15);
+
+    const caption = screen.getByLabelText("Shot caption");
+    expect(await within(caption).findByText("This shot has no caption.")).toBeInTheDocument();
+    expect(within(caption).queryByText("A chef plates a dish.")).not.toBeInTheDocument();
+  });
+
+  it("reports a caption that could not be loaded", async () => {
+    captionScenario = "error";
+    await openVideo();
+    presentFrame(15);
+
+    const caption = screen.getByLabelText("Shot caption");
+    expect(await within(caption).findByText("Failed to load caption.")).toBeInTheDocument();
   });
 
   it("reports the server error when a clip cannot be cut", async () => {

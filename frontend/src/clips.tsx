@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { fetchTranscript } from "./api";
+import { fetchCaptions, fetchTranscript } from "./api";
 import { copyKeyframe, downloadClip, fetchShots, fetchVideoList, updateShotLabels } from "./clipApi";
 import { fetchFrameMap, frameTime, resolveFrameId } from "./frameMap";
 import type { FrameMap } from "./frameMap";
 import { formatTimestamp } from "./results";
-import type { KeyframeSource, Shot, ShotKeyframe, ShotLabelReason, TranscriptCue, VideoSummary } from "./types";
+import type { CaptionWindow, KeyframeSource, Shot, ShotKeyframe, ShotLabelReason, TranscriptCue, VideoSummary } from "./types";
 
 export type AppTab = "search" | "queries" | "agent" | "clips";
 
@@ -40,6 +40,68 @@ export function cuesForShot(cues: TranscriptCue[], shot: Shot | null): Transcrip
   return shot ? cues.filter((cue) => cue.start < shot.end && cue.end > shot.start) : [];
 }
 
+/**
+ * The caption window holding `time`, by the second. A shot over 20 s is split into
+ * overlapping windows, so the deepest one wins — the same rule `caption_for_frame`
+ * uses on the server.
+ */
+export function captionAt(windows: CaptionWindow[], time: number): CaptionWindow | null {
+  if (!windows.length) return null;
+  const ordered = [...windows].sort((a, b) => a.start - b.start);
+  const covering = ordered.filter((window) => window.start <= time && time <= window.end);
+  if (covering.length) {
+    return covering.reduce((best, window) =>
+      Math.min(time - window.start, window.end - time) > Math.min(time - best.start, best.end - time)
+        ? window : best);
+  }
+  return ordered.reduce((best, window) =>
+    Math.abs((window.start + window.end) / 2 - time) < Math.abs((best.start + best.end) / 2 - time)
+      ? window : best);
+}
+
+/** The caption of the shot under the playhead, in full, with a copy button. */
+function ShotCaption({ ariaLabel, shot, caption, loading, error, empty }: {
+  ariaLabel: string;
+  shot: Shot | null;
+  caption: CaptionWindow | null;
+  loading: boolean;
+  error: boolean;
+  /** The video itself was never captioned (2025 `K*`, or a 2026 shot pass that has not reached it). */
+  empty: boolean;
+}) {
+  const [copy, setCopy] = useState<{ text: string; state: "copied" | "error" } | null>(null);
+  const copyState = copy && copy.text === caption?.text ? copy.state : "idle";
+
+  async function copyCaption() {
+    if (!caption) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error();
+      await navigator.clipboard.writeText(caption.text);
+      setCopy({ text: caption.text, state: "copied" });
+    } catch {
+      setCopy({ text: caption.text, state: "error" });
+    }
+  }
+
+  return <section className="shot-caption" aria-label={ariaLabel}>
+    <header><span className="eyebrow">Caption</span>
+      <div className="shot-caption-meta">
+        {caption && <strong>Shot #{shot?.index}{caption.window_count && caption.window_count > 1
+          ? ` · window ${caption.window_idx + 1}/${caption.window_count}` : ""}</strong>}
+        <button disabled={!caption} onClick={() => void copyCaption()}>
+          {copyState === "copied" ? "Copied" : copyState === "error" ? "Copy failed" : "Copy"}
+        </button>
+      </div>
+    </header>
+    {loading && <p className="clip-state">Loading caption…</p>}
+    {!loading && error && <p className="clip-state error">Failed to load caption.</p>}
+    {!loading && !error && empty && <p className="clip-state">This video has no captions.</p>}
+    {!loading && !error && !empty && !shot && <p className="clip-state">No shot under the playhead.</p>}
+    {!loading && !error && !empty && shot && !caption && <p className="clip-state">This shot has no caption.</p>}
+    {!loading && !error && caption && <p className="shot-caption-text">{caption.text}</p>}
+  </section>;
+}
+
 export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isAdmin?: boolean }) {
   const [videos, setVideos] = useState<VideoSummary[]>([]);
   const [filter, setFilter] = useState("");
@@ -67,6 +129,9 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
   const [cues, setCues] = useState<TranscriptCue[]>([]);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [transcriptError, setTranscriptError] = useState(false);
+  const [captions, setCaptions] = useState<CaptionWindow[]>([]);
+  const [captionLoading, setCaptionLoading] = useState(false);
+  const [captionError, setCaptionError] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [followTranscript, setFollowTranscript] = useState(true);
   const [transcriptCopyState, setTranscriptCopyState] = useState<"idle" | "copied" | "error">("idle");
@@ -124,6 +189,22 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
   }, [videoId]);
 
   useEffect(() => {
+    if (!videoId) return;
+    let active = true;
+    setCaptions([]);
+    setCaptionLoading(true);
+    setCaptionError(false);
+    fetchCaptions(videoId).then((response) => {
+      if (active) setCaptions(response.captions ?? []);
+    }).catch(() => {
+      if (active) setCaptionError(true);
+    }).finally(() => {
+      if (active) setCaptionLoading(false);
+    });
+    return () => { active = false; };
+  }, [videoId]);
+
+  useEffect(() => {
     const video = videoRef.current;
     if (!videoId || !video || typeof video.requestVideoFrameCallback !== "function") return;
     let active = true;
@@ -160,6 +241,13 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
 
   const currentIndex = shotAt(shots, liveFrameId);
   const currentShot = currentIndex >= 0 ? shots[currentIndex] : null;
+  // Caption windows are measured on the source clock, so prefer the playhead frame
+  // over `timeupdate`, which only ticks a few times a second.
+  const playheadSeconds = liveFrameId !== null && mapping ? frameTime(mapping, liveFrameId) : playbackTime;
+  const shotCaption = useMemo(() => captionAt(
+    currentShot ? captions.filter((caption) => caption.shot_idx === currentShot.index) : [],
+    playheadSeconds,
+  ), [captions, currentShot, playheadSeconds]);
   const displayedShots = useMemo(() => shots.filter((shot) => (
     labelFilter === "all" || (labelFilter === "unlabelled" ? !shot.label : shot.label?.state === labelFilter)
   )), [shots, labelFilter]);
@@ -479,6 +567,8 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
               </li>)}</ol>
             </section>
           </div>
+          <ShotCaption ariaLabel="Shot caption" shot={currentShot} caption={shotCaption}
+            loading={captionLoading} error={captionError} empty={!captions.length} />
         </section>}
         <section className="full-transcript" aria-label="Full transcript to copy">
           <header><div><span className="eyebrow">Full transcript</span><strong>{cues.length} segments</strong></div>
