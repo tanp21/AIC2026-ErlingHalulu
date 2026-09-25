@@ -21,6 +21,8 @@ MAX_TEXT = 300
 BATCH_LIMIT = 12
 TRAKE_TIGHT_GAP = 45
 ANSWER_SOURCES = {"on_screen_text", "visual_count", "visual_attribute", "speech", "world_knowledge"}
+#: What the query is about, as far as searching the web goes (`agent.web.TOPIC_GOALS`).
+TOPICS = {"cooking", "festival", "place", "event", "person", "sport", "lecture", "nature", "other"}
 
 #: A question that asks for an *amount* is answered by a sentence that states one, so
 #: the terms which find it are the ones such a sentence must contain: the substance and
@@ -54,6 +56,8 @@ class Plan:
     lookups: list[str] = field(default_factory=list)
     question_vi: str | None = None
     answer_source: str | None = None
+    #: One of `TOPICS`; decides which web research the run starts (`agent.web`).
+    topic: str = "other"
 
     def to_dict(self):
         return asdict(self)
@@ -113,6 +117,7 @@ def parse_plan(data, task) -> Plan:
     except (TypeError, ValueError):
         target = 0
     answer_source = data.get("answer_source")
+    topic = str(data.get("topic") or "").strip().lower()
     return Plan(
         summary_vi=_text(data.get("summary_vi")) or task.text[:MAX_TEXT],
         scenes=scenes,
@@ -124,9 +129,10 @@ def parse_plan(data, task) -> Plan:
         # BM25 on a 1-2 character string ("kg") matches half the corpus.
         ocr=[text for text in _texts(data.get("ocr"), MAX_PHRASES)
              if len(re.sub(r"\W", "", text)) >= 3],
-        lookups=_texts(data.get("lookups"), 2),
+        lookups=_texts(data.get("lookups"), 3),
         question_vi=(_text(data.get("question_vi"), 500) or None) if task.kind == "qa" else None,
         answer_source=answer_source if task.kind == "qa" and answer_source in ANSWER_SOURCES else None,
+        topic=topic if topic in TOPICS else "other",
     )
 
 

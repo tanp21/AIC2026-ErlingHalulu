@@ -92,7 +92,8 @@ def _setting(name: str, default: str = "") -> str:
 
 
 def checker_key() -> str:
-    return _setting("OPENROUTER_API_KEY")
+    # The same two names the agent accepts (`agent.config.OPENROUTER_KEY_NAMES`).
+    return _setting("OPENROUTER_API_KEY") or _setting("QWEN_API_KEY")
 
 
 def checker_model() -> str:

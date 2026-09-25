@@ -83,11 +83,13 @@ function serve(run: AgentRunResponse, overrides: Record<string, () => Response> 
   return { bodies };
 }
 
+// The tab no longer offers a person as the judge (every run it starts is automatic), but a run the
+// server reports as human-judged -- started by an older client or through the API -- still opens
+// in this workspace, which is what these tests drive.
 async function startHuman(run: AgentRunResponse = KIS, overrides: Record<string, () => Response> = {}) {
   const server = serve(run, overrides);
   render(<AgentPanel />);
   fireEvent.change(screen.getByLabelText("DeepSeek API key"), { target: { value: "dsk" } });
-  fireEvent.change(screen.getByLabelText("Agent judge"), { target: { value: "human" } });
   fireEvent.change(screen.getByLabelText("Agent query"), { target: { value: run.query } });
   fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
   await screen.findByLabelText("Human review");
@@ -99,10 +101,9 @@ const sent = (server: Server) => server.bodies.slice(1);
 afterEach(() => { cleanup(); clearEvidenceCache(); vi.restoreAllMocks(); });
 
 describe("human review workspace", () => {
-  it("starts a run judged by the person, with no Gemini key, and takes over the page", async () => {
-    const server = await startHuman();
+  it("opens a run the server says a person judges in the workspace, which takes over the page", async () => {
+    await startHuman();
 
-    expect(server.bodies[0]).toMatchObject({ judge: "human", gemini_api_key: "" });
     expect(screen.queryByLabelText("Agent query")).not.toBeInTheDocument();
     expect(screen.getByText("Waiting for your review")).toBeInTheDocument();
     expect(screen.getByText(/120 candidates found, 2 shown/)).toBeInTheDocument();

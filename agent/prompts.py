@@ -77,7 +77,8 @@ Reply with one JSON object and nothing else:
   "ocr": ["on-screen text"],
   "lookups": ["web search question"],
   "question_vi": null,
-  "answer_source": null
+  "answer_source": null,
+  "topic": "other"
 }}
 
 Rules:
@@ -127,7 +128,18 @@ carrying the details CLIP drops (exact counts, what is written on screen, the or
 actions inside the shot). Leave empty only when the scene has no such detail.
 - ocr: only distinctive strings (names, titles, slogans, numbers with context); never \
 generic words or units such as "kg" or "km".
-- lookups: empty unless a name really has to be found on the web.
+- topic: what the clip is about, one of cooking, festival (lễ hội, phong tục, lễ rước, \
+tết, múa lân), place (a landmark, pagoda, bridge, pass, village, beauty spot), event (a \
+news event, ceremony, disaster, competition), person (a named or describable public \
+figure, artisan, athlete), sport, lecture, nature, other.
+- lookups: 0-3 Google-Search questions (in Vietnamese) whose answers make the clip \
+findable or answer the question. Search is cheap and runs beside the searches, so ask \
+whenever the query points at something the web knows and the corpus would NAME: which \
+festival/custom matches the description and where it is held; which landmark or place \
+it is and its province; which news event, ceremony or competition; who a described \
+person is. For qa whose answer is world knowledge or a fact about such a festival, \
+place or event (its date, location, founder, meaning), ask the question itself. Leave \
+it empty only for a generic scene the web cannot identify ("a man walking a dog").
 - question_vi and answer_source: qa only. answer_source is one of on_screen_text, \
 visual_count, visual_attribute, speech, world_knowledge."""
 
@@ -249,7 +261,20 @@ spoken), at most 100 characters, in the language it appears. Reply as JSON: \
 LOOKUP_PROMPT = """Answer briefly for a video search engine. Question: {question}
 
 Reply in 1-3 sentences with the concrete name(s): the Vietnamese name and the English name \
-when they differ, plus any visual detail useful for finding it in TV footage."""
+when they differ, plus any visual detail useful for finding it in TV footage. If the \
+question asks for a fact, give it. End with exactly these two lines:
+TỪ KHÓA: <up to 4 Vietnamese names or phrases a TV narrator would say about it, separated by ";">
+ĐÁP ÁN: <the short answer if the question asks for a fact, else "không rõ">"""
+
+#: Started at t=0, before planning, for a query whose words already say what it is about.
+#: `{what}` and `{kind}` come from `agent.web.TOPIC_GOALS`.
+TOPIC_LOOKUP_PROMPT = """Mô tả dưới đây là một đoạn trong kho video truyền hình Việt Nam (tin tức, phóng sự, du lịch, văn hóa). Nó nói về {what}. Hãy tìm trên web {kind} khớp nhất với mô tả và cho biết: tên gọi chính xác, nơi diễn ra hoặc vị trí (tỉnh/thành, huyện), thời gian nếu có, và những từ ngữ phóng viên có thể nói hoặc chữ có thể hiện trên màn hình (tên {kind}, băng rôn, biển hiệu).
+Mô tả: {query}
+
+Nếu mô tả không đủ để xác định một {kind} cụ thể thì nói rõ là không xác định được, đừng đoán tên.
+Trả lời ngắn gọn bằng tiếng Việt. Kết thúc bằng đúng các dòng:
+TỪ KHÓA: <tối đa 4 tên riêng hoặc cụm từ người dẫn sẽ nói, cách nhau bởi ";", hoặc "không rõ">
+ĐÁP ÁN: <nếu mô tả có câu hỏi: câu trả lời ngắn, tối đa 100 ký tự; nếu không có câu hỏi hoặc không chắc: "không rõ">"""
 
 REWRITE_SYSTEM = f"""You run the second and last search round for one query of AI Challenge HCMC, a VBS-style video retrieval competition. Round 1 did not find a confident match.
 
@@ -401,6 +426,7 @@ Return one JSON object, one entry per candidate, every detail listed for every c
 #: The one moment is labelled [M], so every "candidate" and id the shared rules speak of is still
 #: literally true: there is exactly one, and it is called M.
 CHECK_SYSTEM = """You are checking ONE moment of a video against what a person searched for, by looking at images, so they can decide whether it is the moment they are searching for. What they searched with is given to you as one or more separate CHANNELS, each meaning something different -- read each by what it is, never as if it were another kind:
+- "The competition query (Vietnamese)": the whole description the organisers wrote. What it says is SHOWN is judged against the images, what it says is SAID against the quoted speech, and text it says is WRITTEN against the on-screen text. When it describes several scenes in order, the moment itself is the scene named under "Visual description" and the other scenes should appear in the shots around it.
 - "Visual description (English)": what a frame should SHOW. Judge this against the images, the normal way.
 - "Spoken words to find (Vietnamese speech)": words the person expects to be SAID near this moment, not something a frame shows. Judge it against the quoted speech given to you below (labelled "[speech ...]"), never against the pixels: an image cannot contain words that were only spoken.
 - "On-screen text to find": a string the person expects to appear WRITTEN on screen (a caption, a sign, a name). Judge it against the quoted on-screen text below (labelled "[on screen ...]") AND against what you can read in the images yourself; do not treat it as an action or a scene to picture -- it is text to find, verbatim or close to it.

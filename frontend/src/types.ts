@@ -411,12 +411,25 @@ export interface AgentRunRequest {
   deepseek_model?: string;
   gemini_model?: string;
 }
+/** One of the query's details as the moment judge saw it at this candidate (`agent/judge.py`). */
+export interface AgentJudgeCheck {
+  text: string;
+  status: AgentCheckStatus;
+  /** `vision` when it was read off the frames, else the words (speech, on-screen text). */
+  source: string | null;
+  note: string;
+  quote?: string;
+}
 export interface AgentVerdict {
   score: number;
   reason: string;
   answer?: string | null;
   scene?: number | null;
-  by?: "gemini" | "human";
+  /** Who judged: "human", "gemini", "qwen", ... */
+  by?: string;
+  answer_confidence?: number | null;
+  checks?: AgentJudgeCheck[] | null;
+  frames_seen?: number | null;
 }
 export interface AgentEvidence {
   source: string;
@@ -435,6 +448,8 @@ export interface AgentCandidate {
   fused: number;
   verdict?: AgentVerdict | null;
   evidence: AgentEvidence[];
+  /** The speech, on-screen text and caption around the moment. */
+  context?: AgentCandidateContext;
 }
 export interface AgentSequence {
   video_id: string;
@@ -442,6 +457,17 @@ export interface AgentSequence {
   times?: number[];
   score: number;
   refined?: boolean;
+  /** 0-10 per event from the judge, in order; null when the path was not checked. */
+  event_scores?: number[] | null;
+  source?: string;
+}
+/** A web lookup the run made, and what came back. */
+export interface AgentRunLookup {
+  question: string;
+  answer?: string | null;
+  error?: string | null;
+  sources?: string[];
+  about_the_query?: boolean;
 }
 export interface AgentRunResult {
   query_id: string;
@@ -454,7 +480,23 @@ export interface AgentRunResult {
   notes: string;
   elapsed: number;
   error: string | null;
+  /** Which strategies the run chose, in Vietnamese. */
+  strategy?: string[];
+  /** Who judged the candidates: "qwen", "gemini", "human". */
+  judge?: string | null;
+  /** TRAKE: the events in order, as the query words them. */
+  events?: string[];
+  lookups?: AgentRunLookup[];
 }
+/** What the Retrieval agent tab asks the app to send to DRES. */
+export interface AgentSubmitRequest {
+  kind: QueryKind;
+  video_id: string;
+  frame_idx?: number;
+  frame_ids?: number[];
+  answer?: string;
+}
+export interface AgentSubmitOutcome { message: string; completed?: boolean; uncertain?: boolean }
 export interface AgentUsage {
   deepseek_calls: number;
   deepseek_input: number;
@@ -537,8 +579,11 @@ export interface AgentProgress {
   candidates: AgentLiveCandidate[];
   sequences: AgentLiveSequence[];
   answer: string | null;
-  // Only in a human-judged run:
+  strategy?: string[];
+  judge?: string | null;
+  events?: string[];
   lookups?: AgentLookup[];
+  // Only in a human-judged run:
   total_candidates?: number;
   details?: string[];
   /** How much each detail counts, and which are satisfied by nearly every candidate read. */

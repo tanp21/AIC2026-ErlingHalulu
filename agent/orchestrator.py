@@ -24,6 +24,7 @@ import re
 import time
 
 from .evaluate import normalize_answer
+from .judge import judge_name
 from .evidence import (
     TIE_BAND, EvidenceStore, QueryDetails, detail_weights, evidence_of, query_details, suggest_answers,
     summarize_all, video_coverage,
@@ -38,7 +39,10 @@ from .prompts import AGENT_SYSTEM, HUMAN_REWRITE_NOTE, LOOKUP_PROMPT, REWRITE_SY
 from .review import HUMAN_ACCEPT, HUMAN_REJECT, HumanReview
 from .tasks import Task
 from .vision import Inspector, caption_at, label_context, transcript_window
-from .web import cooking_lookup, dish_name, fact_lookup, is_cooking, recipe_lookup, similar, tagged
+from .web import (
+    TOPIC_GOALS, cooking_lookup, detect_topic, dish_name, fact_lookup, is_cooking, is_unknown, keywords,
+    recipe_lookup, similar, tagged, topic_lookup,
+)
 
 logger = logging.getLogger("agent")
 VIDEO_ID = re.compile(r"^[A-Z]\d{2}[_-]V\d{3}$")
@@ -60,6 +64,15 @@ SUMMARY_TOP = PROGRESS_TOP_HUMAN
 SUMMARY_WORKERS = 12
 #: How often a wait on a model call looks at the human's decisions.
 REVIEW_POLL_SECONDS = 0.25
+#: The most sub-queries one rewrite round sends (`/agent/search` takes 12).
+BATCH_ROOM = 12
+#: The number in a count reading ("12 chấm" -> "12"; "2.15" stays whole).
+COUNT = re.compile(r"\d+(?:[.,]\d+)?")
+#: "E1: ...", "Cảnh 2 - ..." at the start of a TRAKE event line.
+EVENT_PREFIX = re.compile(r"^\s*(?:E\s*\d+|Cảnh\s*\d+)\s*[:.)-]?\s*", re.IGNORECASE)
+REWRITE_STRATEGY = ("Vòng 2: viết lại truy vấn theo nhận xét của giám khảo, thêm tên tìm được trên web "
+                    "và tìm từng cảnh bên trong các video dẫn đầu")
+COOKING_STRATEGY = "Món ăn: tra tên món và công thức trên web, rồi tìm tên món trong lời thoại"
 # A reading whose evidence is the narration: its names went through ASR.
 SPOKEN_EVIDENCE = re.compile(r"lời|thoại|nói|phát thanh|thuyết minh|giọng|transcript|speech", re.IGNORECASE)
 
@@ -118,6 +131,10 @@ class AgentOptions:
     #: a human-judged run builds as `OfflineGemini` precisely so a human-judged run never reaches a
     #: model-judge vision backend; see `backend/agent_runner.py`).
     checklist_vision_model: str = "deepseek"
+    #: `keyframe`: the vision backend scores keyframes five to a call (`Inspector.verify`).
+    #: `moment`: one call per candidate over its keyframe and the shots around it
+    #: (`agent.judge.MomentJudge`), which is how a run judged by Qwen on OpenRouter works.
+    judge_style: str = "keyframe"
 
     @classmethod
     def for_mode(cls, mode="fast", **overrides):
@@ -133,6 +150,8 @@ class AgentOptions:
         set to. Retuning it will not make the local path faster.
         """
         defaults = FAST_DEFAULTS if mode in ("fast", "auto") else {}
+        if overrides.get("judge_style") == "moment":
+            defaults = {**defaults, **MOMENT_DEFAULTS.get(mode, {})}
         return cls(mode=mode, **{**defaults, **overrides})
 
 
@@ -146,6 +165,17 @@ FAST_DEFAULTS = dict(
     time_budget=20.0, verify_top=15, verify_chunk=5, verify_workers=4, verify_wide=15,
     answer_moments=2, trake_check=8, trake_refine=1,
 )
+
+#: The moment judge's budgets. One call judges one candidate over ~10 keyframes and takes
+#: 13-16 s whatever the fan-out (`agent/judge.py`), so a round of judging is ~15-20 s rather
+#: than Gemini's 5 s, and the fast budget has to hold two of them plus the Q&A reading or the
+#: rewrite round -- the recovery the hardest queries depend on -- is cut off by the clock.
+MOMENT_DEFAULTS = {
+    "fast": dict(time_budget=90.0, verify_top=16, verify_wide=16, answer_moments=3, falsify=False),
+    "auto": dict(time_budget=90.0, verify_top=16, verify_wide=16, answer_moments=3, falsify=False,
+                 escalate_budget=240.0),
+    "deep": dict(time_budget=300.0, verify_top=16, verify_per_step=8, answer_moments=3),
+}
 
 
 @dataclass
@@ -163,6 +193,10 @@ class AgentResult:
     error: str | None = None
     #: Every reviewer action with its timestamp (human judge only), for measuring the person.
     review_log: list[dict] = field(default_factory=list)
+    #: The strategies this run chose, in Vietnamese, for the person reading the result.
+    strategy: list[str] = field(default_factory=list)
+    #: Who judged the candidates: `qwen`, `gemini`, ... (see `agent.judge.judge_name`).
+    judge: str | None = None
 
     def to_dict(self):
         def candidate(c):
@@ -171,6 +205,7 @@ class AgentResult:
                 "time": round(c.time, 3), "fused": round(c.fused, 5),
                 "verdict": None if c.verdict is None else vars(c.verdict),
                 "evidence": [vars(e) for e in c.evidence.values()],
+                "context": label_context(c),
             }
 
         return {
@@ -181,8 +216,17 @@ class AgentResult:
             "sequences": [vars(s) for s in self.sequences],
             "lookups": self.lookups, "trace": self.trace, "notes": self.notes,
             "elapsed": round(self.elapsed, 1), "error": self.error,
+            "strategy": self.strategy, "judge": self.judge, "events": self.events(),
             **({"review_log": self.review_log} if self.review_log else {}),
         }
+
+    def events(self) -> list[str]:
+        """TRAKE: each event as the query words it (its `E1:` lines), else as the plan does."""
+        if self.task.kind != "trake":
+            return []
+        lines = [EVENT_PREFIX.sub("", line).strip() for line in self.task.text.splitlines()
+                 if EVENT_PREFIX.match(line)]
+        return lines or (list(self.plan.events_en) if self.plan else [])
 
 
 TOOLS = [
@@ -265,7 +309,7 @@ FINISH_TOOL = next(tool for tool in TOOLS if tool["function"]["name"] == "finish
 
 class Agent:
     def __init__(self, deepseek, gemini, search, options: AgentOptions | None = None,
-                 clock=time.monotonic, vision=None):
+                 clock=time.monotonic, vision=None, judge=None):
         # `gemini` is still the web-search client whatever `vision` is: Google
         # Search grounding has no local equivalent, and the vision backend only
         # ever sees pixels.
@@ -279,6 +323,9 @@ class Agent:
             workers=self.options.verify_workers,
         )
         self.clock = clock
+        #: `agent.judge.MomentJudge` when candidates are judged as moments; None keeps
+        #: `Inspector.verify` (keyframes five to a call).
+        self.judge = judge
 
     def run(self, task: Task, review: HumanReview | None = None, progress=None) -> AgentResult:
         """One task; `review` carries a teammate's decisions, `progress(snapshot)` the live view.
@@ -303,7 +350,9 @@ class _Run:
         self.finished: dict | None = None
         self.step = 0
         self.cooking = agent.options.auto_web and is_cooking(task.text)
-        self.background = ThreadPoolExecutor(max_workers=3)
+        self.background = ThreadPoolExecutor(max_workers=5)
+        #: The topic whose web lookup started before planning, if the query's words named one.
+        self.early_topic: str | None = None
         self.pending: list = []
         self.budget = agent.options.time_budget
         self.human = agent.options.judge == "human"
@@ -331,6 +380,9 @@ class _Run:
         # Model calls a human decision may abandon run here, never under a `with`
         # block that would wait for them on exit.
         self.waiter = ThreadPoolExecutor(max_workers=4)
+        #: The query split into checkable details for the moment judge, asked for as soon as
+        #: the plan exists so it is back before the first candidates are judged.
+        self.details_future = None
 
     # -- bookkeeping ---------------------------------------------------------------
     def elapsed(self):
@@ -350,6 +402,7 @@ class _Run:
 
     # -- main flow -----------------------------------------------------------------
     def execute(self) -> AgentResult:
+        self._describe_judging()
         self._publish("planning")
         try:
             if self.human:
@@ -383,6 +436,29 @@ class _Run:
         self.stage = "done"
         self._publish()
         return self.result
+
+    def _describe_judging(self):
+        """Say who judges and how, so the result explains itself."""
+        if self.human:
+            self.result.judge = "human"
+            return
+        judge = self.agent.judge
+        self.result.judge = judge.name if judge is not None else judge_name(self.agent.vision)
+        who = self.result.judge.capitalize()
+        if judge is not None:
+            self.result.strategy.append(
+                f"Chấm điểm: {who} xem khung hình của từng ứng viên cùng các shot trước và sau nó "
+                f"(±{judge.window:.0f} s), đối chiếu từng chi tiết của truy vấn")
+        else:
+            self.result.strategy.append(f"Chấm điểm: {who} xem khung hình của từng ứng viên")
+        if self.task.kind == "qa":
+            self.result.strategy.append(
+                "Q&A: chấm điểm xong mới đọc đáp án tại các khoảnh khắc được chấm cao nhất, "
+                "rồi đối chiếu với tra cứu web")
+        elif self.task.kind == "trake":
+            self.result.strategy.append(
+                "TRAKE: tìm từng sự kiện trong các video dẫn đầu, ghép theo thứ tự thời gian "
+                "và chấm từng sự kiện")
 
     # -- the human in the loop -------------------------------------------------------
     def _publish(self, stage=None):
@@ -458,12 +534,15 @@ class _Run:
             } for s in self.result.sequences or self.pool.ranked_sequences()[:8]],
             "answer": self.result.answer,
             "review": self.review.snapshot(),
-        }
-        if self.human:
-            snapshot["lookups"] = [
+            "strategy": list(self.result.strategy),
+            "judge": self.result.judge,
+            "events": self.result.events(),
+            "lookups": [
                 {"question": entry["question"], "answer": entry.get("answer"),
                  "error": entry.get("error"), "sources": entry.get("sources", [])}
-                for entry in self.result.lookups]
+                for entry in self.result.lookups],
+        }
+        if self.human:
             snapshot["total_candidates"] = len(self.pool)
             snapshot["details"] = self.details.texts if self.details else []
             snapshot["detail_weights"], snapshot["common_details"] = weights, common
@@ -539,12 +618,9 @@ class _Run:
         `neighbours` and `add_frame` put exact keyframes in front of them. It ends
         on `finish`/`stop`, or after `human_idle_timeout` seconds of silence.
         """
-        if self.cooking:
-            self._lookup_later(cooking_lookup(self.task.text, None),
-                               "món ăn (Món ngon mỗi ngày)", about_the_query=True)
+        self._early_lookups()
         self._plan()
-        for question in self.plan.lookups:
-            self._lookup_later(LOOKUP_PROMPT.format(question=question), question, about_the_query=True)
+        self._plan_lookups()
         self._run_search(initial_queries(self.plan, self.task, self.options.spoken_numbers,
                                          skip_kinds=self._unavailable_channels()), "round1")
         if self.task.kind == "trake":
@@ -778,14 +854,9 @@ class _Run:
         raw description, started before planning) run in the background and are
         waited for only where their result is used.
         """
-        if self.cooking:
-            # About the query, not about a video the agent has already chosen: those
-            # two kinds are kept apart because only this one is safe to search for.
-            self._lookup_later(cooking_lookup(self.task.text, None),
-                               "món ăn (Món ngon mỗi ngày)", about_the_query=True)
+        self._early_lookups()
         self._plan()
-        for question in self.plan.lookups:
-            self._lookup_later(LOOKUP_PROMPT.format(question=question), question, about_the_query=True)
+        self._plan_lookups()
         self._run_search(initial_queries(self.plan, self.task, self.options.spoken_numbers,
                                          skip_kinds=self._unavailable_channels()), "round1")
         if self.task.kind == "trake":
@@ -820,6 +891,56 @@ class _Run:
         if not confident and not self.over_budget() and not self.review.decided():
             self._rewrite_round()
 
+    def _early_lookups(self):
+        """Web research that needs no plan: the query's own words already say what it is about.
+
+        A cooking query looks up its dish ("Món ngon mỗi ngày" publishes every recipe); a
+        festival, event, place or person looks up its name and where it happened, because the
+        narrator says that name and the description only paraphrases it. Both start at t=0 and
+        are back by the time the first candidates are judged, which is when the rewrite round
+        can search the transcript and on-screen text for what they found.
+        """
+        if not self.options.auto_web:
+            return
+        if self.cooking:
+            # About the query, not about a video the agent has already chosen: those
+            # two kinds are kept apart because only this one is safe to search for.
+            self._lookup_later(cooking_lookup(self.task.text, None),
+                               "món ăn (Món ngon mỗi ngày)", about_the_query=True)
+            self.result.strategy.append(COOKING_STRATEGY)
+            return
+        topic = detect_topic(self.task.text)
+        if topic is not None:
+            self.early_topic = topic
+            self._topic_lookup(topic)
+
+    def _topic_lookup(self, topic):
+        noun = TOPIC_GOALS[topic][1]
+        self._lookup_later(topic_lookup(self.task.text, topic), f"{noun} (tra theo mô tả)", about_the_query=True)
+        self.result.strategy.append(
+            f"{noun.capitalize()}: tra tên và nơi diễn ra trên web, rồi tìm các tên đó "
+            "trong lời thoại và chữ trên màn hình")
+
+    def _plan_lookups(self):
+        """The planner's own web questions, and the topic lookup the query's words missed."""
+        for question in self.plan.lookups:
+            # A side question ("which sign shows a car fording water?"), not the Q&A question: its
+            # ĐÁP ÁN once became a run's answer ("Biển số W.216") when the video read nothing.
+            self._lookup_later(LOOKUP_PROMPT.format(question=question), question, about_the_query=True,
+                               answers_the_question=False)
+        if self.plan.lookups:
+            self.result.strategy.append(f"Tra cứu web theo kế hoạch: {len(self.plan.lookups)} câu hỏi")
+        if not self.options.auto_web or self.cooking or self.early_topic is not None:
+            return
+        if self.plan.topic == "cooking":
+            self.cooking = True
+            self._lookup_later(cooking_lookup(self.task.text, None),
+                               "món ăn (Món ngon mỗi ngày)", about_the_query=True)
+            self.result.strategy.append(COOKING_STRATEGY)
+        elif self.plan.topic in TOPIC_GOALS and not self.plan.lookups:
+            self.early_topic = self.plan.topic
+            self._topic_lookup(self.plan.topic)
+
     def _best_score(self):
         return max((c.verdict.score for c in self.pool.candidates.values() if c.verdict), default=0.0)
 
@@ -835,8 +956,9 @@ class _Run:
             return frozenset()
         return frozenset({"caption"})
 
-    def _lookup_later(self, prompt, label, about_the_query=False):
-        self.pending.append(self.background.submit(self._lookup, label, prompt, about_the_query))
+    def _lookup_later(self, prompt, label, about_the_query=False, answers_the_question=True):
+        self.pending.append(self.background.submit(self._lookup, label, prompt, about_the_query,
+                                                   answers_the_question))
 
     def _collect_lookups(self, timeout):
         """Move finished background lookups into the result, waiting up to `timeout` s."""
@@ -862,6 +984,8 @@ class _Run:
         `hint` is what they typed, and the round can repeat, so it gets its own step.
         """
         self.step = self.step + 1 if self.human else 1
+        if not self.human and REWRITE_STRATEGY not in self.result.strategy:
+            self.result.strategy.append(REWRITE_STRATEGY)
         self._publish("rewriting")
         started = self.agent.clock()
         # A cooking lookup started before planning is usually back by now; its dish
@@ -890,7 +1014,8 @@ class _Run:
         # Before the scoped visuals: a dish name is a key the corpus certainly has, and
         # it is the one thing here that was measured to rank the answer's video first.
         queries += self._dish_queries(room=2)
-        queries += self._scoped_queries(room=8 - len(queries))
+        queries += self._web_queries(room=min(3, BATCH_ROOM - len(queries) - len(self.plan.scenes)))
+        queries += self._scoped_queries(room=BATCH_ROOM - len(queries))
         self.log("rewrite", {"queries": queries},
                  "; ".join(str(q.get("text") or q.get("events"))[:60] for q in queries), started)
         self._run_search(queries, "rewrite")
@@ -925,6 +1050,28 @@ class _Run:
         return [{"kind": "audio", "id": f"s1.k{index}", "text": name,
                  "method": "keyword", "limit": 100}
                 for index, name in enumerate(names[:max(0, room)])]
+
+    def _web_queries(self, room):
+        """The names the web research found (`TỪ KHÓA:` lines), as transcript and on-screen text queries.
+
+        A festival, place or event is named by the narrator and often written on a banner or a
+        lower third, while the query only describes it. Only lookups about the *query* count,
+        for the same reason as `_dish_queries`: a lookup anchored to a video the run already
+        chose would only reinforce that choice.
+        """
+        if room <= 0:
+            return []
+        names = []
+        for entry in self.result.lookups:
+            if entry.get("about_the_query"):
+                names += [name for name in keywords(entry.get("answer")) if name not in names]
+        queries = [{"kind": "audio", "id": f"s1.w{index}", "text": name, "method": "keyword", "limit": 100}
+                   for index, name in enumerate(names[:room])]
+        # A proper name (capitalised past its first word) is what a banner or caption would print.
+        written = [name for name in names if any(word[:1].isupper() for word in name.split()[1:])]
+        queries += [{"kind": "ocr", "id": f"s1.wo{index}", "text": name, "limit": 50}
+                    for index, name in enumerate(written[:max(0, room - len(queries))])]
+        return queries
 
     def _scoped_queries(self, room, videos=3, only=None):
         """Each scene searched inside the videos round 1 favoured.
@@ -976,6 +1123,8 @@ class _Run:
         if self.plan is None:
             raise RuntimeError(f"planning failed: {last_error}")
         self.result.plan = self.plan
+        if self.agent.judge is not None and self.details_future is None:
+            self.details_future = self.waiter.submit(query_details, self.agent.deepseek, self.task, self.plan)
         self._publish("searching")
         self.log("plan", {}, f"{len(self.plan.scenes)} scenes, "
                  f"{len(self.plan.transcript_vi)} transcript, {len(self.plan.caption_en)} caption, "
@@ -984,22 +1133,25 @@ class _Run:
     def _round_one(self):
         queries = initial_queries(self.plan, self.task, self.options.spoken_numbers)
         with ThreadPoolExecutor(max_workers=3) as pool:
-            lookups = [pool.submit(self._lookup, question) for question in self.plan.lookups]
+            lookups = [pool.submit(self._lookup, question, answers_the_question=False)
+                       for question in self.plan.lookups]
             self._run_search(queries, "round1")
             for future in lookups:
                 self.result.lookups.append(future.result())
         self._verify(self.pool.to_verify(self.options.verify_top))
 
-    def _lookup(self, question, prompt=None, about_the_query=False):
+    def _lookup(self, question, prompt=None, about_the_query=False, answers_the_question=True):
         started = self.agent.clock()
         try:
             answer = self.agent.gemini.web_search(prompt or LOOKUP_PROMPT.format(question=question))
         except LLMError as exc:
-            entry = {"question": question, "error": str(exc), "about_the_query": about_the_query}
+            entry = {"question": question, "error": str(exc), "about_the_query": about_the_query,
+                     "answers_the_question": answers_the_question}
         else:
             entry = {"question": question, "answer": answer.text,
                      "sources": [uri for _, uri in answer.sources],
-                     "about_the_query": about_the_query}
+                     "about_the_query": about_the_query,
+                     "answers_the_question": answers_the_question}
         self.log("web_search", {"question": question},
                  (entry.get("answer") or entry.get("error", ""))[:120], started)
         return entry
@@ -1100,7 +1252,11 @@ class _Run:
         started = self.agent.clock()
         self.judging = {c.cid for c in candidates}
         self._publish("judging")
-        future = self.waiter.submit(self.agent.inspector.verify, self.task, self.plan, candidates, question)
+        if self.agent.judge is not None:
+            future = self.waiter.submit(lambda: self.agent.judge.verify(
+                self.task, self.plan, candidates, question, self._judge_details()))
+        else:
+            future = self.waiter.submit(self.agent.inspector.verify, self.task, self.plan, candidates, question)
         done = self._await([future], self.review.decided)
         self.judging = set()
         if future not in done:
@@ -1124,6 +1280,17 @@ class _Run:
         self.log("verify", {"ids": [c.cid for c in candidates], "question": question},
                  f"{len(verdicts)} verdicts, best={best}"
                  + (f", errors={[e[:120] for e in errors]}" if errors else ""), started)
+
+    def _judge_details(self) -> QueryDetails:
+        """The query's checkable details for the moment judge; empty if they never came back."""
+        if self.details is None:
+            try:
+                self.details = (self.details_future.result(timeout=30) if self.details_future
+                                else QueryDetails())
+            except Exception as exc:  # the judge still gives an overall verdict without them
+                logger.warning("%s query details failed: %s", self.task.query_id, exc)
+                self.details = QueryDetails()
+        return self.details
 
     def _server_query(self, raw, index):
         kind = raw.get("kind")
@@ -1456,20 +1623,31 @@ class _Run:
             if suggestion:
                 answer, evidence = suggestion["answer"], f"suggested from {suggestion['source']} (unconfirmed)"
         if not answer:
-            top = next((c for c in self.result.ranking if c.verdict and c.verdict.answer), None)
+            top = next((c for c in self.result.ranking
+                        if c.verdict and self._as_answer(c.verdict.answer)), None)
             if top is not None:
                 answer, evidence = top.verdict.answer, f"verdict on {top.cid} (unconfirmed)"
         self.result.answer = answer[:100] or None
         self.result.answer_evidence = evidence
 
     def _read_answer(self):
-        """Read the answer at up to `answer_moments` moments of the top video.
+        """Read the answer at the best-judged moments of the top video, once judging is over.
 
         One keyframe can hide what is asked (a pointer over the map, a legend cut
         off); the answer most readings agree on wins, ties going to confidence.
+
+        The moments are the ones the judge scored highest, not simply the first in the
+        order: this runs after every round of judging, so the scores are final, and a
+        moment the judge found to be the query's is the one whose answer counts. With the
+        moment judge each of those already carries a reading of its own, made from the
+        same shots it was judged on; those readings vote beside the dedicated ones.
         """
         top_video = self.result.ranking[0].video_id
-        moments = [c for c in self.result.ranking if c.video_id == top_video][:self.options.answer_moments]
+        in_video = [c for c in self.result.ranking if c.video_id == top_video]
+        judged = sorted((c for c in in_video if c.verdict is not None and c.verdict.by != "human"
+                         and c.verdict.score >= VERIFIED_MATCH),
+                        key=lambda c: -c.verdict.score)
+        moments = (judged + [c for c in in_video if c not in judged])[:self.options.answer_moments]
         started = self.agent.clock()
         try:
             cues = self.cues.get(top_video) or self.agent.search.transcript(top_video)
@@ -1486,6 +1664,13 @@ class _Run:
                                                hints, captions)
 
         readings, errors = [], []
+        if self.agent.judge is not None:
+            for candidate in judged[:self.options.answer_moments + 2]:
+                verdict = candidate.verdict
+                text = self._as_answer(verdict.answer)
+                if text:
+                    readings.append((text, float(verdict.answer_confidence or 0.0),
+                                     candidate.cid, f"judge ({verdict.score:.0f}/10): {verdict.reason}"))
         self._publish("reading_answer")
         futures = [(c, self.waiter.submit(read, c)) for c in moments]
         done = self._await([f for _, f in futures],
@@ -1499,7 +1684,7 @@ class _Run:
             except Exception as exc:
                 errors.append(str(exc)[:120])
                 continue
-            text = str(reply.get("answer") or "").strip()
+            text = self._as_answer(reply.get("answer"))
             if text:
                 readings.append((text, float(reply.get("confidence") or 0), candidate.cid,
                                  str(reply.get("evidence") or "")))
@@ -1516,6 +1701,22 @@ class _Run:
         summary = f"{text!r} from {cid} ({votes[normalize_answer(text)][0]}/{len(readings)} readings agree)"
         self.log("answer", {"readings": [(r[0], r[1], r[2]) for r in readings]}, summary, started)
         return text, f"read from {cid}: {evidence}", confidence
+
+    def _as_answer(self, text) -> str:
+        """A reading as a submittable answer: "" when it only says there is none; a count's number.
+
+        A model that cannot see the answer says so in words ("không rõ", "Không xác định
+        được"), and three such readings once agreed with each other and became the answer. A
+        count is compared as an exact string, so "12 chấm màu vàng" is submitted as "12", and a
+        count reading with no number in it is no reading at all.
+        """
+        text = " ".join(str(text or "").split())[:100]
+        if is_unknown(text):
+            return ""
+        if self.plan is not None and self.plan.answer_source == "visual_count":
+            number = COUNT.search(text)
+            return number.group(0) if number else ""
+        return text
 
     def _answer_with_web(self):
         """Read the answer from the video while the web answers the same question.
@@ -1563,7 +1764,8 @@ class _Run:
         if web is None:
             self._collect_lookups(0)
             web = next((tagged(e.get("answer", ""), "ĐÁP ÁN") for e in self.result.lookups
-                        if tagged(e.get("answer", ""), "ĐÁP ÁN")), None)
+                        if e.get("answers_the_question", True) and tagged(e.get("answer", ""), "ĐÁP ÁN")),
+                       None)
             web_source = "web" if web else None
         spoken = (self.plan.answer_source == "speech"
                   or bool(SPOKEN_EVIDENCE.search(evidence or "")))

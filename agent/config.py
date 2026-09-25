@@ -15,17 +15,48 @@ VISION_ENV = (
     "AIC_AGENT_VISION", "AIC_VLM_URL", "AIC_VLM_MODEL", "AIC_VLM_DIR",
     "AIC_VLM_DEVICE", "AIC_VLM_MAX_NEW_TOKENS", "AIC_VLM_IMAGE_SIDE",
     "AIC_VLM_ANSWER_SIDE", "AIC_VLM_MAX_TILES", "AIC_AGENT_CAPTIONS",
-    "OPENROUTER_MODEL",
+    "OPENROUTER_MODEL", "AIC_AGENT_JUDGE_STYLE",
 )
+#: How candidates are judged (`AgentOptions.judge_style`).
+JUDGE_STYLES = ("keyframe", "moment")
 
 #: Which vision backends `AIC_AGENT_VISION` accepts. `openrouter` is a remote API like
 #: `gemini`, and is what the team falls back to when the Gemini quota is gone.
 VISION_BACKENDS = ("gemini", "local", "deepseek", "openrouter")
 
 
+#: Where the team's OpenRouter key may be found, first match wins. `QWEN_API_KEY` is the name
+#: the key was first handed round under (it is the key the Qwen judge runs on), so both work.
+OPENROUTER_KEY_NAMES = ("OPENROUTER_API_KEY", "QWEN_API_KEY")
+
+
+def openrouter_key(env=None) -> str:
+    """The OpenRouter key under either of its names, or ""."""
+    env = os.environ if env is None else env
+    for name in OPENROUTER_KEY_NAMES:
+        value = (env.get(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def default_vision(env=None) -> str:
+    """`AIC_AGENT_VISION` if set; otherwise Qwen on OpenRouter when there is a key for it.
+
+    Gemini judged every frame until the team moved the judging to `qwen/qwen3.7-flash` on
+    OpenRouter for cost (2026-09): Gemini stays the web-search client, and is the judge only
+    where no OpenRouter key exists or a deployment asks for it by name.
+    """
+    env = os.environ if env is None else env
+    chosen = (env.get("AIC_AGENT_VISION") or "").strip().lower()
+    if chosen:
+        return chosen
+    return "openrouter" if openrouter_key(env) else "gemini"
+
+
 def deployment_vision() -> str:
     """Which vision backend this process was deployed with."""
-    return os.environ.get("AIC_AGENT_VISION", "gemini").strip().lower() or "gemini"
+    return default_vision()
 
 
 def read_dotenv(path: Path) -> dict[str, str]:
@@ -100,6 +131,9 @@ class AgentSettings:
     # human judge only, checklist_vision: which client reads those pixels -- deepseek (default,
     # no extra key) or gemini (agent.gemini; see AgentOptions.checklist_vision_model).
     checklist_vision_model: str = "deepseek"
+    # keyframe | moment -- see AgentOptions.judge_style. Defaults to `moment` for the
+    # OpenRouter judge, which is the shape it was built for, and `keyframe` otherwise.
+    judge_style: str = "keyframe"
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None, dotenv: Path = ROOT / ".env"):
@@ -115,10 +149,14 @@ class AgentSettings:
             raw = merged.get(name, "").strip()
             return int(raw) if raw else default
 
-        vision = merged.get("AIC_AGENT_VISION", "gemini").strip().lower()
+        vision = default_vision(merged)
         if vision not in VISION_BACKENDS:
             allowed = ", ".join(repr(name) for name in VISION_BACKENDS)
             raise RuntimeError(f"AIC_AGENT_VISION must be one of {allowed}, not {vision!r}")
+        judge_style = (merged.get("AIC_AGENT_JUDGE_STYLE") or "").strip().lower() or (
+            "moment" if vision == "openrouter" else "keyframe")
+        if judge_style not in JUDGE_STYLES:
+            raise RuntimeError(f"AIC_AGENT_JUDGE_STYLE must be 'keyframe' or 'moment', not {judge_style!r}")
         checklist_vision_model = merged.get("AIC_AGENT_CHECKLIST_MODEL", "deepseek").strip().lower()
         if checklist_vision_model not in ("deepseek", "gemini", "openrouter"):
             raise RuntimeError(
@@ -149,8 +187,8 @@ class AgentSettings:
             # Required only when OpenRouter is the one doing the looking. As a checklist
             # model a missing key costs the checklist its vision half and nothing else,
             # exactly as a missing Gemini key does there.
-            openrouter_api_key=(required("OPENROUTER_API_KEY") if vision == "openrouter"
-                                else merged.get("OPENROUTER_API_KEY", "").strip()),
+            openrouter_api_key=((openrouter_key(merged) or required("OPENROUTER_API_KEY"))
+                                if vision == "openrouter" else openrouter_key(merged)),
             openrouter_model=merged.get("OPENROUTER_MODEL", "qwen/qwen3.7-flash"),
             openrouter_base_url=merged.get(
                 "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/"),
@@ -167,4 +205,5 @@ class AgentSettings:
             captions=merged.get("AIC_AGENT_CAPTIONS", "1").lower() not in ("0", "false", "no"),
             checklist_vision=merged.get("AIC_AGENT_CHECKLIST_VISION", "1").lower() not in ("0", "false", "no"),
             checklist_vision_model=checklist_vision_model,
+            judge_style=judge_style,
         )

@@ -17,18 +17,19 @@ const live: AgentRunResponse = {
   ...running,
   kind: "qa",
   progress: {
-    stage: "judging", step: 0, elapsed: 6, answer: null, sequences: [],
+    stage: "judging", step: 0, elapsed: 6, answer: null, sequences: [], judge: "qwen",
+    strategy: ["Lễ hội: tra tên và nơi diễn ra trên web"],
+    lookups: [{ question: "lễ hội (tra theo mô tả)", answer: "Lễ hội Gióng ở Sóc Sơn", error: null, sources: [] }],
     plan: {
       summary_vi: "tìm cảnh", scenes: ["hai người cầm điện thoại", "trả lời phỏng vấn"],
       target_scene: 1, question_vi: "Người đó nói gì?", events: [],
     },
     candidates: [{
       id: "C3", video_id: "L21_V010", frame_idx: 23484, time: 939.4, judging: true,
-      verdict: null, sources: ["caption", "visual"],
-      context: { speech: "tôi rất vui", caption: "A young woman speaks while a woman walks past." },
+      verdict: null, sources: ["caption", "visual"], context: {},
     }, {
       id: "C7", video_id: "L22_V003", frame_idx: 10912, time: 436.5, judging: false,
-      verdict: { score: 8, reason: "hai người cầm điện thoại", by: "gemini" }, sources: ["visual"],
+      verdict: { score: 8, reason: "hai người cầm điện thoại", by: "qwen" }, sources: ["visual"],
       context: {},
     }],
   },
@@ -40,11 +41,11 @@ const done: AgentRunResponse = {
   status: "done",
   elapsed: 12,
   result: {
-    query_id: "abc", kind: "kis", query: "a red boat", answer: "42", answer_evidence: "read",
-    sequences: [], notes: "check it", elapsed: 12, error: null,
+    query_id: "abc", kind: "kis", query: "a red boat", answer: null, answer_evidence: null,
+    sequences: [], notes: "check it", elapsed: 12, error: null, judge: "qwen",
     ranking: [{
       id: "c0", video_id: "L01_V001", frame_idx: 10, time: 0.4, fused: 0.9,
-      verdict: { score: 8, reason: "the boat matches" }, evidence: [],
+      verdict: { score: 8, reason: "the boat matches", by: "qwen" }, evidence: [],
     }],
   },
 };
@@ -58,7 +59,7 @@ function fillForm(query = "a red boat") {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe("agent panel", () => {
-  it("sends the teammate's own keys with the run request", async () => {
+  it("sends the teammate's own keys with an automatic run request", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse(running, { status: 202 }));
     render(<AgentPanel />);
@@ -74,17 +75,9 @@ describe("agent panel", () => {
     });
   });
 
-  it("sends the judge the user selected, so human review is not silently run as Gemini", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValue(jsonResponse(running, { status: 202 }));
+  it("offers no human judge: every run is automatic", () => {
     render(<AgentPanel />);
-    fillForm();
-    fireEvent.change(screen.getByLabelText("Agent judge"), { target: { value: "human" } });
-
-    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)).judge).toBe("human");
+    expect(screen.queryByLabelText("Agent judge")).not.toBeInTheDocument();
   });
 
   it("sends the selected mode", async () => {
@@ -101,9 +94,7 @@ describe("agent panel", () => {
   });
 
   it("starts with no keys at all, so the owner does not have to type them", async () => {
-    // The deployment holds the owner's keys and the server decides whether this run
-    // may spend them. The panel used to demand them up front, which is what blocked
-    // a local-vision deployment -- and the owner's own blank-field runs.
+    // The deployment holds the keys and the server decides whether this run may spend them.
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(running, { status: 202 }));
     render(<AgentPanel />);
@@ -142,7 +133,7 @@ describe("agent panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(/already have a run in progress/);
-    expect(await screen.findByLabelText("Live review")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Agent progress")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop and use the current ranking" })).toBeEnabled();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.slice(0, 2).map((call) => call[0]))
@@ -162,11 +153,12 @@ describe("agent panel", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("polls until the run finishes and renders the verified ranking", async () => {
+  it("polls until the run finishes and lays the answer out for checking", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(running, { status: 202 }))
-      .mockResolvedValueOnce(jsonResponse(done));
+      .mockResolvedValueOnce(jsonResponse(done))
+      .mockResolvedValue(jsonResponse({ video_id: "L01_V001", frame_idx: 10, frames: [] }));
     render(<AgentPanel />);
     fillForm();
 
@@ -177,11 +169,9 @@ describe("agent panel", () => {
     await act(async () => { vi.advanceTimersByTime(1000); await Promise.resolve(); });
 
     expect(fetchMock.mock.calls[1][0]).toBe("/api/agent/runs/abc");
-    expect(screen.getByText("8/10")).toBeInTheDocument();
+    expect(screen.getByText(/judged by Qwen/)).toBeInTheDocument();
     expect(screen.getByText(/the boat matches/)).toBeInTheDocument();
-    expect(screen.getByText("Answer:")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Candidate 1: L01_V001 frame 10" }))
-      .toHaveAttribute("src", "/thumb/L01_V001/10?w=320");
+    expect(screen.getByRole("img", { name: "L01_V001 frame 10" })).toHaveAttribute("src", "/frame/L01_V001/10");
   });
 
   async function startLive() {
@@ -190,69 +180,47 @@ describe("agent panel", () => {
     render(<AgentPanel />);
     fillForm();
     fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
-    await screen.findByLabelText("Live review");
+    await screen.findByLabelText("Agent progress");
     return fetchMock;
   }
 
-  it("shows what Gemini is judging, with the same context, while it judges", async () => {
-    const fetchMock = await startLive();
+  it("shows the run as it goes: who judges, the strategy, the web research", async () => {
+    await startLive();
 
-    expect(screen.getByText("Gemini is judging candidates")).toBeInTheDocument();
-    expect(screen.getByText("Gemini is judging…")).toBeInTheDocument();
-    expect(screen.getByText("tôi rất vui")).toBeInTheDocument();
-    expect(screen.getByText("A young woman speaks while a woman walks past.")).toBeInTheDocument();
+    expect(screen.getByText("Qwen is judging candidates")).toBeInTheDocument();
+    expect(screen.getByText("Qwen is judging…")).toBeInTheDocument();
     expect(screen.getByText(/trả lời phỏng vấn/)).toHaveTextContent("(frame to submit)");
     expect(screen.getByText("Người đó nói gì?")).toBeInTheDocument();
+    expect(screen.getByText("Lễ hội: tra tên và nơi diễn ra trên web")).toBeInTheDocument();
+    expect(screen.getByText("Lễ hội Gióng ở Sóc Sơn")).toBeInTheDocument();
     expect(screen.getByText("8/10")).toBeInTheDocument();
+    // Fully automatic: nothing to accept or reject.
+    expect(screen.queryByRole("button", { name: /Accept/ })).not.toBeInTheDocument();
   });
 
-  it("sends an acceptance, and a second click withdraws it", async () => {
-    const fetchMock = await startLive();
-    const accepted = { ...live, review: { decisions: { C3: "accept" as const }, answer: null, stopped: false, decided: true } };
-    fetchMock.mockResolvedValueOnce(jsonResponse(accepted));
-
-    fireEvent.click(screen.getByRole("button", { name: "Accept C3" }));
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "Accept C3" }))
-      .toHaveAttribute("aria-pressed", "true"));
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/agent/runs/abc/review");
-    expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body)))
-      .toEqual({ candidate_id: "C3", decision: "accept" });
-    expect(screen.getByText(/your decision is being applied/)).toBeInTheDocument();
-
-    fetchMock.mockResolvedValueOnce(jsonResponse(live));
-    fireEvent.click(screen.getByRole("button", { name: "Accept C3" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body)))
-      .toEqual({ candidate_id: "C3", decision: "clear" });
-  });
-
-  it("sends a typed Q&A answer and a stop", async () => {
+  it("can still be stopped early", async () => {
     const fetchMock = await startLive();
     fetchMock.mockResolvedValue(jsonResponse(live));
 
-    fireEvent.change(screen.getByLabelText("Reviewer answer"), { target: { value: " 2.15 " } });
-    fireEvent.click(screen.getByRole("button", { name: "Use this answer" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole("button", { name: "Stop and use the current ranking" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
 
-    const bodies = fetchMock.mock.calls.slice(1).map((call) => JSON.parse(String((call[1] as RequestInit).body)));
-    expect(bodies).toEqual([{ answer: "2.15" }, { stop: true }]);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/agent/runs/abc/review");
+    expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body))).toEqual({ stop: true });
   });
 
-  it("marks a reviewer's verdict in the finished ranking", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(jsonResponse({
-      ...done,
-      result: { ...done.result!, ranking: [{
-        ...done.result!.ranking[0], verdict: { score: 10, reason: "Accepted by the reviewer", by: "human" },
-      }] },
-    }, { status: 202 }));
-    render(<AgentPanel />);
+  it("submits the answer being checked through the app's DRES handler", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(done, { status: 202 }))
+      .mockResolvedValue(jsonResponse({ video_id: "L01_V001", frame_idx: 10, frames: [] }));
+    const onSubmit = vi.fn().mockResolvedValue({ message: "ACCEPTED · HTTP 200", completed: true });
+    render(<AgentPanel onSubmit={onSubmit} />);
     fillForm();
     fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
 
-    expect(await screen.findByText("Reviewer")).toBeInTheDocument();
-    expect(screen.getByText("10/10")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Submit this frame to DRES" }));
+
+    expect(await screen.findByText("ACCEPTED · HTTP 200")).toBeInTheDocument();
+    expect(onSubmit).toHaveBeenCalledWith({ kind: "kis", video_id: "L01_V001", frame_idx: 10 });
   });
 });

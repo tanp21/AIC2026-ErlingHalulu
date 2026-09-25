@@ -5,8 +5,60 @@ searches across every channel the server offers, checks candidates by looking at
 them, and writes a ranked, submission-ready answer for a teammate to confirm.
 
 The agent is an HTTP client of the search server. It runs as a CLI on a laptop, or
-server-side from the **Retrieval agent** tab in the web UI, where each teammate
-supplies their own DeepSeek and Gemini keys for the run (see *Server-hosted runs*).
+server-side from the **Retrieval agent** tab in the web UI (see *Server-hosted runs*).
+
+## Fully automatic runs (the Retrieval agent tab)
+
+The tab is for the hard queries -- Q&A that needs the web, TRAKE, and KIS that plain search
+misses -- and a run needs nobody while it runs. Who does what:
+
+| Model | Job |
+| --- | --- |
+| DeepSeek | plans the searches, rewrites them after the first round, splits the query into checkable details |
+| **Qwen** (`qwen/qwen3.7-flash`, OpenRouter, the team's shared key) | **judges every candidate**, checks TRAKE paths, reads Q&A answers off the frames |
+| Gemini | **web search only** (Google Search grounding); never sees a frame |
+
+Judging moved from Gemini to Qwen for cost. It is on whenever the deployment has an OpenRouter
+key -- `OPENROUTER_API_KEY`, or `QWEN_API_KEY`, the name it was handed round under -- and
+`AIC_AGENT_VISION` is unset (`agent.config.default_vision`).
+
+**A candidate is judged as a moment, not a keyframe** (`agent/judge.py`, `MomentJudge`). Qwen
+gets one call per candidate holding its keyframe plus the keyframes of the shots around it
+(±60 s, nearest shots densest, ~9-15 images), the speech and on-screen text of that window, the
+organisers' query, the frame the plan wants (target scene) and, for Q&A, the question. It is the
+Search tab's "Check by AI" (`agent/checker.py`) pointed at the agent's candidates. It answers
+per detail of the query (✓/~/✗, from DeepSeek's checklist, `evidence.query_details`), an overall
+0-10 and, for Q&A, the answer read off that moment. Measured live: a call takes 13-16 s and
+eight in flight take the same wall time, so a round of 16 candidates is ~15-20 s on a healthy
+host. A round has a 60 s deadline (a slow compute host serving the keyframes once stretched one
+to 190 s); what misses it stays unjudged. A reply the parser cannot repair is asked once more.
+Because the judge already sees the shots around a candidate, the falsifier is off in this mode,
+and the budgets are longer (`MOMENT_DEFAULTS`: 90 s fast, 240 s auto, 300 s deep) so the rewrite
+round still fits after two rounds of judging.
+
+**Strategies, chosen per query** (each one is listed in the result, `AgentResult.strategy`):
+
+| The query... | What the run does |
+| --- | --- |
+| cooks something (regex, or the plan's `topic: cooking`) | Gemini looks up the dish and recipe at t=0 ("Món ngon mỗi ngày" publishes them); the dish name becomes a transcript query in round 2; a Q&A also looks up the recipe of the top video's own dish |
+| names a festival, custom, event, place or person (`web.TOPIC_PATTERNS`, or the plan's `topic`) | Gemini looks up which one it is and where (`TOPIC_LOOKUP_PROMPT`) at t=0; the names in its `TỪ KHÓA:` line are searched in round 2 as transcript queries and, when capitalised, as on-screen text (`_web_queries`) |
+| leaves a name to the web (the plan's `lookups`, now 0-3 and asked for whenever the web can name what the corpus would say) | each question is looked up; its `TỪ KHÓA:` names feed round 2 the same way and its `ĐÁP ÁN:` joins the Q&A answers |
+| is Q&A | the answer is read **after all judging is over**, at the best-judged moments of the top video: the judge's own readings of those moments vote with a dedicated high-resolution reading, non-answers ("không rõ", "Không xác định được", a sentence that opens with a denial) are no vote, a count keeps only its number, and the result is reconciled with a fact/recipe lookup made from the top video's narration |
+| is TRAKE | each event is searched inside the leading videos, paths are joined in order and checked event by event by the judge |
+
+**The result is laid out for checking and submitting** (`frontend/src/agentResult.tsx`): the
+answers on the left; the selected one on the right at full resolution, with the keyframes around
+it (click one to submit that frame instead), the judge's score, reason and per-detail checks, and
+the speech/on-screen text/caption around it. A TRAKE path shows every event side by side, each
+with its own frame, score and the query's wording of the event, and each adjustable to a nearby
+keyframe. **Submit to DRES** sends exactly what is on screen through the app's DRES flow
+(`submitAgentAnswer` in `App.tsx`: the DRES task is switched to the run's kind first); a Q&A
+submits the answer in the box above, pre-filled with the agent's.
+
+The live view shows the plan, the strategies, each web lookup as it lands and each candidate as
+Qwen judges it; **Stop** ends a run early with its current ranking. The tab no longer starts a
+run with a person as the judge; the API still accepts `judge: "human"` and such a run still opens
+in the review workspace described below.
 
 ## How one query is answered
 
@@ -138,6 +190,9 @@ finalize: ranking (verified matches first) · Q&A answer read from the frame/spe
   scored against its own events before the best ones are refined.
 
 ### A teammate judging alongside Gemini
+
+*The tab no longer shows these controls: runs are fully automatic (above). The API and
+`agent/review.py` still carry them.*
 
 Gemini judges every candidate the agent submits. On a quiet network that is ~4 s a
 call; on a congested venue network it can be far longer, and the run waits. So while a
@@ -603,8 +658,9 @@ at your own app so runs use your local orchestrator; see
 | `GEMINI_THINKING_LEVEL` | `low` | |
 | `AIC_AGENT_SEARCH_API` | `auto` | `batch` requires `/agent/search`; `compat` always uses the public routes |
 | `AIC_AGENT_SPOKEN_NUMBERS` | `0` | `1` spells digits out in transcript queries (raw-ASR index only) |
-| `AIC_AGENT_VISION` | `gemini` | Which model does the five vision jobs: `gemini`, `local` (a model on this machine), `deepseek`, or `openrouter` (one shared team key, default `qwen/qwen3.7-flash`, see `OPENROUTER_API_KEY`/`OPENROUTER_MODEL` below). `local` makes `GEMINI_API_KEY` optional — the web lookup goes without — but it does not need to be. `deepseek` and `openrouter` are remote APIs like Gemini, so they solve nothing about a congested uplink; they exist because they may simply judge more accurately, or (`openrouter`) because the Gemini quota ran out |
-| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | required for `openrouter` / `qwen/qwen3.7-flash` | The team's one shared key — never a per-teammate paste. Also what `backend/checker.py`'s "Check by AI" (`docs/checker.md`) uses, whether or not the agent's own vision backend is `openrouter` |
+| `AIC_AGENT_JUDGE_STYLE` | `moment` with OpenRouter, else `keyframe` | `moment`: one call per candidate over its keyframe and the shots around it (`agent/judge.py`); `keyframe`: five keyframes to a call (`Inspector.verify`) |
+| `AIC_AGENT_VISION` | `openrouter` when an OpenRouter key exists, else `gemini` | Which model does the five vision jobs: `gemini`, `local` (a model on this machine), `deepseek`, or `openrouter` (one shared team key, default `qwen/qwen3.7-flash`, see `OPENROUTER_API_KEY`/`OPENROUTER_MODEL` below). `local` makes `GEMINI_API_KEY` optional — the web lookup goes without — but it does not need to be. `deepseek` and `openrouter` are remote APIs like Gemini, so they solve nothing about a congested uplink; they exist because they may simply judge more accurately, or (`openrouter`) because the Gemini quota ran out |
+| `OPENROUTER_API_KEY` (or `QWEN_API_KEY`), `OPENROUTER_MODEL` | required for `openrouter` / `qwen/qwen3.7-flash` | The team's one shared key — never a per-teammate paste. Also what `backend/checker.py`'s "Check by AI" (`docs/checker.md`) uses, whether or not the agent's own vision backend is `openrouter` |
 | `AIC_VLM_URL` | unset | Runs the local model in another process or on another host (`POST /core/vision/judge`), the same split as `AIC_CORE_URL`. Only read when `AIC_AGENT_VISION=local` |
 | `AIC_VLM_MODEL` | `deepseek-flash` / smallest candidate | The model the selected vision backend uses: a registry slug for `local`, a DeepSeek model id for `deepseek`. **Only `deepseek-flash` reads images** — `deepseek-v4-pro` answers a vision call with schema-shaped JSON whose every score is 0, which reads as a judge that works and scores badly. `bench_agent_vision` probes any remote judge with a solid-colour image before scoring it. The local default is deliberately the smallest, so a first run on a card that may already hold PE-Core and Qwen does not start by trying to fit the largest. See *Local vision* below |
 | `AIC_VLM_DIR` | `~/.cache/aic/vlm` | Where the snapshots are materialised; `/models/vlm` in the container |

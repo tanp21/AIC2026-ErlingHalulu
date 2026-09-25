@@ -216,6 +216,28 @@ class DeploymentKeyTests(unittest.TestCase):
         self.assertEqual(settings.deepseek_api_key, "dsk-typed")
         self.assertEqual(settings.gemini_api_key, "gmk-deployment")
 
+    def test_the_teams_qwen_key_judges_every_run_as_moments(self):
+        # The shared key was handed round as QWEN_API_KEY; with no backend named, having it is
+        # what makes a run judge with Qwen on OpenRouter -- anyone's run, not only the owner's.
+        from agent.tasks import task_from_text
+
+        store = AgentRunStore()
+        with tempfile.TemporaryDirectory() as directory:
+            run = store.create("run1", TEAMMATE, task_from_text("run1", "a red boat", "kis"),
+                               Path(directory) / "run1", "http://test", deployment_keys=False)
+            with (
+                patch("backend.agent_runner.run_query",
+                      return_value=(fake_result(run.run_id), Mock(as_dict=lambda: {}))) as query,
+                patch.dict(os.environ, {"QWEN_API_KEY": "sk-or-team", "AIC_AGENT_VISION": "",
+                                        "OPENROUTER_API_KEY": "", "AIC_AGENT_OUT_DIR": directory}),
+            ):
+                execute_run(store, run, AgentRunReq(text="a red boat", deepseek_api_key="dsk-theirs"), INT_URL)
+
+        settings = query.call_args.args[1]
+        self.assertEqual((settings.vision, settings.judge_style, settings.openrouter_api_key),
+                         ("openrouter", "moment", "sk-or-team"))
+        self.assertEqual(settings.gemini_api_key, "")  # Gemini is only the web search now
+
     def test_a_run_that_is_not_the_owners_never_reaches_them(self):
         with tempfile.TemporaryDirectory() as directory:
             store, run, query = self.settings_for(directory, deployment_keys=False)
@@ -370,6 +392,11 @@ class AgentRunEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((no_candidate.status_code, bad_id.status_code), (422, 422))
         self.assertEqual((foreign.status_code, late.status_code), (404, 409))
         self.assertFalse(self.runs.get(OWNER, run_id).review.stopped)
+
+    async def test_a_qwen_judged_run_needs_no_gemini_key(self):
+        with patch.dict(os.environ, {"QWEN_API_KEY": "sk-or-team", "AIC_AGENT_VISION": ""}):
+            response = await self.start(gemini_api_key="", headers={"X-AIC-User": TEAMMATE})
+        self.assertEqual(response.status_code, 202)
 
     async def test_a_human_judged_run_needs_no_gemini_key(self):
         blank = await self.start(gemini_api_key="")

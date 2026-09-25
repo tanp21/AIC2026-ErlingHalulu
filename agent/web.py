@@ -12,7 +12,7 @@ from difflib import SequenceMatcher
 import re
 import unicodedata
 
-from .prompts import COOKING_LOOKUP_PROMPT, FACT_PROMPT, RECIPE_PROMPT
+from .prompts import COOKING_LOOKUP_PROMPT, FACT_PROMPT, RECIPE_PROMPT, TOPIC_LOOKUP_PROMPT
 
 COOKING = re.compile(
     r"nấu|món|nguyên liệu|đầu bếp|chế biến|công thức|ẩm thực|tạp dề|topping|gia vị|"
@@ -24,6 +24,69 @@ UNKNOWN = {"", "khong ro", "khong biet", "khong xac dinh", "unknown", "n/a"}
 
 def is_cooking(text: str) -> bool:
     return bool(COOKING.search(text or ""))
+
+
+#: Words that already say, before any planning, that the web knows what a query is about. Only
+#: words that name a KIND of thing the corpus would call by its name: "lễ hội" is a festival
+#: with a name the narrator says, "tỉnh" alone is every news report. Checked in this order; the
+#: first match decides the lookup (`topic_lookup`), and the planner's own `topic` and
+#: `lookups` add to it after planning.
+TOPIC_PATTERNS = (
+    ("festival", re.compile(
+        r"lễ hội|hội làng|hội xuân|lễ rước|rước kiệu|rước đèn|lễ cúng|lễ tế|lễ dâng|tết nguyên đán|"
+        r"trung thu|rằm tháng|phong tục|tập tục|nghi lễ|nghi thức|múa lân|múa rồng|múa sư tử|"
+        r"đua thuyền|đua ghe|đua bò|chọi trâu|kéo co|quan họ|hát xoan|hát then|đờn ca tài tử",
+        re.IGNORECASE)),
+    ("event", re.compile(
+        r"hội nghị|hội thảo|lễ khai mạc|lễ bế mạc|khánh thành|khai trương|lễ kỷ niệm|diễu binh|"
+        r"diễu hành|triển lãm|hội chợ|giải đấu|chung kết|lễ trao|lễ phát động|cơn bão|lũ quét|"
+        r"sạt lở|vụ cháy|hỏa hoạn|tai nạn|động đất", re.IGNORECASE)),
+    ("place", re.compile(
+        r"chùa|đền|đình làng|miếu|nhà thờ|thánh đường|lăng|di tích|di sản|danh lam|thắng cảnh|"
+        r"phố cổ|làng nghề|khu du lịch|bảo tàng|thành cổ|cột cờ|cây cầu|con đèo|ngọn núi|hang|"
+        r"thác|vịnh|hòn đảo|bãi biển|địa danh|địa điểm", re.IGNORECASE)),
+    ("person", re.compile(
+        r"nghệ nhân|nghệ sĩ|ca sĩ|danh hiệu|chủ tịch|bộ trưởng|thủ tướng|giáo sư|vận động viên|"
+        r"cầu thủ|đạo diễn|nhà văn|anh hùng|người sáng lập", re.IGNORECASE)),
+)
+#: What each topic's lookup is after, for `TOPIC_LOOKUP_PROMPT`: (what the query is about, the noun).
+TOPIC_GOALS = {
+    "festival": ("một lễ hội, phong tục hoặc nghi lễ", "lễ hội"),
+    "event": ("một sự kiện (tin tức, lễ, hội nghị, thi đấu, thiên tai)", "sự kiện"),
+    "place": ("một địa danh (công trình, di tích, thắng cảnh, làng nghề)", "địa danh"),
+    "person": ("một nhân vật", "nhân vật"),
+}
+
+
+def detect_topic(text: str) -> str | None:
+    """The first topic in `TOPIC_PATTERNS` whose words the query uses, or None."""
+    for topic, pattern in TOPIC_PATTERNS:
+        if pattern.search(text or ""):
+            return topic
+    return None
+
+
+def topic_lookup(query: str, topic: str) -> str:
+    what, kind = TOPIC_GOALS[topic]
+    return TOPIC_LOOKUP_PROMPT.format(query=query, what=what, kind=kind)
+
+
+#: How long a keyword may be to be searched: a name or a short phrase, not a sentence.
+KEYWORD_MAX_WORDS = 8
+
+
+def keywords(text: str | None) -> list[str]:
+    """The names a lookup's `TỪ KHÓA:` line lists, alternatives and asides dropped."""
+    line = tagged(text or "", "TỪ KHÓA")
+    if not line:
+        return []
+    found = []
+    for part in re.split(r"[;,]", line):
+        name = NAME_TAIL.split(part.strip())[0].strip(" .-*_\"'“”")
+        if (len(name) > 2 and len(name.split()) <= KEYWORD_MAX_WORDS and not is_unknown(name)
+                and name.casefold() not in (f.casefold() for f in found)):
+            found.append(name)
+    return found
 
 
 def _fold(text: str) -> str:
@@ -80,6 +143,29 @@ DISH_PATTERNS = (
 NAME_TAIL = re.compile(r"\s*[(\[;,.–—]|\s+(?:hoặc|hay|hoac)\s")
 #: Answers the model marks as unknown; "không rõ" is what the prompts ask for.
 UNKNOWN_ANSWER = re.compile(r"^(kh[ôo]ng r[õo]|khong ro|unknown|n/?a)$", re.IGNORECASE)
+#: A reading that says the moment does not answer the question, in the words models use for it
+#: ("không rõ", "Không xác định được", "không đọc được số", "not visible", ...). Measured on the
+#: first Qwen run: three readings of "không rõ" agreed with each other and outvoted nothing, so
+#: the run submitted "không rõ" as its answer.
+NON_ANSWER = re.compile(
+    r"^(kh[oô]ng\s+(r[oõ]|bi[eế]t|x[aá]c\s+[dđ][iị]nh|[dđ][oọ]c\s+[dđ][uư][oợ]c|th[aấ]y|c[oó]\s+th[oô]ng\s+tin|"
+    r"nh[iì]n\s+th[aấ]y|[dđ][uủ]\s+(d[uữ]|th[oô]ng)|th[eể])|unknown|n/?a|none|not\s+(visible|shown|known|determinable)|"
+    r"cannot|unclear|kh[oô]ng$)", re.IGNORECASE)
+
+
+DENIAL = re.compile(r"^(kh[oô]ng|ch[uư]a|there (is|are) no|no |none |the (image|frame)s? (does|do) not)",
+                    re.IGNORECASE)
+
+
+def is_unknown(answer: str | None) -> bool:
+    """True for an empty answer and for one that only says there is no answer."""
+    text = " ".join(str(answer or "").split()).strip(" .!\"'")
+    if not text or NON_ANSWER.match(text) or _fold(text) in UNKNOWN:
+        return True
+    # A sentence that opens with a denial is an explanation, not an answer: "Không có hình ảnh
+    # cân hay con số hiển thị trên cân trong các khung hình" was read as the answer to "what
+    # does the scale show?". A real answer is a name, a number or a few words.
+    return bool(DENIAL.match(text)) and len(text.split()) > 4
 
 
 def dish_name(text: str | None) -> str | None:

@@ -19,6 +19,8 @@ import { QueryBox } from "./queryBox";
 import { ObjectCanvas, emptyObjectQuery } from "./objectCanvas";
 export { VideoDialog } from "./videoDialog";
 import type {
+  AgentSubmitOutcome,
+  AgentSubmitRequest,
   CompareResult,
   ClassicSearchMode,
   IndexName,
@@ -850,12 +852,14 @@ export default function App() {
     setDresKind(kind);
   }
 
-  async function submitDresCandidate(candidate: DresCandidate, expectedTimestampMs?: number) {
+  // `kind` is the task the candidate answers: the navigation bar's by default, the agent run's
+  // for a submission from the Retrieval agent tab, which may answer a different kind of query.
+  async function submitDresCandidate(candidate: DresCandidate, expectedTimestampMs?: number, kind: QueryKind = dresKind) {
     let status = dresStatus;
-    if (status?.connected && (!status.context_valid || status.context?.kind !== dresKind
-      || dresKind === "trake" && status.context?.event_count !== null)) {
+    if (status?.connected && (!status.context_valid || status.context?.kind !== kind
+      || kind === "trake" && status.context?.event_count !== null)) {
       try {
-        await selectDresKind(dresKind);
+        await selectDresKind(kind);
         status = await fetchDresStatus();
       } catch (error) {
         return { message: error instanceof Error ? error.message : "Could not select DRES task.", completed: false };
@@ -881,6 +885,18 @@ export default function App() {
       const uncertain = !(error instanceof DresApiError) || error.category === "uncertain";
       return { message: `${uncertain ? "UNCERTAIN" : "NOT SENT / REJECTED"} · ${error instanceof Error ? error.message : "DRES submission failed"}${uncertain ? ". Check DRES before any retry." : ""}`, uncertain, completed: false, timestamp_ms: prepared.timestamp_ms ?? undefined };
     }
+  }
+
+  /** A frame, a TRAKE sequence or a Q&A answer the Retrieval agent found, sent exactly as shown there. */
+  async function submitAgentAnswer(request: AgentSubmitRequest): Promise<AgentSubmitOutcome> {
+    const candidate: DresCandidate = request.kind === "trake"
+      ? { video_id: request.video_id, frame_ids: request.frame_ids ?? [] }
+      : { video_id: request.video_id, frame_idx: request.frame_idx,
+        ...(request.kind === "qa" ? { answer: request.answer ?? "" } : {}) };
+    try {
+      if (!dresStatus) setDresStatus(await fetchDresStatus());
+    } catch { /* submitDresCandidate reports DRES as not ready */ }
+    return submitDresCandidate(candidate, undefined, request.kind);
   }
 
   function addTrakeEvent(videoId: string, frameId: number): string {
@@ -1748,7 +1764,7 @@ export default function App() {
           : <div className="empty-state query-empty"><h3>No query round yet</h3><p>Upload a round to start assigning and managing answers.</p></div>}
       </section>
       <section className="agent-page" hidden={tab !== "agent"}>
-        <AgentPanel />
+        <AgentPanel onSubmit={submitAgentAnswer} />
       </section>
       {openResult && !(activeRound && login) && <VideoDialog result={openResult} onClose={() => setOpenResult(null)} startPaused
         originalVideo profile={profile}

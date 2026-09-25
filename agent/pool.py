@@ -46,6 +46,11 @@ class Verdict:
     scene: int | None = None
     #: "gemini", or "human" for a teammate's decision in the UI, which always wins.
     by: str = "gemini"
+    #: The moment judge only (`agent.judge`): how sure it is of `answer`, the query's
+    #: details it ticked or crossed, and how many keyframes it looked at.
+    answer_confidence: float | None = None
+    checks: list | None = None
+    frames_seen: int | None = None
 
 
 @dataclass

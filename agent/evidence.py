@@ -26,11 +26,11 @@ from __future__ import annotations
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from functools import lru_cache
 import logging
 import math
 import re
 import threading
+from time import monotonic
 import unicodedata
 
 from .llm import LLMError
@@ -520,7 +520,16 @@ def _spread_nearest(frames: list[dict], count: int) -> list[dict]:
     return [frames[round(index * (len(frames) - 1) / (count - 1))] for index in range(count)]
 
 
-@lru_cache(maxsize=64)
+#: Guards the per-client shot cache below; each video then has a lock of its own.
+_SHOTS_LOCK = threading.Lock()
+#: A video whose shots could not be read is not asked again for this long: the fall-back (the
+#: keyframe neighbourhood) is good enough, and a host that just timed out is still slow.
+SHOTS_RETRY_SECONDS = 60.0
+#: Videos whose shots one client remembers. The Search tab's checker keeps one client for the
+#: life of the server, so this is what bounds it; an agent run touches a few dozen videos.
+SHOTS_CACHE_MAX = 128
+
+
 def _shots_of(search, video_id: str) -> tuple:
     """A video's shots with the keyframes inside each, read once per video per run; `()` if there are none.
 
@@ -536,12 +545,32 @@ def _shots_of(search, video_id: str) -> tuple:
     fetch = getattr(search, "shots", None)
     if fetch is None:
         return ()
-    try:
-        rows = fetch(video_id) or []
-    except Exception as exc:
-        logger.warning("evidence: no shots for %s (%s)", video_id, exc)
-        return ()
-    return tuple(rows)
+    with _SHOTS_LOCK:
+        cache = getattr(search, "_evidence_shots", None)
+        if cache is None:
+            cache = OrderedDict()
+            try:
+                search._evidence_shots = cache
+            except AttributeError:  # a client that takes no attributes is simply asked each time
+                pass
+        entry = cache.setdefault(video_id, {"lock": threading.Lock(), "rows": None, "failed_at": None})
+        cache.move_to_end(video_id)
+        while len(cache) > SHOTS_CACHE_MAX:
+            cache.popitem(last=False)
+    # One request per video, however many threads judge its moments at once: measured on a slow
+    # compute host, sixteen candidates of two videos each waited out their own 8 s timeout.
+    with entry["lock"]:
+        if entry["rows"] is not None:
+            return entry["rows"]
+        if entry["failed_at"] is not None and monotonic() - entry["failed_at"] < SHOTS_RETRY_SECONDS:
+            return ()
+        try:
+            entry["rows"] = tuple(fetch(video_id) or [])
+        except Exception as exc:
+            logger.warning("evidence: no shots for %s (%s)", video_id, exc)
+            entry["failed_at"] = monotonic()
+            return ()
+        return entry["rows"]
 
 
 def _shot_frames(search, video_id: str, frame_idx: int, time: float,

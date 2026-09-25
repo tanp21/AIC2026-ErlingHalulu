@@ -39,7 +39,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent.cli import save_run
-from agent.config import VISION_ENV, AgentSettings, deployment_vision
+from agent.config import VISION_ENV, AgentSettings, deployment_vision, openrouter_key
+from agent.judge import MomentJudge
 from agent.llm import DeepSeekClient, GeminiClient, OfflineGemini, Usage
 from agent.orchestrator import Agent, AgentOptions
 from agent.review import HumanReview
@@ -289,6 +290,10 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
         "plan_thinking": settings.deepseek_plan_thinking,
         "spoken_numbers": settings.spoken_numbers,
     }
+    # A model-judged run on OpenRouter judges each candidate as a moment (its keyframe and
+    # the shots around it, `agent/judge.py`), which also sets the longer budgets that needs.
+    judge_style = settings.judge_style if judge != "human" else "keyframe"
+    overrides["judge_style"] = judge_style
     if time_budget is not None:
         overrides["time_budget"] = time_budget
     if judge == "human":
@@ -299,7 +304,8 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
             overrides["human_idle_timeout"] = human_idle_timeout
     try:
         agent = Agent(deepseek, gemini, search, AgentOptions.for_mode(mode, **overrides),
-                      vision=vision)
+                      vision=vision,
+                      judge=MomentJudge(vision, search) if judge_style == "moment" else None)
         result = agent.run(task, review=review, progress=progress).to_dict()
     finally:
         search.close()
@@ -322,6 +328,8 @@ _SHARED_KEYS = frozenset({"openrouter"})
 
 
 def _deployment_key(name: str) -> str:
+    if name == "openrouter":
+        return openrouter_key()  # OPENROUTER_API_KEY, or the QWEN_API_KEY it was handed round as
     return os.environ.get(_DEPLOYMENT_KEY_ENV[name], "").strip()
 
 

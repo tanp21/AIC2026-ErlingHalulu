@@ -112,6 +112,7 @@ class CheckTarget:
 #: no sense, and an audio query is spoken words to match, not an action to see.
 #: English, for `CHECK_SYSTEM` (the vision judge's prompt, which is in English).
 CHANNEL_LABELS_EN = (
+    ("query_text", "The competition query (Vietnamese)"),
     ("visual_text", "Visual description (English)"),
     ("audio_text", "Spoken words to find (Vietnamese speech)"),
     ("ocr_text", "On-screen text to find"),
@@ -119,6 +120,7 @@ CHANNEL_LABELS_EN = (
 #: Vietnamese, for `DETAILS_SYSTEM` (the checklist step, a Vietnamese prompt shared with the
 #: agent) -- worded to match `CHECK_DETAILS_NOTE`, which tells that step what each label means.
 CHANNEL_LABELS_VI = (
+    ("query_text", "Truy vấn"),
     ("visual_text", "Mô tả hình ảnh (tiếng Anh)"),
     ("audio_text", "Lời thoại cần tìm"),
     ("ocr_text", "Chữ trên màn hình cần tìm"),
@@ -136,6 +138,9 @@ class CheckQuery:
     ocr_text: str = ""
     kind: str = "kis"
     question: str | None = None
+    #: The organisers' whole query, as the retrieval agent judges its candidates against it
+    #: (`agent.judge`); the Search tab leaves it empty and sends its channels instead.
+    query_text: str = ""
 
     def _channels(self, labels) -> list[tuple[str, str]]:
         return [(label, text.strip()) for field, label in labels
@@ -161,7 +166,8 @@ class CheckQuery:
 
 def check_moment(client, search, store, *, query: CheckQuery, target: CheckTarget,
                  details: QueryDetails | list[dict],
-                 window_seconds: float = CHECK_WINDOW_SECONDS) -> dict:
+                 window_seconds: float = CHECK_WINDOW_SECONDS,
+                 context: tuple[int, int, int] | None = None) -> dict:
     """Check one moment against one query; raises `CheckError` if the pixels could not be judged.
 
     `client` is any backend with `judge()` and `chat_json()` -- an `OpenRouterClient` in the
@@ -177,7 +183,8 @@ def check_moment(client, search, store, *, query: CheckQuery, target: CheckTarge
     span = span_around(store, target.video_id, target.time - window, target.time + window)
     with ThreadPoolExecutor(2) as pool:
         text_future = pool.submit(_text_checks, client, entries, span, target, window)
-        vision_future = pool.submit(_vision_check, client, search, entries, span, query, target, window)
+        vision_future = pool.submit(_vision_check, client, search, entries, span, query, target, window,
+                                    context)
         text = text_future.result()
         seen, overall, answer, frames_seen = vision_future.result()
 
@@ -266,7 +273,8 @@ def _said(span: dict, limit: int = CHECK_SAID_CHARS) -> str:
 
 
 # -- the pixels -----------------------------------------------------------------------------
-def _images(search, target: CheckTarget, window: float) -> list[tuple[str, bytes]]:
+def _images(search, target: CheckTarget, window: float,
+            context: tuple[int, int, int] | None = None) -> list[tuple[str, bytes]]:
     """The moment's own keyframe plus the keyframes of the shots around it, labelled and in order.
 
     `[M]` is the label on every one of them, so the shared judging rules -- which speak of a
@@ -274,14 +282,14 @@ def _images(search, target: CheckTarget, window: float) -> list[tuple[str, bytes
     An image that cannot be cut is skipped, never raised: a missing neighbour costs reach, and
     a missing own frame is caught by the caller as "nothing to look at".
     """
+    dense, most, count = context or (CHECK_CONTEXT_DENSE, CHECK_CONTEXT_MAX, CHECK_CONTEXT_FRAMES)
     wanted = [(target.frame_idx, target.time, "[M] this moment itself")]
-    for context in evidence._context_frames(
+    for frame in evidence._context_frames(
             search, target.video_id, target.frame_idx, target.time,
-            seconds=window, dense=CHECK_CONTEXT_DENSE, most=CHECK_CONTEXT_MAX,
-            count=CHECK_CONTEXT_FRAMES):
-        offset = float(context["time"]) - target.time
+            seconds=window, dense=dense, most=most, count=count):
+        offset = float(frame["time"]) - target.time
         when = f"{abs(offset):.0f}s earlier" if offset < 0 else f"{offset:.0f}s later"
-        wanted.append((int(context["frame_idx"]), float(context["time"]),
+        wanted.append((int(frame["frame_idx"]), float(frame["time"]),
                        f"[M] shot {when} in the same story"))
 
     def fetch(item):
@@ -297,9 +305,9 @@ def _images(search, target: CheckTarget, window: float) -> list[tuple[str, bytes
 
 
 def _vision_check(client, search, entries: list[dict], span: dict, query: CheckQuery,
-                  target: CheckTarget, window: float):
+                  target: CheckTarget, window: float, context: tuple[int, int, int] | None = None):
     """`(checks, verdict, answer, frames_seen)` from one call over the moment's images."""
-    images = _images(search, target, window)
+    images = _images(search, target, window, context)
     if not images:
         raise CheckError("no keyframe of this moment could be read")
     asked = query.asked

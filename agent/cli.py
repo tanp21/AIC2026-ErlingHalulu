@@ -12,6 +12,7 @@ import time
 
 from .config import ROOT, AgentSettings
 from .evaluate import DEFAULT_TOLERANCE, score_result, summarize
+from .judge import MomentJudge
 from .llm import DeepSeekClient, GeminiClient, OfflineGemini, Usage
 from .orchestrator import Agent, AgentOptions
 from .plan import analysis_messages, initial_queries, parse_plan
@@ -49,7 +50,8 @@ def build_agent(settings, options):
     vision = build_vision(settings, usage=usage,
                           gemini=gemini if settings.gemini_api_key else None)
     search = SearchClient.from_settings(settings)
-    return Agent(deepseek, gemini, search, options, vision=vision), usage
+    judge = MomentJudge(vision, search) if options.judge_style == "moment" else None
+    return Agent(deepseek, gemini, search, options, vision=vision, judge=judge), usage
 
 
 def options_from(args, settings):
@@ -59,6 +61,7 @@ def options_from(args, settings):
         overrides["time_budget"] = args.time_budget
     if args.no_web:
         overrides["auto_web"] = False
+    overrides["judge_style"] = getattr(settings, "judge_style", "keyframe")
     return AgentOptions.for_mode(args.mode, **overrides)
 
 
