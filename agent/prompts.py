@@ -82,7 +82,18 @@ Reply with one JSON object and nothing else:
 }}
 
 Rules:
-- scenes: one entry per visually distinct scene, in time order (usually 1-3).
+- scenes: one entry per visually distinct scene, in time order (usually 1-3). Things the \
+query lists as being on ONE slide, screen or frame ("Trên slide bao gồm: ...", "trong khung \
+hình có ...") are ONE scene: one caption naming all of them together, never separate scenes \
+and never a temporal search. A long caption naming several pictures blurs each of them for \
+CLIP, so also put each listed item alone in readings_en (up to 2, "a slide showing <item>"): \
+the moment that matches both searches is the one that holds both items.
+- Lectures (a recorded lesson with slides, "bài giảng", "slide"): the caption says it is a \
+lecture presentation slide and names its layout ("a lecture presentation slide with a title \
+and two illustrations: ..."), so the search stays among lecture videos. transcript_vi holds \
+1-2 phrases for the SUBJECT the pictures most likely illustrate, worked out from this query's \
+own pictures -- never words copied from these instructions; leave it empty if the pictures \
+do not point at a subject.
 - visual_en: the caption first, then 3-4 paraphrases of THAT caption which keep every \
 detail (same counts, colours, clothing, quoted text, names) and change only word order, \
 synonyms or grammar. Never shorten to a subset of the details and never add details: \
