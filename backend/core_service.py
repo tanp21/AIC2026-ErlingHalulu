@@ -471,8 +471,14 @@ class CoreProxyMiddleware:
             async with self._proxy_client().stream(
                 scope["method"], url, headers=headers, content=bytes(body) or None,
             ) as response:
+                # ASGI header names are lowercase, and the middleware outside this one relies on
+                # it: GZipMiddleware looks for `content-encoding` to leave an already-compressed
+                # body alone. The compute host answers `Content-Encoding: gzip`, so a verbatim
+                # name made it compress the body a second time under the upstream
+                # Content-Length -- "Too much data for declared Content-Length", a dropped
+                # connection, and "Failed to fetch" in the browser for every proxied JSON route.
                 raw_headers = [
-                    (key, value)
+                    (key.lower(), value)
                     for key, value in response.headers.raw
                     if key.decode("latin-1").lower() not in {
                         "connection", "keep-alive", "transfer-encoding",

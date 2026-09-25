@@ -228,6 +228,33 @@ class CoreProxyTests(unittest.TestCase):
         self.assertEqual(response.json(), {"source": "local"})
         self.assertEqual(seen, {})
 
+    def test_a_gzipped_upstream_reply_survives_the_apps_own_gzip(self):
+        # The compute host answers `Content-Encoding: gzip` with its compressed length. Passed
+        # on with that capitalisation, GZipMiddleware missed it, compressed the body again under
+        # the old Content-Length, and uvicorn dropped the connection ("Failed to fetch").
+        import gzip
+
+        from starlette.middleware.gzip import GZipMiddleware
+
+        payload = b'{"cues": [' + b",".join(b'{"text": "xin chao"}' for _ in range(200)) + b"]}"
+        packed = gzip.compress(payload)
+
+        def handler(request: httpx.Request):
+            return httpx.Response(200, headers=[("Content-Type", "application/json"),
+                                                ("Content-Encoding", "gzip"),
+                                                ("Content-Length", str(len(packed)))],
+                                  stream=httpx.ByteStream(packed))
+
+        middleware = core_service.CoreProxyMiddleware(FastAPI(), "http://core.test")
+        middleware._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = TestClient(GZipMiddleware(middleware, minimum_size=10))
+
+        response = client.get("/transcript/L21_V001", headers={"Accept-Encoding": "gzip"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, payload)
+        self.assertEqual(response.headers.get_list("content-encoding"), ["gzip"])
+
     def test_upstream_failure_is_reported_as_502(self):
         def handler(request: httpx.Request):
             raise httpx.ConnectError("down", request=request)
