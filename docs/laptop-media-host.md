@@ -49,6 +49,9 @@ compute host was never given them either.
 
 ## One-time setup on Windows
 
+`docs/prompts/laptop-media-host-setup.md` is these steps as a task brief for a coding agent
+running on the laptop, with the machine-specific blanks left to fill in.
+
 **1. Docker Desktop.** Linux containers, which means either the WSL2 backend or the Hyper-V
 one — Windows has no third option. "No WSL2" as in *not developing inside a WSL distro* is
 fine: nothing here is run from a Linux shell on the laptop, and both backends behave the
