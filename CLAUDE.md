@@ -54,6 +54,14 @@ uv run python -m scripts.indexing.build_frame_maps --help     # creates indexes/
 uv run python -m scripts.extraction.detect_shots --help       # creates data/<year>/shots/*.json
 uv run python -m scripts.embedding.embed_keyframes --help
 
+# The laptop media host (docs/laptop-media-host.md). `--resign-only` re-adopts a
+# frame-map manifest for a corpus copied to another machine, which DRES otherwise
+# refuses on every video; the checker reports that and everything else a media host
+# needs on disk.
+uv run python -m scripts.indexing.build_frame_maps --resign-only --help
+uv run python -m scripts.media.check_media_host --help
+uv run python -m scripts.media.make_lan_users --help          # writes haproxy-users.cfg
+
 # Local VLM snapshots for AIC_AGENT_VISION=local (needs the network; the container
 # is offline and read-only, so this runs here and the result is mounted in)
 uv run python -m scripts.vlm.fetch_models --help              # creates ~/.cache/aic/vlm/*
@@ -231,6 +239,6 @@ or destroy wipes ~390 GB of corpus, indexes and Elasticsearch. It is billed hour
 
 ## Further reading
 
-`docs/getting-started.md` (setup, indexing, local dev) · `docs/audio-search.md` · `docs/temporal-search.md` · `docs/clip-export.md` (per-shot clips for captioning) · `docs/shot-exclusions.md` (reviewer shot labelling) · `docs/caprl-shot-captioning.md` · `docs/agent.md` (retrieval agent) · `docs/checker.md` (Search tab's on-demand "Check by AI") · `docs/venue-deployment.md` (compute on a rented vast.ai instance, media on the WSL desktop, linked by an SSH tunnel) · `docs/operations.md` (failure playbook). Methodology write-ups for offline decisions (audio cleaning, OCR engine choice, hybrid fusion tuning, **which vision backend the agent should judge with**, and the agent's own
+`docs/getting-started.md` (setup, indexing, local dev) · `docs/audio-search.md` · `docs/temporal-search.md` · `docs/clip-export.md` (per-shot clips for captioning) · `docs/shot-exclusions.md` (reviewer shot labelling) · `docs/caprl-shot-captioning.md` · `docs/agent.md` (retrieval agent) · `docs/checker.md` (Search tab's on-demand "Check by AI") · `docs/venue-deployment.md` (compute on a rented vast.ai instance, media on the WSL desktop, linked by an SSH tunnel) · `docs/laptop-media-host.md` (the same split with a Windows/Docker Desktop laptop as the media host, on a switch instead of a tailnet) · `docs/operations.md` (failure playbook). Methodology write-ups for offline decisions (audio cleaning, OCR engine choice, hybrid fusion tuning, **which vision backend the agent should judge with**, and the agent's own
 end-to-end baseline on the official 2026 set) live under `docs/reports/` — the last is
 `docs/reports/agent-benchmark-2026-09.md`.

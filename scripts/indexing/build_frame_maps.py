@@ -97,8 +97,11 @@ def signature(path):
 
 
 def save_manifest(videos):
-    MAP_DIR.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=MAP_DIR, mode="w", suffix=".json", delete=False) as tmp:
+    # The staging file has to land on the same filesystem as the target: `os.replace` is
+    # atomic only within one, and `MAP_DIR` and `MANIFEST` are two names for the same
+    # directory that a caller may patch apart.
+    MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=MANIFEST.parent, mode="w", suffix=".json", delete=False) as tmp:
         temp_path = Path(tmp.name)
         json.dump({"version": 2, "videos": videos}, tmp, indent=2, sort_keys=True)
     try:
@@ -198,11 +201,78 @@ def build(workers):
         print(f"[frame-map] {directory.name}: {count} indexed timestamps")
 
 
+def resign(data_dir):
+    """Re-adopt an existing manifest after the corpus moved to another machine.
+
+    `manifest.json` records each video's `size` and `mtimeNs`, and DRES refuses a
+    submission whose original video does not match both (`dres.py::_source`: a map that no
+    longer describes the file it was built from would submit a frame_id for the wrong
+    moment). Copying the corpus to a second host -- where the same bytes arrive with the
+    copy's own timestamps -- trips that check on every video, with a message that reads
+    like the map is corrupt when nothing about it is.
+
+    Re-signing is safe without re-decoding because the *size* is still checked: a file whose
+    length differs is refused outright, not re-signed. Same length is what stands in for
+    "same bytes" here, and for the organiser's archives it is a strong one -- a re-encode or
+    a truncated download changes the length.
+
+    `build()` is the stronger answer and the one to reach for first when ffprobe is
+    available: it compares each existing map against the file's own packet timeline, so it
+    re-signs a moved corpus just as cheaply *and* catches a file that was replaced by
+    another of the same length. This exists for the host that has no ffmpeg.
+
+    Paths are rebased by their last four components, exactly as `dres.py::_source` compares
+    them, so a manifest built at `/home/x/.../data` is understood under `D:/aic/data`.
+    """
+    document = json.loads(MANIFEST.read_text())
+    if document.get("version") != 2:
+        raise SystemExit(f"{MANIFEST} is not a version 2 manifest; run without --resign-only")
+    data_dir = Path(data_dir)
+    videos, stale, missing = {}, [], []
+    for video_id, sig in document["videos"].items():
+        parts = Path(str(sig.get("path", ""))).parts
+        if len(parts) < 4:
+            stale.append(f"{video_id}: manifest path is not <year>/videos/<group>/<file>")
+            continue
+        path = data_dir.joinpath(*parts[-4:])
+        if not path.exists():
+            missing.append(f"{video_id}: {path}")
+            continue
+        stat = path.stat()
+        if sig.get("size") != stat.st_size:
+            stale.append(
+                f"{video_id}: {path} is {stat.st_size} bytes, the map was built from "
+                f"{sig.get('size')} -- this is not the file the map describes"
+            )
+            continue
+        videos[video_id] = {"path": str(path), "size": stat.st_size, "mtimeNs": stat.st_mtime_ns}
+    if stale or missing:
+        raise SystemExit(
+            "refusing to re-sign:\n  " + "\n  ".join(stale + missing)
+            + "\n\nRe-copy the files, or rebuild the maps with this script's default mode."
+        )
+    save_manifest(videos)
+    print(f"[frame-map] re-signed {len(videos)} videos against {data_dir}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--resign-only", action="store_true",
+        help="re-adopt the existing manifest for a corpus that moved to another machine, "
+             "checking file sizes and re-recording mtimes; needs no ffmpeg and re-derives "
+             "no map",
+    )
+    parser.add_argument(
+        "--data-dir", default=str(ROOT / "data"),
+        help="where the videos are now; only used by --resign-only",
+    )
     args = parser.parse_args()
-    build(max(1, args.workers))
+    if args.resign_only:
+        resign(args.data_dir)
+    else:
+        build(max(1, args.workers))
 
 
 if __name__ == "__main__":

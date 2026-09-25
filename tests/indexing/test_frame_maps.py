@@ -1,3 +1,4 @@
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -113,6 +114,98 @@ class FrameMapTests(unittest.TestCase):
     def test_packet_pts_without_frame_equivalent_falls_back_to_decode(self):
         with self.assertRaisesRegex(ValueError, "packet PTS unavailable"):
             build_frame_maps.parse_packet_probe({"streams": [{"time_base": "1/1000"}], "packets": [{"pts": 0}, {}]})
+
+
+class ResignFrameMapTests(unittest.TestCase):
+    """`--resign-only`: the same corpus on a second host, with that host's timestamps.
+
+    DRES compares a video's size *and* mtime against `manifest.json` before it will submit
+    a frame_id (`backend/dres.py::_source`), so a copied corpus is refused on every video
+    until the manifest is re-adopted -- which is what these cover.
+    """
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.data_dir = self.root / "data"
+        self.manifest = self.root / "frame_maps" / "manifest.json"
+        self.manifest.parent.mkdir(parents=True)
+        patcher = patch.object(build_frame_maps, "MANIFEST", self.manifest)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _video(self, year="2026", group="L21", video_id="L21_V001", payload=b"video"):
+        path = self.data_dir / year / "videos" / group / f"{video_id}.mp4"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        return path
+
+    def _manifest(self, path, size, mtime_ns=1):
+        # The recorded host path is deliberately a *different* root: the manifest is built
+        # where the corpus was built, and read where it now lives.
+        self.manifest.write_text(json.dumps({
+            "version": 2,
+            "videos": {path.stem: {
+                "path": f"/home/someone/aic/data/{path.parts[-4]}/{path.parts[-3]}/{path.parts[-2]}/{path.name}",
+                "size": size,
+                "mtimeNs": mtime_ns,
+            }},
+        }))
+
+    def test_readopts_a_manifest_for_a_corpus_that_moved_hosts(self):
+        path = self._video()
+        self._manifest(path, size=len(b"video"), mtime_ns=1)
+
+        build_frame_maps.resign(self.data_dir)
+
+        recorded = json.loads(self.manifest.read_text())["videos"]["L21_V001"]
+        self.assertEqual(recorded["path"], str(path))
+        self.assertEqual(recorded["size"], len(b"video"))
+        self.assertEqual(recorded["mtimeNs"], path.stat().st_mtime_ns)
+        self.assertNotEqual(recorded["mtimeNs"], 1)
+
+    def test_refuses_a_video_that_is_not_the_one_the_map_describes(self):
+        path = self._video(payload=b"a longer video than the map was built from")
+        self._manifest(path, size=len(b"video"))
+
+        with self.assertRaisesRegex(SystemExit, "not the file the map describes"):
+            build_frame_maps.resign(self.data_dir)
+
+    def test_refuses_a_missing_video_rather_than_dropping_it(self):
+        path = self._video()
+        self._manifest(path, size=len(b"video"))
+        path.unlink()
+
+        # Dropping the video would silently shrink the manifest, which is how a half-copied
+        # corpus would look healthy.
+        with self.assertRaisesRegex(SystemExit, "refusing to re-sign"):
+            build_frame_maps.resign(self.data_dir)
+
+    def test_refuses_a_manifest_that_is_not_version_two(self):
+        self.manifest.write_text(json.dumps({"version": 1, "videos": {}}))
+
+        with self.assertRaisesRegex(SystemExit, "not a version 2 manifest"):
+            build_frame_maps.resign(self.data_dir)
+
+    def test_leaves_the_manifest_alone_when_anything_is_stale(self):
+        good = self._video(video_id="L21_V001", payload=b"video")
+        bad = self._video(video_id="L21_V002", payload=b"a different length entirely")
+        self.manifest.write_text(json.dumps({"version": 2, "videos": {
+            "L21_V001": {"path": "/x/data/2026/videos/L21/L21_V001.mp4",
+                         "size": len(b"video"), "mtimeNs": 1},
+            "L21_V002": {"path": "/x/data/2026/videos/L21/L21_V002.mp4",
+                         "size": len(b"video"), "mtimeNs": 2},
+        }}))
+        before = self.manifest.read_text()
+
+        with self.assertRaises(SystemExit):
+            build_frame_maps.resign(self.data_dir)
+
+        # A partial re-sign would leave the two hosts disagreeing about which videos are
+        # current, which is worse than refusing.
+        self.assertEqual(self.manifest.read_text(), before)
+        self.assertTrue(good.exists() and bad.exists())
 
 
 if __name__ == "__main__":

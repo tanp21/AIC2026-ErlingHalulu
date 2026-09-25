@@ -1,0 +1,90 @@
+# The laptop media host: corpus and ffmpeg on a Windows machine, compute on the rented
+# instance. Layer it over the base file -- never run it alone, it is a diff, not a stack:
+#
+#   docker compose -f compose.yaml -f compose.media.yaml up -d --build --wait
+#
+# What it changes, and why none of it is optional on this host:
+#
+#  - **No Elasticsearch.** Every route that reads it (`/search`, `/agent/search`,
+#    `/ocr/*`, `/api/check`) is forwarded to the compute host by `CoreProxyMiddleware`'s
+#    `mode="api"`. Running it here would cost ~4 GB and 3 CPUs to answer nothing.
+#  - **No model mounts.** A media host loads no model. Beyond the waste, `compose.yaml`
+#    guards those two paths with `${VAR:?}`, so leaving the mounts in would force a
+#    laptop that has never downloaded PE-Core to point at a Hugging Face cache anyway.
+#  - **No `gpus`.** `gpus: all` fails container start outright on a host whose Docker
+#    Desktop has no GPU passthrough, and nothing on the media path touches CUDA.
+#  - **The ingress binds the switch, not loopback.** Teammates reach this machine over
+#    Ethernet (see docs/laptop-media-host.md); `127.0.0.1:8000` is only reachable by
+#    `tailscale serve`, which a switch cannot provide.
+#  - **`haproxy.lan.cfg`, not `haproxy.cfg`.** The Tailscale frontend 403s every source
+#    outside 127.0.0.1/172.16.0.0/12. The LAN one authenticates with basic auth instead.
+#
+# The compute host is reached through the same `core-tunnel` sidecar as the desktop
+# deployment -- `AIC_CORE_URL=http://core-tunnel:9000` in `.env.secure`. It needs the
+# laptop's WiFi up, which is also what DRES submission needs; neither needs inbound
+# access on that interface.
+
+services:
+  # Off unless explicitly asked for (`--profile elasticsearch`). `app`'s `depends_on` is
+  # reset below, so nothing pulls it back in.
+  elasticsearch:
+    profiles: ["elasticsearch"]
+
+  app:
+    # `!reset` and `!override` are Compose's removal/replacement tags. A plain value here
+    # would *merge* -- `volumes` is a list, so Compose would append to the base list rather
+    # than replace it, and the model mounts would come back.
+    depends_on: !reset null
+    gpus: !reset null
+    volumes: !override
+      - ./data:/data:ro
+      - ./indexes:/indexes:ro
+      # A named volume, not `./.thumb_cache` as on the desktop. The cache is thousands of
+      # small JPEGs written by ffmpeg, and on Windows a bind mount of the host filesystem
+      # goes through Docker Desktop's file-sharing layer -- the wrong shape for this and
+      # the one thing this host does constantly. Nothing needs to see the cache from
+      # Windows: `/thumb` and `/frame` read it through the container either way.
+      - thumb-cache:/cache
+      - collab-data:/workspace
+      # The reviewer-facing shot-label store. `create_host_path: false` in the base file
+      # would refuse to start on a fresh clone, where `artifacts/` (gitignored) does not
+      # exist yet. Labels themselves are written on the compute host -- `/shots/` is
+      # forwarded -- so this only has to exist and be writable.
+      - type: bind
+        source: ./artifacts/shot-labels
+        target: /labels
+        bind:
+          create_host_path: true
+    # The base file sizes the container for a desktop. A laptop that is smaller than that
+    # would have Windows thrash against a limit above its own RAM, so keep the default
+    # below what a 16 GB machine can afford and let a bigger one raise it.
+    #
+    # The number that actually needs tuning per machine is ffmpeg concurrency, and that is
+    # `AIC_THUMB_FFMPEG_SLOTS` in `.env.secure` (default 12, one per logical core): it is
+    # this host's whole job, and oversubscribing it is what makes searches wait.
+    mem_limit: ${AIC_APP_MEM_LIMIT:-12g}
+    memswap_limit: ${AIC_APP_MEM_LIMIT:-12g}
+    cpus: ${AIC_APP_CPUS:-6}
+
+  ingress:
+    # 0.0.0.0 would also publish on the WiFi interface, where nothing needs inbound access
+    # -- DRES and the compute tunnel are both outbound. Pin it to the switch address.
+    ports: !override
+      - "${AIC_INGRESS_BIND:?Set AIC_INGRESS_BIND to the laptop's switch-side IPv4 address, e.g. 192.168.1.10}:8000:8000"
+    # The password list is a second config file, not an `include`d one, so it has to be
+    # named on the command line. It stays out of git (`.gitignore`): it is the team's
+    # credentials in cleartext-or-crypt form.
+    command: !override
+      - haproxy
+      - -W
+      - -db
+      - -f
+      - /usr/local/etc/haproxy/haproxy.cfg
+      - -f
+      - /usr/local/etc/haproxy/users.cfg
+    volumes: !override
+      - ./haproxy.lan.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./haproxy-users.cfg:/usr/local/etc/haproxy/users.cfg:ro
+
+volumes:
+  thumb-cache:

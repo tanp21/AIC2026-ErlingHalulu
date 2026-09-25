@@ -4,6 +4,11 @@ This guide covers the supported Docker workflow, one-time transcript indexing, a
 
 ## Prerequisites
 
+This is the development workflow: one host running everything, including the models. For the
+competition split — a media host serving the corpus while a GPU host runs search — see
+`docs/venue-deployment.md`, and for the Windows laptop that takes the media half of it,
+`docs/laptop-media-host.md`.
+
 - Windows 11 with WSL2
 - Docker Desktop with WSL integration enabled
 - NVIDIA drivers and GPU access from Docker
