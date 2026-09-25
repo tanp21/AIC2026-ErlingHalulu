@@ -21,7 +21,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from starlette.background import BackgroundTask
 
-from . import core, thumb, shots, shot_labels, audio_search, ocr_search, frame_maps, subquery_fusion
+from . import core, thumb, shots, shot_labels, audio_search, ocr_search, frame_maps, subquery_fusion, video_ids
 from . import object_search
 from . import query_refine
 from . import caption_search
@@ -88,7 +88,7 @@ class RefineReq(BaseModel):
 
 
 class ImageReference(BaseModel):
-    video_id: str = Field(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")
+    video_id: str = Field(pattern=video_ids.VIDEO_ID_PATTERN)
     frame_idx: int = Field(ge=0)
 
 
@@ -162,7 +162,7 @@ class CompareReq(BaseModel):
     k: int = Field(default=50, ge=1, le=200)
 
 
-VideoId = Annotated[str, Field(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")]
+VideoId = Annotated[str, Field(pattern=video_ids.VIDEO_ID_PATTERN)]
 AgentQueryId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.:-]{1,40}$")]
 AgentText = Annotated[str, Field(min_length=1, max_length=2000)]
 
@@ -695,26 +695,55 @@ async def search_endpoint(req: SearchReq, request: Request):
 
 
 #: Built on first refine request, not at import: constructing it costs nothing but
-#: an Authorization header, and a deployment without a DeepSeek key never builds it.
+#: an Authorization header, and a deployment without the configured key never builds it.
 _refiner = None
+
+
+def _refiner_backend() -> str:
+    """`deepseek` (the measured default) or `openrouter`, to try a Qwen model instead.
+
+    `AIC_REFINER_BACKEND=openrouter` reuses the checker's `OPENROUTER_API_KEY` (a
+    deployment running Check by AI already has one) and defaults to the same
+    `qwen/qwen3.7-flash`, overridable with `AIC_REFINER_MODEL` so the two features
+    can point at different models without one env var fighting the other.
+    """
+    return (os.environ.get("AIC_REFINER_BACKEND") or "deepseek").strip().lower()
+
+
+def _refiner_key() -> str:
+    """The key `refine_endpoint` needs for whichever backend is configured, or "" if unset."""
+    if _refiner_backend() == "openrouter":
+        return os.environ.get("OPENROUTER_API_KEY", "")
+    return os.environ.get("DEEPSEEK_API_KEY", "")
 
 
 def _refiner_client():
     global _refiner
     if _refiner is None:
-        from agent.llm import DeepSeekClient
-
-        # Far below the client's own 180 s / 3-retry defaults: a person is watching
+        # Far below either client's own retry/timeout defaults: a person is watching
         # this one, and a slow answer is worse than telling them it is unavailable.
-        _refiner = DeepSeekClient(
-            os.environ["DEEPSEEK_API_KEY"], thinking=False, timeout=25.0, retries=1,
-        )
+        if _refiner_backend() == "openrouter":
+            from agent.openrouter import DEFAULT_BASE_URL, DEFAULT_MODEL, OpenRouterClient
+
+            _refiner = OpenRouterClient(
+                os.environ["OPENROUTER_API_KEY"],
+                os.environ.get("AIC_REFINER_MODEL") or os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL),
+                os.environ.get("OPENROUTER_BASE_URL", DEFAULT_BASE_URL),
+                timeout=25.0, retries=1,
+            )
+        else:
+            from agent.llm import DeepSeekClient
+
+            _refiner = DeepSeekClient(
+                os.environ["DEEPSEEK_API_KEY"], thinking=False, timeout=25.0, retries=1,
+            )
     return _refiner
 
 
 @app.post("/search/refine")
 async def refine_endpoint(req: RefineReq):
-    """The agent's DeepSeek planner over one typed query, as search suggestions.
+    """The agent's planner (DeepSeek by default, Qwen via OpenRouter with
+    `AIC_REFINER_BACKEND=openrouter`) over one typed query, as search suggestions.
 
     Deliberately its own route rather than a step inside /search: the per-user
     search lock is held for a whole request, so an LLM call there would stall the
@@ -725,7 +754,7 @@ async def refine_endpoint(req: RefineReq):
     text = req.text.strip()
     if not text:
         raise HTTPException(422, "query text is required")
-    if not os.environ.get("DEEPSEEK_API_KEY"):
+    if not _refiner_key():
         raise HTTPException(503, "query refinement is not configured")
     try:
         refinement = await run_in_threadpool(
@@ -804,7 +833,7 @@ def object_catalog_endpoint():
 
 @app.get("/objects/{video_id}/detections")
 def object_video_detections_endpoint(
-    video_id: str = Path(pattern=r"^[A-Z]\d{2,3}_V\d{3}$"),
+    video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN),
 ):
     try:
         return search_core.object_video_detections(video_id)
@@ -1841,12 +1870,17 @@ async def session(request: Request):
 
 @app.get("/thumb/{video_id}/{frame_idx}")
 def get_thumb(
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
+    video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN),
     frame_idx: int = Path(ge=0),
     w: int = Query(default=320, ge=32, le=1920),
 ):
     if w not in (160, 320, 640):
         raise HTTPException(422, "thumbnail width must be 160, 320, or 640")
+    # The organisers' keyframe images first: for the N groups they are the only source that
+    # works at all, and for any group they are what the keyframe's embedding was taken from.
+    stored = thumb.stored_keyframe(video_id, frame_idx, w)
+    if stored is not None:
+        return Response(stored, media_type="image/jpeg")
     row = resolve(video_id)
     try:
         data = thumb.extract(row["path"], frame_idx, frame_maps.load(video_id), w)
@@ -1860,7 +1894,7 @@ def get_thumb(
 @app.get("/context/{video_id}/{frame_idx}")
 def keyframe_context(
     response: Response,
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
+    video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN),
     frame_idx: int = Path(ge=0),
     profile: str | None = Query(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$"),
     radius: int = Query(default=10, ge=0, le=25),
@@ -1894,7 +1928,7 @@ def keyframe_context(
 @app.get("/captions/{video_id}/frames")
 def shot_captions(
     response: Response,
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
+    video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN),
     frames: str = Query(pattern=r"^\d+(,\d+)*$"),
 ):
     """CapRL shot captions for `frames`, keyed by frame index.
@@ -1935,9 +1969,15 @@ def shot_captions(
 
 @app.get("/frame/{video_id}/{frame_idx}")
 def get_frame(
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
+    video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN),
     frame_idx: int = Path(ge=0),
 ):
+    # The largest stored keyframe stands in for the full-size frame: the N groups have nothing
+    # for ffmpeg to extract (see `thumb.stored_keyframe`), and this is the image the agent
+    # judges candidates on and the reviewer looks at.
+    stored = thumb.stored_keyframe_largest(video_id, frame_idx)
+    if stored is not None:
+        return Response(stored, media_type="image/jpeg")
     row = resolve(video_id)
     try:
         data = thumb.extract(row["path"], frame_idx, frame_maps.load(video_id), w=0)
@@ -1949,14 +1989,14 @@ def get_frame(
 
 
 @app.get("/video/{video_id}")
-def get_video(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"), original: bool = False):
+def get_video(video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN), original: bool = False):
     row = resolve(video_id)
     source = row["path"] if original else shots.streaming_path(row)
     return FileResponse(source, media_type="video/quicktime" if str(source).lower().endswith(".mov") else "video/mp4")
 
 
 @app.get("/frame-map/{video_id}")
-def get_frame_map(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
+def get_frame_map(video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN)):
     try:
         return frame_maps.load(video_id).payload(video_id)
     except FileNotFoundError as exc:
@@ -2002,7 +2042,7 @@ def _shot_index(video_id):
 
 @app.get("/shots/{video_id}")
 def get_shots(
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
+    video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN),
     keyframe_source: str | None = Query(
         default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$"
     ),
@@ -2067,7 +2107,7 @@ def get_shots(
 def update_shot_labels(
     patch: ShotLabelPatch,
     request: Request,
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
+    video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN),
 ):
     if not request.state.is_admin:
         raise HTTPException(403, "shot labels are restricted to the owner")
@@ -2092,7 +2132,7 @@ def update_shot_labels(
 
 @app.get("/clip/{video_id}/{shot_index}")
 def get_clip(
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
+    video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN),
     shot_index: int = Path(ge=0),
 ):
     row, mapping, index = _shot_index(video_id)
@@ -2121,7 +2161,7 @@ def get_clip(
 
 
 @app.get("/transcript/{video_id}")
-def get_transcript(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
+def get_transcript(video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN)):
     try:
         cues = audio_search.load_transcript_cues(video_id)
     except (FileNotFoundError, OSError) as exc:
@@ -2152,7 +2192,7 @@ def _get_topic_segmenter():
 
 
 @app.get("/audio/topic-segments/{video_id}")
-def get_topic_segments(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
+def get_topic_segments(video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN)):
     """DeepSeek topic/story segments for one video -- a Clip Studio visualization
     of the `topic` chunking pilot (see docs/audio-search.md), not a production
     search channel: no index is built from this. Reads the same on-disk
@@ -2192,7 +2232,7 @@ def get_topic_segments(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
 
 
 @app.get("/captions/{video_id}/windows")
-def get_caption_windows(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
+def get_caption_windows(video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN)):
     """Every caption window of one video, in time order, whether or not the index exists.
 
     Where `/captions/{video_id}` answers from Elasticsearch (503 on a deployment that has
@@ -2216,7 +2256,7 @@ def get_caption_windows(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"))
 
 
 @app.get("/captions/{video_id}")
-def get_captions(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
+def get_captions(video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN)):
     """Every shot caption of one video, in time order (empty when not indexed)."""
     try:
         hits = caption_search.captions_for_video(video_id)
@@ -2231,7 +2271,7 @@ def get_captions(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
 
 
 @app.get("/ocr/{video_id}")
-def get_ocr(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
+def get_ocr(video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN)):
     """The on-screen text of every OCR'd shot of one video, in time order.
 
     Read by the review view of the retrieval agent, which shows the text of a

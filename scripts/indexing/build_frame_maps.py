@@ -29,11 +29,20 @@ def parse_probe(data):
     raw_pts = [frame.get("best_effort_timestamp") for frame in data.get("frames", [])]
     if not raw_pts or any(value is None for value in raw_pts):
         raise ValueError("video has frames without best-effort PTS")
-    return frame_maps.FrameMap(
-        np.asarray(raw_pts, dtype=np.int64),
-        time_base.numerator,
-        time_base.denominator,
-    )
+    # The map is a position -> time array, one entry per frame, and both the browser
+    # (``frontend/src/frameMap.ts``) and the thumbnail seek require strictly increasing PTS --
+    # so a decoded timeline that repeats or steps back has to be repaired, not passed through.
+    # Dropping the offending frame instead would shift every later index by one, which
+    # mislabels the rest of the video; this keeps the frame's own time and moves it a single
+    # tick, which is 0.0001 s at the usual 1/10000 time base. N031_V001 and N031_V002 are the
+    # two videos that need the sort (each steps back ~0.12 s once); a frame carrying the same
+    # timestamp as the one before it is the other shape the bump covers. A video whose frames
+    # already come out ascending is untouched, and the packet-level probe this module verifies
+    # against sorts for the same reason.
+    pts = np.sort(np.asarray(raw_pts, dtype=np.int64))
+    offset = np.arange(len(pts), dtype=np.int64)
+    pts = np.maximum.accumulate(pts - offset) + offset
+    return frame_maps.FrameMap(pts, time_base.numerator, time_base.denominator)
 
 
 def probe(path):

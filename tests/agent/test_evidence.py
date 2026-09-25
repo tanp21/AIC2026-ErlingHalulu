@@ -678,6 +678,17 @@ class ShotContextTests(unittest.TestCase):
                             [vitem("C2", 20.933, "L24_V035", frame_idx=628)])
         self.assertEqual(search.shot_calls, 1)                   # still one: the shot list is cached per video
 
+    def test_dense_zero_with_middle_pick_keeps_one_middle_frame_per_shot(self):
+        """The Search tab's on-demand checker (`agent.checker`, `CHECK_CONTEXT_DENSE = 0`,
+        `pick="middle"`): speed over depth, one call and a person waiting, so every shot --
+        including the ones a `dense` walk would have sent all three keyframes of -- keeps
+        exactly its MIDDLE keyframe, never its first (which can still be mid-transition from
+        the previous cut) and never all three. The candidate's own shot's other keyframes
+        (512, 570) are untouched by this -- they are not a neighbouring shot's guess."""
+        frames = [f["frame_idx"] for f in ev._context_frames(
+            self.Shots(), "L24_V035", 628, 20.933, dense=0, pick="middle")]
+        self.assertEqual(frames, [243, 512, 570, 864, 1163, 1446, 1714, 2469])
+
     def test_a_shot_that_reaches_into_the_window_without_a_frame_inside_it_is_left_out(self):
         rows = [row for row in self.SHOTS[:-1]]
         rows.append((6, 1789, 3149, 59.63, 105.0, [(1993, 66.43)]))

@@ -7,10 +7,11 @@ import re
 import unicodedata
 from pathlib import Path
 
+from . import video_ids
 from .frame_maps import FrameMap
 
 
-VIDEO_ID = re.compile(r"^[A-Z]\d{2,3}_V\d{3}$")
+VIDEO_ID = video_ids.VIDEO_ID
 
 
 def video_id_from_source(path: str | Path, expected: str) -> str:

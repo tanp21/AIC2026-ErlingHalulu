@@ -54,13 +54,15 @@ CHECK_MAX_SECONDS = 600.0
 #: Same width the agent's checklist judges at: a judge sees more of a small frame than a caption
 #: ever wrote down, and this is not the job that has to read text off the screen.
 CHECK_IMAGE_WIDTH = 480
-#: The nearest `DENSE` shots each side keep every keyframe they have (a beat that is a CHANGE
-#: needs more than one look); the rest keep their first, so the window's far end stays reachable
-#: on a densely cut video. `MAX` is the real limit and it is on FRAMES, not shots -- see the long
-#: note on `evidence.VISION_CONTEXT_MAX` for why that distinction was measured to matter. Two and
-#: fourteen, against the agent's one and sixteen: this window is 5 minutes rather than 3, so the
-#: budget buys reach at the edges and a closer read of the shots either side of the moment.
-CHECK_CONTEXT_DENSE = 2
+#: `DENSE=0`: every shot keeps exactly ONE keyframe, never a shot's whole set. A person is
+#: waiting on one call here (unlike the agent's own multi-round verification, where a beat a
+#: single frame could blur past is worth another look), so speed wins over that extra depth --
+#: `evidence._one_of` picks it as the MIDDLE of however many the shot has (`pick="middle"` below),
+#: not the first, which can still be mid-transition from the previous cut. `MAX` is the real
+#: limit and it is on FRAMES, not shots -- see the long note on `evidence.VISION_CONTEXT_MAX` for
+#: why that distinction was measured to matter. Fourteen a side, against the agent's sixteen:
+#: this window is 5 minutes rather than 3, so the budget buys reach at the edges instead of depth.
+CHECK_CONTEXT_DENSE = 0
 CHECK_CONTEXT_MAX = 14
 CHECK_CONTEXT_FRAMES = 4
 #: At most 29 images at 480 px -- about 17k input tokens, well inside one call.
@@ -68,6 +70,11 @@ CHECK_IMAGE_WORKERS = 6
 #: Speech and on-screen text handed to the vision call so a Q&A answer can be read off the words
 #: as well as the pixels, capped so a ten-minute window cannot crowd out the rules.
 CHECK_SAID_CHARS = 2400
+#: The share of that going to speech, with the rest left for on-screen text. Speech keeps its own
+#: budget rather than competing for one pool because the narration is where a Vietnamese bulletin
+#: puts names and facts, while on-screen text here is mostly broadcaster furniture -- see `_said`
+#: for the measurement that made this necessary.
+CHECK_SPEECH_SHARE = 0.6
 
 CHECK_SCHEMA = {
     "type": "object",
@@ -82,15 +89,39 @@ CHECK_SCHEMA = {
             "score": {"type": "integer", "minimum": 0, "maximum": 10},
             "reason": {"type": "string"},
         }, "required": ["score", "reason"]},
+        # "ocr" is deliberately absent: the answer is read from the keyframes or the speech, never
+        # from on-screen text -- see `prompts.CHECK_ANSWER_RULE`. `_answer` still accepts it from a
+        # reply that names it anyway, so a good answer mislabelled is not thrown away.
         "answer": {"type": "object", "properties": {
             "text": {"type": "string"},
             "confidence": {"type": "integer", "minimum": 0, "maximum": 10},
-            "source": {"type": "string", "enum": ["frame", "speech", "ocr", "unknown"]},
+            "source": {"type": "string", "enum": ["frame", "speech", "unknown"]},
             "quote": {"type": "string"},
         }, "required": ["text", "confidence", "source"]},
     },
     "required": ["details", "overall"],
 }
+
+
+def check_schema(asked: bool) -> dict:
+    """`CHECK_SCHEMA`, with `answer` promoted to the front and made required when a question was asked.
+
+    Measured live: a reply came back with the whole answer object written INTO the `overall.reason`
+    string -- `...nêu rõ trong lời bình (speech). "answer": {"text": "MEDELLIN", "confidence": 10,
+    "source": "` -- which parses as a reply whose `answer` member is missing, so the person was shown
+    "This moment does not answer the question" for a question the model had, in fact, answered. The
+    answer came after the prose in property order and was not required, which is exactly where a
+    weaker model loses track of which field it is inside. Committing to it before the `overall`
+    prose is the mitigation; re-running the same query came back clean 6 times out of 6, so this is
+    a hardening against a rare malformation rather than a measured rate change.
+    """
+    if not asked:
+        return CHECK_SCHEMA
+    return {
+        **CHECK_SCHEMA,
+        "properties": {"answer": CHECK_SCHEMA["properties"]["answer"], **CHECK_SCHEMA["properties"]},
+        "required": ["details", "answer", "overall"],
+    }
 
 
 class CheckError(RuntimeError):
@@ -161,7 +192,7 @@ class CheckQuery:
 
 def check_moment(client, search, store, *, query: CheckQuery, target: CheckTarget,
                  details: QueryDetails | list[dict],
-                 window_seconds: float = CHECK_WINDOW_SECONDS) -> dict:
+                 window_seconds: float = CHECK_WINDOW_SECONDS, span: dict | None = None) -> dict:
     """Check one moment against one query; raises `CheckError` if the pixels could not be judged.
 
     `client` is any backend with `judge()` and `chat_json()` -- an `OpenRouterClient` in the
@@ -171,10 +202,16 @@ def check_moment(client, search, store, *, query: CheckQuery, target: CheckTarge
     half failing is the error, because without it there is no answer to the question that was
     asked. That asymmetry is the opposite of the agent's checklist, where vision is the optional
     extra on top of the words -- here the person pressed a button that means "look at this".
+
+    `span` is the moment's transcript/OCR window, when the caller has already fetched it. It is
+    independent of `details`, and on a cold check both cost seconds while neither can start until
+    the other has finished -- so `backend.checker` fetches the two CONCURRENTLY and passes this in
+    rather than letting the serial default run (see the timing note there).
     """
     entries = list(details.details if isinstance(details, QueryDetails) else details)
     window = max(CHECK_MIN_SECONDS, min(CHECK_MAX_SECONDS, float(window_seconds)))
-    span = span_around(store, target.video_id, target.time - window, target.time + window)
+    if span is None:
+        span = span_around(store, target.video_id, target.time - window, target.time + window)
     with ThreadPoolExecutor(2) as pool:
         text_future = pool.submit(_text_checks, client, entries, span, target, window)
         vision_future = pool.submit(_vision_check, client, search, entries, span, query, target, window)
@@ -253,16 +290,52 @@ def _text_checks(client, entries: list[dict], span: dict, target: CheckTarget,
     return best
 
 
-def _said(span: dict, limit: int = CHECK_SAID_CHARS) -> str:
-    """The speech and on-screen text of the window, in time order, for the vision call to read."""
-    lines = []
-    for label, rows in (("speech", span["speech"]), ("on screen", span["ocr"])):
-        for row in rows:
-            if row["text"]:
-                lines.append(f"[{label} {row['start']:.0f}s] {row['text']}")
-    lines.sort(key=lambda line: line)
-    text = "\n".join(lines)
-    return text[:limit]
+def _nearest(rows: list[tuple[float, str]], target_time: float, budget: int) -> list[tuple[float, str]]:
+    """The lines closest to `target_time` that fit in `budget` characters, nearest first."""
+    kept: list[tuple[float, str]] = []
+    used = 0
+    for start, line in sorted(rows, key=lambda row: abs(row[0] - target_time)):
+        used += len(line) + 1
+        if used > budget and kept:
+            break
+        kept.append((start, line))
+    return kept
+
+
+def _said(span: dict, target_time: float, limit: int = CHECK_SAID_CHARS) -> str:
+    """The speech and on-screen text of the window, in time order, for the vision call to read.
+
+    **Each channel gets its own budget** (`CHECK_SPEECH_SHARE` to speech, the rest to on-screen
+    text), instead of both competing for one pool. That matters for a Q&A answer: the narration is
+    where a Vietnamese bulletin puts a place, a person or a fact, while the on-screen text of this
+    corpus is dominated by broadcaster furniture -- clocks, channel logos, tickers, "coming up
+    next" banners -- which the corpus note itself calls noise. Measured on the Colombia flower
+    query (L22_V012, the moment at 692 s): 169 OCR rows in the ±300 s window of which exactly one
+    carried anything about the story, against 7 speech lines that held the answer ("...tại
+    Medellin."). Sharing one budget let that furniture take 1598 of 2400 characters, and the model
+    answered "which city" with "Silletero" -- a word off the caption's festival name -- in one run
+    and "Medellín" in another. Speech now cannot be crowded out by it.
+
+    Within each channel the lines CLOSEST TO THE MOMENT are kept first, rather than however far a
+    blind head-truncation from the window's start reaches: the same ±300 s window ran to 11.5k
+    characters, and the line naming the city sat at offset 5580 -- past a from-the-start cutoff --
+    so the model once answered "unknown" to "which city" with the frame, the speech and the query
+    all right.
+
+    (Also fixes a latent ordering bug: the previous cut sorted the *strings* lexicographically,
+    which reads "[speech 100s]" before "[speech 20s]" and put every "on screen" line before every
+    "speech" line regardless of when either was said.)
+    """
+    def rows(label, entries):
+        return [(float(row["start"]), f"[{label} {row['start']:.0f}s] {row['text']}")
+                for row in entries if row["text"]]
+
+    speech = _nearest(rows("speech", span["speech"]), target_time,
+                      int(limit * CHECK_SPEECH_SHARE))
+    spent = sum(len(line) + 1 for _, line in speech)
+    onscreen = _nearest(rows("on screen", span["ocr"]), target_time, max(limit - spent, 0))
+    kept = sorted(speech + onscreen, key=lambda item: item[0])
+    return "\n".join(line for _, line in kept)[:limit]
 
 
 # -- the pixels -----------------------------------------------------------------------------
@@ -278,7 +351,7 @@ def _images(search, target: CheckTarget, window: float) -> list[tuple[str, bytes
     for context in evidence._context_frames(
             search, target.video_id, target.frame_idx, target.time,
             seconds=window, dense=CHECK_CONTEXT_DENSE, most=CHECK_CONTEXT_MAX,
-            count=CHECK_CONTEXT_FRAMES):
+            count=CHECK_CONTEXT_FRAMES, pick="middle"):
         offset = float(context["time"]) - target.time
         when = f"{abs(offset):.0f}s earlier" if offset < 0 else f"{offset:.0f}s later"
         wanted.append((int(context["frame_idx"]), float(context["time"]),
@@ -320,11 +393,11 @@ def _vision_check(client, search, entries: list[dict], span: dict, query: CheckQ
         prompt += "\n\nThere is no detail list for this query: judge the query as a whole."
     if asked:
         prompt += f"\n\nThe question: {asked[:500]}"
-    if said := _said(span):
+    if said := _said(span, target.time):
         prompt += f"\n\nWhat is said and shown in words around this moment:\n{said}"
 
     try:
-        reply = client.judge(images, prompt, CHECK_SCHEMA, max_output_tokens=3000,
+        reply = client.judge(images, prompt, check_schema(bool(asked)), max_output_tokens=3000,
                              job="check", query=query.description, question=asked, salvage=True)
     except LLMError as exc:
         raise CheckError(str(exc)) from exc
@@ -382,6 +455,11 @@ def _answer(reply: dict) -> dict | None:
         # "this moment does not answer it" is an answer the person needs to see, and it is not
         # the same thing as the call having failed.
         return {"text": "", "confidence": 0.0, "source": "unknown", "quote": ""}
+    # "ocr" is accepted though the schema no longer offers it: the source label is the model's own
+    # report of where it read the answer, and it is measurably unreliable -- on the Colombia query
+    # the right answer ("Medellín", which only the narration says) came back labelled "ocr" three
+    # runs out of three. Dropping the text over a mislabelled source would lose a good answer, so
+    # it is kept and shown for what it claims to be.
     return {"text": text, "confidence": min(max(confidence, 0.0), 10.0),
             "source": source if source in ("frame", "speech", "ocr") else "unknown",
             "quote": " ".join(str(answer.get("quote") or "").split())[:MAX_SENTENCE_CHARS]}

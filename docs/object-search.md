@@ -26,8 +26,15 @@ by the Polars backend and can be kept for rollback.
 The generated store has a manifest, one keyframe metadata file, one flat
 detection file per class, and playback files partitioned by video. Keyframe
 metadata records profile membership without duplicating detections for each
-profile. L/M/S keyframes participate in search when present in a FAISS profile;
-N samples are available for playback even without a query profile.
+profile. A keyframe can be matched when its video is in a FAISS profile *and*
+its group is in `--search-prefixes` (default `L,M,S,N`). Every source sample
+lands in its video's playback partition either way, which is what lets a video
+be looked at before it is searchable; the N groups were playback-only until
+`l2026-v3`/`naflex-l2026-v3` carried their videos.
+
+The generation records which profiles a keyframe belongs to, so it is stale
+whenever a profile's keyframe set or the profile list changes — rebuild it after
+building or extending a profile, not only after a new detector run.
 
 ## Query behavior
 

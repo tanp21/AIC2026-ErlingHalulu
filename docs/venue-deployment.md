@@ -94,9 +94,15 @@ for p in ['l2026-v2','naflex-l2026-v2']:
 ```
 
 As of the 2026 set this answers: **1189 videos, all `year=2026`**, groups `L21..L30`, `M01..M10`,
-`S01` — about 330 GB. Nothing from `data/2025/videos/` is referenced, despite `l2025` being one
-of the profiles. The `N001..N100` traffic-camera archives exist on the organiser's host but are
-in no profile; download them only if something needs the media catalogue to list them.
+`S01` — about 330 GB, plus the 298 `N001..N100` traffic-camera videos (~96 GB) that
+`l2026-v3`/`naflex-l2026-v3` carry. Nothing from `data/2025/videos/` is referenced, despite
+`l2025` being one of the profiles.
+
+The N videos are `Video_N001-N010.zip` … `Video_N091-N100.zip` (also in `corpus-urls.txt`).
+They belong on the compute host as much as on the desktop: the agent reads candidate frames
+from the host it runs on, and `/shots` and `/frame-map` are forwarded there. The desktop's own
+copies came from the same mirror, so every frame map and embedding agrees with the bytes the
+instance holds.
 
 The videos come from the organiser's archives, not from YouTube. Re-downloading a different
 rendition is the wrong move: `frame_maps` and every embedding were built from these exact files,
@@ -107,6 +113,7 @@ right video at the wrong moment, with nothing on screen to show it.
 | --- | --- | --- |
 | `Videos_*.zip` / `Video_*.zip` | ~320 GB | `aria2c -x16 -s16` on the instance, one at a time; extract, then delete the archive |
 | `data/2026/**` minus `videos/` and `embeddings*/` | ~5.6 GB | `rsync` from the desktop |
+| `data/2026/keyframe_thumbs/{160,320,640,1280}` | ~17 GB | `rsync` from the desktop — the only thumbnail source for the N groups (their videos carry no usable timestamps, so ffmpeg cannot extract one), built with `scripts.indexing.build_keyframe_thumbnails` |
 | `indexes/frame_maps/`, profile metadata, `*.flat.ip` | ~9 GB | `rsync` from the desktop |
 | Hugging Face models | ~36 GB | download on the instance |
 | Elasticsearch data | ~2 GB | rebuild on the instance |

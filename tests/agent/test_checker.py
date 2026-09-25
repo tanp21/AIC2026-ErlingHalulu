@@ -2,7 +2,8 @@ import re
 import unittest
 
 from agent.checker import (
-    CHECK_CONTEXT_MAX, CHECK_IMAGE_WIDTH, CheckError, CheckQuery, CheckTarget, check_moment,
+    CHECK_CONTEXT_MAX, CHECK_IMAGE_WIDTH, CHECK_SAID_CHARS, CHECK_SCHEMA, CheckError, CheckQuery,
+    CheckTarget, _said, check_moment, check_schema,
 )
 from agent.evidence import EvidenceStore, QueryDetails
 
@@ -355,6 +356,95 @@ class AnswerTests(unittest.TestCase):
         run(judge, query=CheckQuery(visual_text="cảnh bếp", kind="kis", question="Có mấy con nghêu?"))
 
         self.assertIn("Có mấy con nghêu?", judge.prompts[0])
+
+    def test_a_qa_answer_is_never_asked_for_from_on_screen_text(self):
+        """The Colombia case: the lower-third caption named the COUNTRY and the festival, the
+        question asked for the CITY, and a model reading the caption offered "Silletero" and
+        "COLOMBIA". The answer comes from the keyframes or the speech, so the prompt says so and
+        the schema stops offering "ocr" as a source at all."""
+        judge = FakeJudge()
+        run(judge, query=CheckQuery(visual_text="cảnh lễ hội", kind="qa", question="Thành phố nào?"))
+
+        self.assertIn("Do NOT take the answer from on-screen text", judge.prompts[0])
+        self.assertEqual(CHECK_SCHEMA["properties"]["answer"]["properties"]["source"]["enum"],
+                         ["frame", "speech", "unknown"])
+
+    def test_the_answer_is_committed_before_the_prose_when_a_question_is_asked(self):
+        # Measured live: one reply wrote the whole answer object INTO `overall.reason` and left
+        # `answer` missing, so the person was shown "This moment does not answer the question" for
+        # a question the model had answered. The field now comes first in property order and is
+        # required, so it is filled before the model is deep inside the overall prose.
+        asked, plain = check_schema(True), check_schema(False)
+        self.assertEqual(list(asked["properties"])[0], "answer")
+        self.assertIn("answer", asked["required"])
+        self.assertNotIn("answer", plain["required"])   # a KIS check asks nothing
+
+    def test_a_good_answer_mislabelled_as_ocr_is_kept_not_thrown_away(self):
+        # Measured three runs out of three on the Colombia query: the narration said "tại
+        # Medellin", the reply carried it as the answer, and it labelled its own source "ocr".
+        # The label is the model's report about itself and is not reliable enough to drop text for.
+        judge = FakeJudge(vision_reply={
+            "details": [], "overall": {"score": 9, "reason": "r"},
+            "answer": {"text": "Medellín", "confidence": 9, "source": "ocr", "quote": ""},
+        })
+        result = run(judge, query=CheckQuery(visual_text="cảnh lễ hội", kind="qa", question="Thành phố nào?"))
+
+        self.assertEqual(result["answer"]["text"], "Medellín")
+
+
+class SaidTests(unittest.TestCase):
+    """`_said` feeds the answer-reading half of the vision call. A dense window (a fast-cut news
+    bulletin can pack a dozen unrelated stories into +-5 minutes) can hold far more text than the
+    budget -- see the long note on `_said` for the real query this reproduces: the line that
+    named the answer sat well past a from-the-start cutoff, so the model never saw it."""
+
+    def test_keeps_the_line_closest_to_the_moment_when_the_window_does_not_fit(self):
+        span = {"speech": [{"start": 0.0, "text": "xa mấy phút trước"},
+                           {"start": 690.0, "text": "Medellin"}],
+               "ocr": []}
+
+        said = _said(span, target_time=692.0, limit=25)
+
+        self.assertIn("Medellin", said)
+        self.assertNotIn("xa mấy phút trước", said)
+
+    def test_output_stays_in_time_order_even_though_the_cut_is_by_proximity(self):
+        # Also covers the previous bug: sorting the rendered STRINGS put every "on screen" line
+        # before every "speech" line (o < s) and read "[speech 100s]" before "[speech 20s]".
+        span = {"speech": [{"start": 690.0, "text": "gần sau"}, {"start": 680.0, "text": "gần trước"}],
+               "ocr": [{"start": 300.0, "text": "XA"}]}
+
+        said = _said(span, target_time=685.0, limit=1000)
+
+        self.assertLess(said.index("XA"), said.index("gần trước"))
+        self.assertLess(said.index("gần trước"), said.index("gần sau"))
+
+    def test_a_window_that_fits_is_unchanged(self):
+        span = {"speech": [{"start": 480.0, "text": "nghêu"}], "ocr": [{"start": 470.0, "text": "MÓN NGON"}]}
+
+        said = _said(span, target_time=480.0, limit=2400)
+
+        self.assertIn("nghêu", said)
+        self.assertIn("MÓN NGON", said)
+
+    def test_furniture_on_screen_cannot_crowd_the_answer_out_of_the_speech(self):
+        """The Colombia case: 169 OCR rows of clocks, logos and "coming up next" banners carrying
+        exactly one caption about the story, against the 7 speech lines that held the answer
+        ("...tại Medellin."). On one shared budget the furniture took 1598 of 2400 characters and
+        the model answered "which city" with "Silletero" -- a word off the caption's festival name.
+        Speech keeps its own share, so the answer survives however loud the overlays are.
+        """
+        span = {
+            "speech": [{"start": 690.0, "text": "hoạt động truyền thống tại Medellin"}],
+            "ocr": [{"start": 689.0 + index, "text": f"HD 18:41:{index:02d} TIẾP THEO TRÊN Phim hoạt hình"}
+                    for index in range(40)],
+        }
+
+        said = _said(span, target_time=692.0, limit=2400)
+
+        self.assertIn("Medellin", said)
+        self.assertLess(sum(len(line) for line in said.splitlines() if line.startswith("[on screen")),
+                        CHECK_SAID_CHARS)   # the on-screen side is capped by the remainder, not the whole pool
 
 
 class WindowTests(unittest.TestCase):

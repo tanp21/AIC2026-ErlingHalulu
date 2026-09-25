@@ -10,20 +10,22 @@ class MainTests(unittest.TestCase):
     def test_probes_only_videos_in_requested_groups(self):
         with TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
-            for group, ids in (("M01", ["M01_V001"]), ("S01", ["S01_V001"])):
+            # N ships .mov: a glob that only knows .mp4 reports success having probed nothing.
+            for group, files in (("M01", ["M01_V001.mp4"]), ("S01", ["S01_V001.mp4"]),
+                                 ("N031", ["N031_V001.mov"])):
                 d = data_dir / "2026" / "videos" / group
                 d.mkdir(parents=True)
-                for vid in ids:
-                    (d / f"{vid}.mp4").touch()
+                for name in files:
+                    (d / name).touch()
 
             probed = []
             saved = []
             with patch.object(bfm, "probe", side_effect=lambda p: probed.append(p) or "MAP"), \
                  patch.object(bfm, "save_map", side_effect=lambda vid, m: saved.append((vid, m))):
-                bfm.main(["--year", "2026", "--groups", "M01", "--data-dir", str(data_dir)])
+                bfm.main(["--year", "2026", "--groups", "M01,N031", "--data-dir", str(data_dir)])
 
-            self.assertEqual(len(probed), 1)
-            self.assertEqual(saved, [("M01_V001", "MAP")])
+            self.assertEqual(sorted(p.name for p in probed), ["M01_V001.mp4", "N031_V001.mov"])
+            self.assertEqual(sorted(saved), [("M01_V001", "MAP"), ("N031_V001", "MAP")])
 
     def test_one_failure_does_not_stop_the_batch_but_raises_at_the_end(self):
         with TemporaryDirectory() as tmp:

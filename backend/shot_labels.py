@@ -10,10 +10,12 @@ import re
 import tempfile
 import threading
 
+from . import video_ids
+
 
 ROOT = Path(__file__).resolve().parent.parent
 LABEL_DIR = Path(os.environ.get("AIC_SHOT_LABEL_DIR", ROOT / "artifacts" / "shot-labels"))
-VIDEO_ID = re.compile(r"^[A-Z]\d{2}[_-]V\d{3}$")
+VIDEO_ID = video_ids.VIDEO_ID
 STATES = {"suggested", "excluded", "included"}
 REASONS = {"intro", "preview", "presenter", "outro", "other"}
 _write_lock = threading.Lock()

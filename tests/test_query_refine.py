@@ -5,7 +5,9 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 from agent.llm import LLMError
+from agent.openrouter import DEFAULT_MODEL, OpenRouterClient
 from agent.tasks import Task
+from backend import app as backend_app
 from backend import query_refine
 from backend.app import RefineReq, refine_endpoint
 
@@ -149,6 +151,55 @@ class RefineEndpointTests(unittest.TestCase):
              patch("backend.app._refiner_client"), \
              self.assertRaises(HTTPException) as caught:
             self.call(text="thuyền đỏ")
+        self.assertEqual(caught.exception.status_code, 503)
+
+
+class RefinerBackendTests(unittest.TestCase):
+    """`AIC_REFINER_BACKEND=openrouter` lets a deployment try Qwen instead of DeepSeek here,
+    reusing the checker's `OPENROUTER_API_KEY` -- see `backend.app._refiner_backend`."""
+
+    def setUp(self):
+        # `_refiner_client` caches a client on the module global; a leftover from one test
+        # would otherwise answer the next test's call without rebuilding it.
+        patcher = patch.object(backend_app, "_refiner", None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_defaults_to_deepseek(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(backend_app._refiner_backend(), "deepseek")
+
+    def test_reads_the_backend_env_var_case_insensitively(self):
+        with patch.dict("os.environ", {"AIC_REFINER_BACKEND": "OpenRouter"}):
+            self.assertEqual(backend_app._refiner_backend(), "openrouter")
+
+    def test_refiner_key_checks_deepseeks_key_by_default(self):
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "d", "OPENROUTER_API_KEY": "o"}, clear=True):
+            self.assertEqual(backend_app._refiner_key(), "d")
+
+    def test_refiner_key_checks_openrouters_key_when_switched(self):
+        with patch.dict("os.environ", {"AIC_REFINER_BACKEND": "openrouter",
+                                       "DEEPSEEK_API_KEY": "d", "OPENROUTER_API_KEY": "o"}, clear=True):
+            self.assertEqual(backend_app._refiner_key(), "o")
+
+    def test_builds_an_openrouter_client_defaulting_to_qwen(self):
+        with patch.dict("os.environ", {"AIC_REFINER_BACKEND": "openrouter",
+                                       "OPENROUTER_API_KEY": "o"}, clear=True):
+            client = backend_app._refiner_client()
+        self.assertIsInstance(client, OpenRouterClient)
+        self.assertEqual(client.model, DEFAULT_MODEL)
+
+    def test_refiner_model_override_does_not_leak_into_the_checkers_model(self):
+        with patch.dict("os.environ", {"AIC_REFINER_BACKEND": "openrouter", "OPENROUTER_API_KEY": "o",
+                                       "OPENROUTER_MODEL": "qwen/checker-model",
+                                       "AIC_REFINER_MODEL": "qwen/refiner-model"}, clear=True):
+            client = backend_app._refiner_client()
+        self.assertEqual(client.model, "qwen/refiner-model")
+
+    def test_endpoint_reports_unavailable_without_an_openrouter_key(self):
+        with patch.dict("os.environ", {"AIC_REFINER_BACKEND": "openrouter"}, clear=True), \
+             self.assertRaises(HTTPException) as caught:
+            asyncio.run(refine_endpoint(RefineReq(text="thuyền đỏ")))
         self.assertEqual(caught.exception.status_code, 503)
 
 

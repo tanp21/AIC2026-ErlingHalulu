@@ -34,6 +34,14 @@ class FrameMap:
     def frame_time(self, frame_id):
         return (int(self.pts[frame_id]) - int(self.pts[0])) * self.time_base_num / self.time_base_den
 
+    def times(self):
+        """Every frame's playback time in seconds, the array a time->frame search sorts.
+
+        One allocation per map, so a caller resolving many times against the same video
+        should hold on to it (`scripts.indexing.build_flat_profile.KeyframeResolver` does).
+        """
+        return (self.pts - self.pts[0]) * (self.time_base_num / self.time_base_den)
+
     def source_time(self, frame_id):
         return int(self.pts[frame_id]) * self.time_base_num / self.time_base_den
 

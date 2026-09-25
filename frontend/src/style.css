@@ -376,6 +376,16 @@ kbd { padding: 2px 5px; border: 1px solid #ffffff20; border-radius: 4px; backgro
 .video-dialog header span { color: var(--muted); font-size: 10px; }
 .video-dialog header button { width: 30px; height: 30px; padding: 0; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); font-size: 20px; }
 .video-dialog-body { display: grid; grid-template-columns: minmax(0, 1fr) 360px; height: calc(92vh - 52px); min-height: 0; }
+/* The check gets a column of its own whenever there is one, mirroring the transcript's on the
+   right. `:has` is what lets the same markup fall back to two columns for a player opened
+   without a check (the collab view, and every player outside the Search tab). */
+.video-dialog-body:has(.video-check-pane) { grid-template-columns: 340px minmax(0, 1fr) 360px; }
+.video-check-pane { min-width: 0; min-height: 0; overflow-y: auto; border-right: 1px solid var(--line); background: var(--surface); }
+.video-check-pane > header { position: sticky; top: 0; z-index: 1; display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 15px 17px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.video-check-pane > header span, .video-check-pane > header small { grid-column: 1 / -1; }
+.video-check-pane > header small { color: var(--muted); font-size: 11px; }
+.video-check-pane > header .check-button { grid-column: 1 / -1; width: auto; justify-self: start; }
+.video-check-pane .check-panel { padding: 12px 17px; }
 .video-pane { min-width: 0; min-height: 0; overflow: auto; }
 .video-dialog video { display: block; width: 100%; max-height: calc(90vh - 52px); background: #000; }
 .video-dialog:has(.exact-frame-controls) video { max-height: calc(90vh - 180px); }
@@ -1282,13 +1292,13 @@ kbd { padding: 2px 5px; border: 1px solid #ffffff20; border-radius: 4px; backgro
 }
 
 /* -- "Check by AI": one moment, checked on demand against the query ------------------------ */
-.keyframe-context .check-button, .video-check .check-button {
+.keyframe-context .check-button, .video-check-pane .check-button {
   padding: 4px 10px; border: 1px solid var(--accent); border-radius: 8px;
   background: transparent; color: var(--accent); font-size: 12px; cursor: pointer;
 }
 .keyframe-context .check-button { margin-left: auto; }
 .keyframe-context .check-button + button { margin-left: 8px; }
-.keyframe-context .check-button:disabled, .video-check .check-button:disabled { opacity: 0.55; cursor: progress; }
+.keyframe-context .check-button:disabled, .video-check-pane .check-button:disabled { opacity: 0.55; cursor: progress; }
 /* The mark a filmstrip frame carries when an answer already covers its shot. */
 .context-frames .check-badge {
   position: absolute; top: 4px; left: 4px; min-width: 18px; padding: 0 3px;
@@ -1337,6 +1347,3 @@ kbd { padding: 2px 5px; border: 1px solid #ffffff20; border-radius: 4px; backgro
 .check-busy { margin: 0; color: var(--muted); }
 .check-error { margin: 0; color: var(--danger); }
 
-.video-check { display: grid; gap: 8px; padding: 10px 0 0; }
-.video-check-actions { display: flex; align-items: center; gap: 10px; }
-.video-check-actions small { color: var(--muted); font-size: 11px; }

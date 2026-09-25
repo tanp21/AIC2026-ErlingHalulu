@@ -420,6 +420,28 @@ export function VideoDialog({ result, onClose, capture, picker, profile, origina
           ? ` · ${playheadFrame === null ? "Exact frame unavailable" : `frame ${playheadFrame}`}` : ""}</span></div>
           <button autoFocus onClick={onClose} aria-label="Close video">×</button></header>
         <div className="video-dialog-body">
+          {/* Its own column, mirroring the transcript's on the right: inside `.video-pane` it sat in
+              the vertical flow between the video and the keyframe strip, so every check pushed the
+              video smaller while it played. As a sibling column it scrolls independently and the
+              video keeps its height. */}
+          {check && <aside className="video-check-pane" aria-label="AI check">
+            <header>
+              <span className="eyebrow">AI CHECK</span>
+              <button type="button" className="check-button" disabled={check.state.status === "loading"}
+                onClick={() => check.run(liveFrameId !== null && !seeking
+                  ? { video_id: result.video_id, frame_idx: liveFrameId }
+                  : { video_id: result.video_id, time: playbackTime })}>
+                {check.state.status === "loading" ? "Checking…" : "✓ Check this moment"}
+              </button>
+              <small>{liveFrameId !== null && !seeking
+                ? `frame ${liveFrameId}` : formatTimestamp(playbackTime)} · ±5 min around it</small>
+            </header>
+            <CheckPanel state={check.state} keywords={check.keywords}
+              onSeek={(time) => { if (videoRef.current) videoRef.current.currentTime = time; }}
+              onRecheck={() => check.run(liveFrameId !== null && !seeking
+                ? { video_id: result.video_id, frame_idx: liveFrameId }
+                : { video_id: result.video_id, time: playbackTime }, true)} />
+          </aside>}
           <div className="video-pane">
         <video ref={videoRef} src={originalVideo ? `/video/${encodeURIComponent(result.video_id)}?original=1` : result.video}
           controls preload="metadata" autoPlay={!startPaused} aria-label="Video player"
@@ -457,23 +479,6 @@ export function VideoDialog({ result, onClose, capture, picker, profile, origina
               videoRef.current.currentTime = result.time; setPlaybackTime(result.time);
             }
           }} />
-        {check && <section className="video-check" aria-label="AI check">
-          <div className="video-check-actions">
-            <button type="button" className="check-button" disabled={check.state.status === "loading"}
-              onClick={() => check.run(liveFrameId !== null && !seeking
-                ? { video_id: result.video_id, frame_idx: liveFrameId }
-                : { video_id: result.video_id, time: playbackTime })}>
-              {check.state.status === "loading" ? "Checking…" : "✓ Check this moment"}
-            </button>
-            <small>{liveFrameId !== null && !seeking
-              ? `frame ${liveFrameId}` : formatTimestamp(playbackTime)} · ±5 min around it</small>
-          </div>
-          <CheckPanel state={check.state} variant="inline" keywords={check.keywords}
-            onSeek={(time) => { if (videoRef.current) videoRef.current.currentTime = time; }}
-            onRecheck={() => check.run(liveFrameId !== null && !seeking
-              ? { video_id: result.video_id, frame_idx: liveFrameId }
-              : { video_id: result.video_id, time: playbackTime }, true)} />
-        </section>}
         {mapping && <VideoKeyframes key={`${result.video_id}-${profile ?? "default"}`} videoId={result.video_id} profile={profile} currentTime={playbackTime}
           initialFrameId={result.frame_idx} showFrameId={showFrameId} officialFrames={officialFrames}
           onSeek={(frameId, time) => time === undefined ? seekToFrame(frameId) : seekToTime(time)} />}

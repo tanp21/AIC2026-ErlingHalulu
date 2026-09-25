@@ -1,9 +1,13 @@
 """Build frame_maps for Batch 2 groups without needing indexes/video_meta.parquet.
 
 Unlike scripts/indexing/build_frame_maps.py (which reads the full indexes/video_meta.parquet
-catalogue), this discovers videos directly from data/<year>/videos/<group>/*.mp4 for the
-given groups -- useful on a remote processing box that only needs frame_maps for the videos
-it just downloaded, not the full production catalogue.
+catalogue), this discovers videos directly from the video group directories for the given
+groups -- useful on a remote processing box that only needs frame_maps for the videos it just
+downloaded, not the full production catalogue.
+
+Both extensions are searched: the S/M/L groups ship ``.mp4``, but the N traffic-camera videos
+are ``.mov`` -- an mp4-only glob finds no N video at all and quietly reports success having
+done nothing.
 
     uv run python -m scripts.indexing.build_batch2_frame_maps --year 2026 --groups M01
 
@@ -41,7 +45,8 @@ def main(argv=None):
 
     jobs = []
     for group in sorted(groups):
-        jobs.extend(sorted((videos_dir / group).glob("*.mp4")))
+        jobs.extend(sorted(set((videos_dir / group).glob("*.mp4"))
+                           | set((videos_dir / group).glob("*.mov"))))
     log(f"{len(jobs)} videos across {sorted(groups)}, {args.workers} workers")
 
     failures = []

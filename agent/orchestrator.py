@@ -28,6 +28,8 @@ from .evidence import (
     TIE_BAND, EvidenceStore, QueryDetails, detail_weights, evidence_of, query_details, suggest_answers,
     summarize_all, video_coverage,
 )
+from backend import video_ids
+
 from .llm import LLMError
 from .plan import (
     TRAKE_TIGHT_GAP, Plan, analysis_messages, expected_events, initial_queries, parse_plan,
@@ -41,7 +43,10 @@ from .vision import Inspector, caption_at, label_context, transcript_window
 from .web import cooking_lookup, dish_name, fact_lookup, is_cooking, recipe_lookup, similar, tagged
 
 logger = logging.getLogger("agent")
-VIDEO_ID = re.compile(r"^[A-Z]\d{2}[_-]V\d{3}$")
+#: Gates every video id the agent takes from a model or the reviewer. Shared with the server's
+#: routes rather than re-typed: a copy without the N groups' third digit silently drops N out
+#: of a scoped search, a lookup or an "add frame" the human asked for.
+VIDEO_ID = video_ids.VIDEO_ID
 OBSERVE_TOP = 12
 #: How many candidates the live review view shows (every pending one is added on top).
 PROGRESS_TOP = 24

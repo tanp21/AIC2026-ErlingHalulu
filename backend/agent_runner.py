@@ -47,6 +47,7 @@ from agent.search_client import SearchClient
 from agent.tasks import Task, task_from_text
 from agent.vlm import build_vision
 
+from . import video_ids
 from .core import ROOT
 
 logger = logging.getLogger("uvicorn.error")
@@ -61,7 +62,7 @@ _AGENT_RUN_EXECUTOR = ThreadPoolExecutor(max_workers=5, thread_name_prefix="agen
 _NO_DOTENV = Path("/nonexistent")
 
 
-VIDEO_ID_PATTERN = r"^[A-Z]\d{2}[_-]V\d{3}$"
+VIDEO_ID_PATTERN = video_ids.VIDEO_ID_PATTERN
 
 
 class AgentRunConflict(RuntimeError):

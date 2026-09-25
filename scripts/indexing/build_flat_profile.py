@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Build an exact FAISS Flat profile from raw or sharded embeddings."""
+"""Build an exact FAISS Flat profile from raw or sharded embeddings.
+
+    uv run python -m scripts.indexing.build_flat_profile \
+        --source data/2026/embeddings_merged/pe-core --prefix '' \
+        --name l2026-v2 --label 'L+M+S · embeddings 2026'
+
+``--prefix ''`` takes every group the source holds. For the N (traffic-camera) groups, whose
+organisers' map-keyframes call ``frame_idx`` a relative label and time KIS/QA answers by
+``pts_time``, pass ``--frame-from pts-ms``: each keyframe is then placed at the frame of our
+own copy whose PTS carries its ``pts_ms`` (see ``KeyframeResolver``)."""
 import argparse
 import json
 import os
@@ -18,6 +27,12 @@ from backend import shots
 
 
 def iter_embeddings(source, prefix):
+    """``(video_id, frame_idx, pts_ms, vector)`` per keyframe, in the source's own order.
+
+    ``pts_ms`` is the organisers' real playback time for the sources that carry it
+    (``scripts.embedding.attach_pts_ms`` adds the column for the N groups) and ``None``
+    otherwise -- a frame index is a frame's identity for every CFR group.
+    """
     meta_path = source / "meta.parquet"
     if meta_path.exists():
         rows = pq.read_table(meta_path).to_pylist()
@@ -28,14 +43,58 @@ def iter_embeddings(source, prefix):
             if row["shard_idx"] != shard_idx:
                 shard_idx = row["shard_idx"]
                 shard = np.load(source / f"emb_{shard_idx:06d}.npy", mmap_mode="r")
-            yield row["video_id"], int(row["frame_idx"]), np.asarray(shard[row["row_idx"]])
+            yield (row["video_id"], int(row["frame_idx"]), row.get("pts_ms"),
+                   np.asarray(shard[row["row_idx"]]))
         return
     for path in sorted(source.glob(f"{prefix}*/*/*.npy")):
-        yield path.parent.name, int(path.stem), np.load(path)
+        yield path.parent.name, int(path.stem), None, np.load(path)
+
+
+class KeyframeResolver:
+    """Places a keyframe that is known only by its time at a frame of the file we hold.
+
+    The N (traffic-camera) videos are VFR and the organisers' own map-keyframes say their
+    ``frame_idx`` is a relative label there, while ``pts_time`` is the real playback time and
+    what a KIS/QA answer is scored on. So for those two groups the source's frame index is not
+    an identity: the keyframe belongs at the frame of *our* copy whose PTS carries that time --
+    which is also what makes a hit's thumbnail, its playback position and its submitted
+    millisecond agree with each other. Holds one frame-time array per video: resolving is a
+    ``searchsorted`` per keyframe, but building that array is not.
+    """
+
+    def __init__(self, base_index):
+        self.base_index = Path(base_index)
+        self._maps = {}
+
+    def _times(self, video_id):
+        times = self._maps.get(video_id)
+        if times is None:
+            times = frame_maps.load_path(
+                self.base_index / "frame_maps" / f"{video_id}.npz").times()
+            self._maps[video_id] = times
+        return times
+
+    def time_of(self, video_id, frame_idx):
+        """The playback time the frame map gives a frame of the file we hold."""
+        return float(self._times(video_id)[frame_idx])
+
+    def frame_for(self, video_id, pts_ms):
+        """``(frame_idx, seconds_off)``: the nearest frame, and how far its time is off."""
+        target = float(pts_ms) / 1000.0
+        times = self._times(video_id)
+        position = int(np.searchsorted(times, target))
+        if position <= 0:
+            frame = 0
+        elif position >= len(times):
+            frame = len(times) - 1
+        else:
+            before, after = position - 1, position
+            frame = before if abs(times[before] - target) <= abs(times[after] - target) else after
+        return frame, abs(float(times[frame]) - target)
 
 
 def build_profile(source, output, base_index, prefix="L", batch_size=2048,
-                  shot_label_dir=None, data_dir=shots.DATA):
+                  shot_label_dir=None, data_dir=shots.DATA, frame_from="frame-idx"):
     source, output, base_index = map(Path, (source, output, base_index))
     if output.exists():
         raise FileExistsError(f"profile already exists: {output}")
@@ -69,6 +128,10 @@ def build_profile(source, output, base_index, prefix="L", batch_size=2048,
             index, labels = cached
             position = index.shot_at(frame_idx)
             return labels.get(position)
+        if frame_from not in ("frame-idx", "pts-ms"):
+            raise ValueError(f"unknown frame_from: {frame_from!r}")
+        resolver = KeyframeResolver(base_index) if frame_from == "pts-ms" else None
+        worst_frame_off = 0.0
         index = None
         vectors, video_ids, frame_ids = [], [], []
         video_order = {}
@@ -79,7 +142,7 @@ def build_profile(source, output, base_index, prefix="L", batch_size=2048,
                 index.add(np.stack(vectors).astype("float32", copy=False))
                 vectors = []
 
-        for video_id, frame_idx, vector in iter_embeddings(source, prefix):
+        for video_id, frame_idx, pts_ms, vector in iter_embeddings(source, prefix):
             vector = np.asarray(vector)
             if vector.ndim != 1 or not np.isfinite(vector).all():
                 raise ValueError(f"invalid embedding: {video_id}/{frame_idx}")
@@ -89,6 +152,11 @@ def build_profile(source, output, base_index, prefix="L", batch_size=2048,
                 raise ValueError(f"embedding dimension mismatch: {video_id}/{frame_idx}")
             if video_id not in base_meta:
                 raise ValueError(f"video metadata unavailable: {video_id}")
+            if resolver is not None:
+                if pts_ms is None:
+                    raise ValueError(f"source carries no pts_ms for {video_id}/{frame_idx}")
+                frame_idx, off = resolver.frame_for(video_id, pts_ms)
+                worst_frame_off = max(worst_frame_off, off)
             reason = excluded_reason(video_id, frame_idx)
             if reason is not None:
                 excluded_by_reason[reason] = excluded_by_reason.get(reason, 0) + 1
@@ -129,6 +197,12 @@ def build_profile(source, output, base_index, prefix="L", batch_size=2048,
             "excluded_count": sum(excluded_by_reason.values()),
             "excluded_by_reason": excluded_by_reason,
         }
+        if resolver is not None:
+            # How far a keyframe had to move to land on a frame of our copy. Bounded by one
+            # frame interval of the video, so a value in the seconds means the source's
+            # pts_ms and this frame map are not of the same rendition.
+            result["frame_from"] = "pts-ms"
+            result["frame_time_off_seconds"] = worst_frame_off
         (staging / "info.json").write_text(json.dumps({
             **result,
             "indexes": {"flat": {"type": "FlatIP", "metric": "ip", "exact": True}},
@@ -166,16 +240,21 @@ def main():
     parser.add_argument("--shot-label-dir", type=Path,
                         help="filter only reviewed exclusions from this directory")
     parser.add_argument("--data-dir", type=Path, default=shots.DATA)
+    parser.add_argument("--frame-from", choices=("frame-idx", "pts-ms"), default="frame-idx",
+                        help="how a source keyframe is identified: its frame index (every CFR "
+                             "group), or the pts_ms the VFR N groups are scored on")
     parser.add_argument("--default", action="store_true")
     args = parser.parse_args()
     result = build_profile(
         args.source, args.profile_root / args.name, args.base_index, args.prefix,
-        shot_label_dir=args.shot_label_dir, data_dir=args.data_dir,
+        shot_label_dir=args.shot_label_dir, data_dir=args.data_dir, frame_from=args.frame_from,
     )
     register_profile(args.profile_root, args.name, args.label, result, args.default)
+    resolved = (f", frames from pts_ms (worst {result['frame_time_off_seconds']:.3f}s off)"
+                if "frame_from" in result else "")
     print(f"[flat-profile] {args.name}: {result['count']} vectors, "
           f"{result['video_count']} videos, {result['excluded_count']} excluded "
-          f"{result['excluded_by_reason']}")
+          f"{result['excluded_by_reason']}{resolved}")
 
 
 if __name__ == "__main__":

@@ -126,7 +126,7 @@ Hybrid degrades gracefully: if the audio branch raises, the visual results are r
 - `agent/checker.py` — the orchestration behind `backend/checker.py`'s "Check by AI": one moment checked against a query, reusing `agent/evidence.py`'s checklist/shot-walk/scoring machinery but cut to a single candidate, one vision call, and (for Q&A) the answer read from the same call. See `docs/checker.md`.
 - `scripts/benchmarks/bench_agent_vision.py` — measures candidate local VLMs on the agent's own verification job: one shared candidate pool built from real searches, scored by how well each model's 0-10 verdicts separate gold from non-gold. End-to-end R@1 is deliberately not the metric; the agent's own docs record it varying 40-56% across runs of identical code.
 - `backend/checker.py` — `POST /api/check`, the Search tab's on-demand "Check by AI": one keyframe, checked against the current query by `agent/checker.py` (a cut-down version of the agent's own checklist, judged by OpenRouter `qwen/qwen3.7-flash` rather than a whole agent run). Cached by shot (not frame) so stepping through the filmstrip after the first press is free, and shared across teammates rather than owner-scoped. See `docs/checker.md`.
-- `backend/thumb.py` — exact-PTS ffmpeg thumbnail extraction with a bounded semaphore and a size-capped LRU disk cache.
+- `backend/thumb.py` — exact-PTS ffmpeg thumbnail extraction with a bounded semaphore and a size-capped LRU disk cache, plus the organisers' keyframe store that `/thumb` and `/frame` consult first. The N (traffic-camera) groups depend on that store: their videos are VFR with a container that carries no usable frame timestamps, so ffmpeg extracts *nothing* from them (a seek decodes no frame, a `pts` match finds no frame), while the organiser keyframe JPEGs are both the only workable source and the images the N embeddings were taken from. `scripts.indexing.build_keyframe_thumbnails` builds it offline, keyed by the `(video_id, frame_idx)` a hit reports.
 
 ### Snapshot pagination (not offset pagination)
 
@@ -151,11 +151,15 @@ Owner-only (`request.state.is_admin`): non-`flat` indexes, round upload, round a
 
 ### Index profiles
 
-`indexes/profiles/manifest.json` defines named profiles (currently `l2025`, `l2026`) with a default. When the manifest is absent, `ProfileStore` falls back to the legacy full-dataset layout directly in `indexes/`. Profile directories are resolved and checked for escapes from the profile root. FAISS indexes are lazily loaded into a bounded LRU keyed by `(profile, index_name)`.
+`indexes/profiles/manifest.json` defines named profiles with a default: `l2025`, `gopt-l2026`, `l2026-v2` and `naflex-l2026-v2` (L+M+S), and `l2026-v3`/`naflex-l2026-v3`, which add the N traffic-camera groups. When the manifest is absent, `ProfileStore` falls back to the legacy full-dataset layout directly in `indexes/`. Profile directories are resolved and checked for escapes from the profile root. FAISS indexes are lazily loaded into a bounded LRU keyed by `(profile, index_name)`. `SearchReq.profile` is a `Literal` over the manifest read at import, so a new profile is selectable only after a restart.
+
+The N groups are VFR, and the organisers' map-keyframes say so: `frame_idx` there is a relative label and KIS/QA answers are scored on `pts_time`. So a N keyframe is indexed at the frame of *our* copy whose PTS carries its `pts_ms` (`--frame-from pts-ms` on `build_flat_profile`), not at its label — otherwise 78 of the 298 videos land seconds away from the moment the query asked for. A group added to a profile that is already built goes in with `scripts.indexing.extend_flat_profile` (append to a copy, switch the manifest) rather than a rebuild that would re-ship embeddings the host already holds.
 
 ### Frame identity
 
 Frame ↔ time conversion goes through `backend.frame_maps.FrameMap` (PTS + time base), never through fps arithmetic. The same map is shipped to the browser via `GET /frame-map/{video_id}` and reimplemented in `frontend/src/frameMap.ts`; changes to one must mirror the other. `backend.thumb.ffmpeg_command` seeks by exact PTS with `-copyts`.
+
+A map holds one PTS per frame and is strictly increasing — `frameMap.ts` rejects a delta of zero, and the index is the frame's position in the file, so neither a repeated timestamp nor a backwards step can be passed through: `scripts.indexing.build_frame_maps` sorts a decoded timeline and bumps a repeat by one tick (N031_V001/V002 need it), where dropping the frame would mislabel every frame after it.
 
 ### Competition workflow
 
@@ -164,6 +168,7 @@ Frame ↔ time conversion goes through `backend.frame_maps.FrameMap` (PTS + time
 ## Conventions and gotchas
 
 - Backend tests are stdlib `unittest` with `unittest.mock.patch` targeting `backend.app.*` / `backend.core.*` symbols. Frontend tests are Vitest + Testing Library (`frontend/src/test/setup.ts`).
+- One video-id format, defined once in `backend/video_ids.py` (`^[A-Z]\d{2,3}[_-]V\d{3}$` — the batch 2 N groups carry three group digits). Re-typing it per module is what silently rejected every `/thumb`, `/video`, `/shots` and `/frame-map` request for an N video with a 422 while the index behind it was correct; `tests/test_video_ids.py` scans `backend/` and `agent/` for a re-typed copy and checks every route uses the shared one.
 - Some tests assert repository invariants rather than behavior — `tests/test_frontend_serving.py` checks the Dockerfile mentions `backend/temporal_search.py` and `benchmarks/temporal/temporal_config.json`; `tests/test_runtime_mounts.py` checks mount-derived paths (including `backend/shot_labels.py`); `tests/test_repository_security.py` checks the Gitleaks setup. **A new top-level runtime module must be added to the Dockerfile `COPY` line.**
 - `benchmarks/temporal/temporal_config.json` (candidate K + scorer) is generated by `scripts/benchmarks/bench_temporal_search.py` against `benchmarks/temporal/temporal_ground_truth.json`. Re-run the benchmark instead of hand-editing it. `benchmarks/audio/audio_config.json` and `benchmarks/ocr/ocr_config.json` work the same way, from `bench_audio_search --sweep`/`bench_audio_capu` and `bench_ocr.py` respectively.
 - Offline, GPU-heavy, or dependency-conflicting tooling gets its own venv outside the main `.venv` and outside `pyproject.toml`'s tracked groups — e.g. `.venv-captioning` (CapRL shot captioning, `requirements-captioning.txt`, see `docs/caprl-shot-captioning.md`) and `.venv-ocr` (the production `OcrPipeline` in `scripts/ocr/engines.py`, used by `scripts/indexing/build_ocr_index.py`). Neither ships in the production image. The PaddleOCR/EasyOCR/VLM-OCR bake-off venvs from the engine comparison (`docs/reports/ocr-shot-audit.md`) were deleted once the comparison concluded — reinstall from that report if reproducing it.
@@ -193,6 +198,25 @@ returns — never a frame.
 | `/etc/supervisor/conf.d/aic.conf` | the `aic-app` and `aic-es` units, both `autorestart` |
 | `/workspace/aic/artifacts/venue/` | `fetch-corpus.sh`, `corpus-urls.txt`, `build-es.sh`, `export-index.py` |
 | `/workspace/elasticsearch/` | Elasticsearch 9.4.3 from its tarball, bound to `127.0.0.1` |
+
+### Working on the instance itself
+
+```bash
+ssh -p 9182 root@136.36.139.116 -L 8080:localhost:8080
+```
+
+The key is the "caprl" one, `~/.ssh/id_ed25519_vast_caprl` on the desktop — pass it with `-i`
+(it is not the default identity), and add `-o StrictHostKeyChecking=accept-new` the first time,
+since a rented host has no key to pin ahead of time. There is no `Host` entry for this box in
+`~/.ssh/config`; the full command above is the whole of it. The `-L 8080:localhost:8080` forward
+is the instance's Jupyter portal, not the application — the app is on `127.0.0.1:8000` and is
+reached over the `core-tunnel` sidecar.
+
+Edits there land in `/workspace/aic` and take effect on `supervisorctl restart aic-app`
+(`supervisorctl status` shows both units; `tail -f /workspace/logs/app-err.log` shows the app,
+`/workspace/es-logs/stdout.log` Elasticsearch). **Nothing you change in this repository follows
+you there** — rsync it across, or make the change twice. Copy anything worth keeping back to the
+desktop as you go: there is no volume, and the box is billed hourly.
 
 The instance is an **unprivileged container**, and that shapes everything: no Docker-in-Docker
 (so the app runs bare under supervisor), no `/dev/net/tun` (so no Tailscale, hence the SSH

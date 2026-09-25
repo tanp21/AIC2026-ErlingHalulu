@@ -544,19 +544,30 @@ def _shots_of(search, video_id: str) -> tuple:
     return tuple(rows)
 
 
+def _one_of(keys: list[dict], pick: str) -> list[dict]:
+    """The single keyframe a non-dense shot contributes: its first, or (`pick="middle"`) the
+    middle of however many the shot has -- e.g. the 2nd of 3, not the 1st, which a shot's early
+    frame can still be mid-transition from the previous cut."""
+    if pick == "middle":
+        return keys[len(keys) // 2:len(keys) // 2 + 1]
+    return keys[:1]
+
+
 def _shot_frames(search, video_id: str, frame_idx: int, time: float,
-                 seconds: float, dense: int, most: int) -> list[dict] | None:
+                 seconds: float, dense: int, most: int, pick: str = "first") -> list[dict] | None:
     """The keyframes of the shots around a moment, walked outward, or None without shot data.
 
     Every shot within `seconds` either side is a candidate, nearest first -- never capped by how MANY
     shots that is, only by how many FRAMES the side sends (`most`): a video cut into many short shots
     must still be able to reach the far end of the window, which capping the shot count could not do
     (see the module docstring). The nearest `dense` shots of a side keep every keyframe they have (a
-    beat that is a change needs more than one look), the rest keep their first -- reach over density,
-    once a beat is known to be a whole shot away rather than a blur inside one. A shot with NO indexed
-    keyframe (nothing in it stood out enough offline to sample) still gets looked at: its own midpoint
-    frame, fetched directly rather than picked from an index, so a long uneventful-looking shot is not
-    silently skipped -- it counts as one frame for `dense`/`most` like any other shot's first keyframe.
+    beat that is a change needs more than one look), the rest keep one (`_one_of`, `pick`) -- reach
+    over density, once a beat is known to be a whole shot away rather than a blur inside one. `dense=0`
+    (the Search tab's on-demand checker, for speed: one call, a person waiting) makes every shot keep
+    just that one frame. A shot with NO indexed keyframe (nothing in it stood out enough offline to
+    sample) still gets looked at: its own midpoint frame, fetched directly rather than picked from an
+    index, so a long uneventful-looking shot is not silently skipped -- it counts as one frame for
+    `dense`/`most` like any other shot's first keyframe.
 
     The candidate's OWN shot's OTHER keyframes are context too, ahead of every other shot's: on the
     reported p2-6 candidate, the second of the query's two red-circle beats sat 3.5 s later in that
@@ -598,7 +609,7 @@ def _shot_frames(search, video_id: str, frame_idx: int, time: float,
                            (own_later, sorted(later, key=lambda pair: pair[0]))):
         taken: list[dict] = list(own_side)   # the candidate's own shot first, ahead of any other shot's
         for position, (_, keys) in enumerate(side):
-            use = keys if position < dense else keys[:1]
+            use = keys if position < dense else _one_of(keys, pick)
             if len(taken) + len(use) > most:
                 break
             taken += use
@@ -609,7 +620,8 @@ def _shot_frames(search, video_id: str, frame_idx: int, time: float,
 def _context_frames(search, video_id: str, frame_idx: int, time: float, *,
                     seconds: float = VISION_CONTEXT_SECONDS,
                     dense: int = VISION_CONTEXT_DENSE, most: int = VISION_CONTEXT_MAX,
-                    count: int = VISION_CONTEXT_FRAMES, radius: int = VISION_CONTEXT_RADIUS) -> list[dict]:
+                    count: int = VISION_CONTEXT_FRAMES, radius: int = VISION_CONTEXT_RADIUS,
+                    pick: str = "first") -> list[dict]:
     """The shots around a candidate -- several keyframes of the nearest, one of the rest -- out to `seconds`.
 
     Per-shot first (`_shot_frames`): a story's beats live in whole shots, and sampling by time can step
@@ -620,7 +632,7 @@ def _context_frames(search, video_id: str, frame_idx: int, time: float, *,
     and vision still has the candidate's own frame without it.
     """
     try:
-        per_shot = _shot_frames(search, video_id, frame_idx, time, seconds, dense, most)
+        per_shot = _shot_frames(search, video_id, frame_idx, time, seconds, dense, most, pick)
     except Exception as exc:  # a shot list in an unexpected shape must cost the checklist nothing
         logger.warning("evidence: shot context failed for %s (%s)", video_id, exc)
         per_shot = None

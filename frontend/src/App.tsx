@@ -1,6 +1,6 @@
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
-import { compareIndexes, fetchKeyframeContext, fetchSession, refineQuery, searchNextPage, searchTemporalMultimodal, searchTemporalNextPage, searchVideos, searchVideosByImage } from "./api";
+import { compareIndexes, fetchKeyframeContext, fetchProfiles, fetchSession, refineQuery, searchNextPage, searchTemporalMultimodal, searchTemporalNextPage, searchVideos, searchVideosByImage } from "./api";
 import { cachedCheck, forgetChecks, lookupCheck, runCheck } from "./checkApi";
 import { CheckPanel, verdictTier } from "./checkView";
 import { AgentPanel } from "./agentPanel";
@@ -457,9 +457,11 @@ interface ResultsWorkspaceProps {
   onSimilar(result: SearchResult): void;
   dresKind: QueryKind;
   dresAnswer: string;
+  qaQuestion: string;
   trakeCandidate: DresCandidate | null;
   trakeMessage: string;
   onDresAnswer(answer: string): void;
+  onQaQuestion(question: string): void;
   onSubmitDresFrame(result: SearchResult, expectedTimestampMs: number): Promise<{ message: string; completed?: boolean; uncertain?: boolean; timestamp_ms?: number; timestamp_mismatch?: boolean }>;
   onAddTrakeFrame(result: SearchResult): void;
   onOpenTrakeFrame(videoId: string, frameId: number): void;
@@ -523,6 +525,9 @@ function ResultsWorkspace(props: ResultsWorkspaceProps) {
       {props.warning && <div className="message warning">{props.warning}</div>}
 
       {props.dresKind === "qa" && <div className="dres-result-tools dres-qa-tools">
+        <label>Q&amp;A question<input aria-label="Q&A question for Check by AI" value={props.qaQuestion}
+          onChange={(event) => props.onQaQuestion(event.target.value)}
+          placeholder="What is being asked? (read by Check by AI)" /></label>
         <label>Q&amp;A answer<input aria-label="DRES answer for retrieved frames" value={props.dresAnswer}
           onChange={(event) => props.onDresAnswer(event.target.value)} placeholder="Type the answer to submit" /></label>
         <span>Choose a frame below to submit with this answer.</span>
@@ -722,6 +727,14 @@ function TranscriptPanel({ selected, check, keywords, onRecheck }: {
   );
 }
 
+//: What a load with the tunnel down falls back to. The compute host's manifest decides the
+//: profile; this only has to keep the SPA searching the same index a healthy load would, so
+//: keep it in step with the manifest's default (it is one entry, and the switcher stays
+//: hidden -- the competition runs one profile).
+const PINNED_PROFILES: IndexProfile[] = [
+  { name: "l2026-v3", label: "L+M+S+N · embeddings 2026", is_default: true, count: 678778, video_count: 1487, indexes: ["flat"] },
+];
+
 export default function App() {
   const [visualQuery, setVisualQuery] = useState("");
   const [audioQuery, setAudioQuery] = useState("");
@@ -735,11 +748,24 @@ export default function App() {
   temporalImagesRef.current = temporalImages;
   const [mode, setMode] = useState<SearchMode>("hybrid");
   const [index, setIndex] = useState<IndexName>("flat");
-  const [profiles] = useState<IndexProfile[]>([
-    { name: "l2026-v2", label: "PE-Core + NaFlex · 2026 (L+M+S)", is_default: true, count: 590325, video_count: 1189, indexes: ["flat"] },
-  ]);
-  const [profile, setProfile] = useState("l2026-v2");
+  // The competition runs one profile, chosen by the compute host's manifest -- the SPA asks
+  // for it rather than naming it, so a rebuilt index (a group added, an embedding model
+  // swapped) is picked up without a frontend change. The pinned entry is what a load with the
+  // tunnel down falls back to: search is dead then anyway, but the SPA still renders.
+  const [profiles, setProfiles] = useState<IndexProfile[]>(PINNED_PROFILES);
+  const [profile, setProfile] = useState(PINNED_PROFILES[0].name);
   const profilesReady = true;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchProfiles().then((list) => {
+      if (cancelled || !list.length) return;
+      setProfiles(list);
+      const chosen = list.find((item) => item.is_default) ?? list[0];
+      setProfile(chosen.name);
+    }).catch(() => { /* pinned profile: the SPA still renders when the tunnel is down */ });
+    return () => { cancelled = true; };
+  }, []);
   const [nprobe, setNprobe] = useState(64);
   const [ef, setEf] = useState(64);
   const [queryImage, setQueryImage] = useState<QueryImage | null>(null);
@@ -755,6 +781,12 @@ export default function App() {
   dresCandidateRef.current = dresCandidate;
   const [dresKind, setDresKind] = useState<QueryKind>("kis");
   const [dresQaAnswer, setDresQaAnswer] = useState("");
+  // What the question actually asks, in the person's own words -- distinct from `dresQaAnswer`
+  // (what gets submitted). Search text alone is a scene description, not a question ("cascade
+  // hoa" is not "which city?"), so without this Check by AI has to guess what it is answering
+  // (`CheckQuery.asked` falls back to the flattened visual/audio/ocr text). Typing the real
+  // question here is what lets it read the pixels and transcript FOR that question instead.
+  const [qaQuestion, setQaQuestion] = useState("");
   const [trakeMessage, setTrakeMessage] = useState("");
   const [dresPickError, setDresPickError] = useState("");
   const [dresStatus, setDresStatus] = useState<DresStatus | null>(null);
@@ -846,7 +878,7 @@ export default function App() {
         event_count: null });
       setDresStatus(await fetchDresStatus());
     }
-    if (dresKind !== kind) { setDresCandidate(null); setDresQaAnswer(""); setTrakeMessage(""); }
+    if (dresKind !== kind) { setDresCandidate(null); setDresQaAnswer(""); setQaQuestion(""); setTrakeMessage(""); }
     setDresKind(kind);
   }
 
@@ -1058,6 +1090,23 @@ export default function App() {
     }
   }
 
+  /**
+   * Every channel the person has written, not only the active tab's.
+   *
+   * The composer keeps a visual, a transcript and an OCR query side by side and shows one at a
+   * time (`setTemporalMode`), but a classic search reads `temporalEvents[0]` alone -- so a check
+   * built from the submitted channels judged a candidate against a fraction of what was asked.
+   * Reported live: three details, all from the audio query, "while I also have a query by
+   * visual". The active tab's text wins where both exist, since it is what the search just ran.
+   */
+  function checkChannels(active: { visualText: string; audioText: string; ocrText: string }) {
+    return {
+      visualText: active.visualText || visualQuery.trim(),
+      audioText: active.audioText || audioQuery.trim(),
+      ocrText: active.ocrText || ocrQuery.trim(),
+    };
+  }
+
   function setObjectQuery(index: number, query: ObjectQuery) {
     setObjectQueries((current) => {
       const next = [...current];
@@ -1167,7 +1216,8 @@ export default function App() {
     if (!checkQuery || !(checkQuery.visualText || checkQuery.audioText || checkQuery.ocrText)) return null;
     return {
       visual_text: checkQuery.visualText || undefined, audio_text: checkQuery.audioText || undefined,
-      ocr_text: checkQuery.ocrText || undefined, kind: checkQuery.kind, ...target, profile, force,
+      ocr_text: checkQuery.ocrText || undefined, kind: checkQuery.kind,
+      question: qaQuestion.trim() || undefined, ...target, profile, force,
     };
   }
 
@@ -1392,8 +1442,9 @@ export default function App() {
       if (requestRef.current?.id !== id) return;
       setResponse(data);
       setSelected(data.results.length ? data.results.reduce((best, item) => item.score > best.score ? item : best) : null);
-      setCheckQuery(visualText || audioText || ocrText
-        ? { visualText, audioText, ocrText, kind: refineKind } : null);
+      const channels = checkChannels({ visualText, audioText, ocrText });
+      setCheckQuery(channels.visualText || channels.audioText || channels.ocrText
+        ? { ...channels, kind: refineKind } : null);
     } catch (searchError) {
       if (requestRef.current?.id !== id || (searchError instanceof DOMException && searchError.name === "AbortError")) return;
       setError(searchError instanceof Error ? searchError.message : "Search failed");
@@ -1677,9 +1728,11 @@ export default function App() {
         onLoadMore={loadNextPage}
         dresKind={dresNavKind}
         dresAnswer={dresQaAnswer}
+        qaQuestion={qaQuestion}
         trakeCandidate={dresCandidate}
         trakeMessage={trakeMessage}
         onDresAnswer={setDresQaAnswer}
+        onQaQuestion={setQaQuestion}
         onSubmitDresFrame={(result, expectedMs) => submitDresCandidate({ video_id: result.video_id, frame_idx: result.frame_idx,
           ...(dresNavKind === "qa" ? { answer: dresQaAnswer } : {}) }, expectedMs)}
         onAddTrakeFrame={addSearchResultTrake}

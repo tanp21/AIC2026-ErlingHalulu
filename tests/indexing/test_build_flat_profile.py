@@ -68,6 +68,31 @@ class FlatProfileBuildTests(unittest.TestCase):
             self.assertEqual(manifest["profiles"]["l2026"]["directory"], "l2026")
             self.assertEqual(manifest["profiles"]["l2026"]["count"], 2)
 
+    def test_places_a_vfr_keyframe_by_its_pts_time(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._base_index(root)
+            # 2 s apart at a nominal 25 fps is 50 frames, but these videos are VFR: the frame
+            # that carries 2 s is 1, and 3.9 s sits between frames 1 and 2.
+            np.savez_compressed(base / "frame_maps" / "L21_V002.npz",
+                                pts=np.array([0, 2000, 6000, 10000]), time_base_num=1,
+                                time_base_den=1000)
+            source = root / "shards"
+            source.mkdir()
+            np.save(source / "emb_000000.npy", np.array([[1, 0], [0, 1]], dtype=np.float32))
+            pq.write_table(pa.Table.from_pylist([
+                {"shard_idx": 0, "row_idx": 0, "video_id": "L21_V002", "frame_idx": 50, "pts_ms": 2000},
+                {"shard_idx": 0, "row_idx": 1, "video_id": "L21_V002", "frame_idx": 97, "pts_ms": 3900},
+            ]), source / "meta.parquet")
+
+            result = build_profile(source, root / "profile", base, prefix="", frame_from="pts-ms")
+
+            self.assertEqual(result["count"], 2)
+            self.assertEqual(result["frame_from"], "pts-ms")
+            self.assertAlmostEqual(result["frame_time_off_seconds"], 1.9)
+            np.testing.assert_array_equal(np.load(root / "profile" / "id_frame.npy"), [1, 1])
+            np.testing.assert_allclose(np.load(root / "profile" / "id_time.npy"), [2.0, 2.0])
+
     def test_filters_only_reviewed_excluded_shots(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

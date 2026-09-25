@@ -29,7 +29,7 @@ import polars as pl
 from fastapi import Body, HTTPException, Path
 from pydantic import BaseModel, Field
 
-from . import audio_search, core, frame_maps, object_search, ocr_search, shots, thumb
+from . import audio_search, core, frame_maps, object_search, ocr_search, shots, thumb, video_ids
 from . import search_core
 
 logger = logging.getLogger("uvicorn.error")
@@ -120,7 +120,7 @@ class ObjectSearchRequest(BaseModel):
 
 
 class ObjectMatchPoint(BaseModel):
-    video_id: str = Field(pattern=r"^[A-Z]\d{2,3}_V\d{3}$")
+    video_id: str = Field(pattern=video_ids.VIDEO_ID_PATTERN)
     frame_idx: int = Field(ge=0)
 
 
@@ -312,7 +312,7 @@ def object_catalog_endpoint():
         raise HTTPException(503, f"object search unavailable: {exc}") from exc
 
 
-def object_video_detections_endpoint(video_id: str = Path(pattern=r"^[A-Z]\d{2,3}_V\d{3}$")):
+def object_video_detections_endpoint(video_id: str = Path(pattern=video_ids.VIDEO_ID_PATTERN)):
     try:
         return object_search.video_detections(video_id)
     except (FileNotFoundError, OSError, RuntimeError, pl.exceptions.PolarsError) as exc:

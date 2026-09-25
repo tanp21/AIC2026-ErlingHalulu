@@ -40,10 +40,26 @@ which the checker doesn't need to pay twice for.
 
 A ±5 minute window (`AIC_CHECK_WINDOW_SECONDS`, 60–600 s) around the frame: the shots either side
 of it, walked outward the same way `agent/evidence._context_frames` does for the agent's
-checklist (nearest shots keep every keyframe, the rest keep one, capped at ~14 frames a side so
-one call stays under 30 images), plus the speech and on-screen text in the window. Wider than the
-agent's own ±180 s, because a person pressing a button on one candidate is asking about a whole
-segment, not a moment already narrowed down by retrieval.
+checklist, capped at ~14 frames a side so one call stays under 30 images. Wider than the agent's
+own ±180 s, because a person pressing a button on one candidate is asking about a whole segment,
+not a moment already narrowed down by retrieval.
+
+**One keyframe per shot, its middle one** (`CHECK_CONTEXT_DENSE = 0`, `pick="middle"`): where the
+agent's own checklist gives the nearest shots of each side their whole keyframe set — a beat that
+is a change needs two states visible — this trades that depth for speed, because a person is
+waiting on a single call. `evidence._one_of` picks the middle keyframe of however many a shot has
+rather than the first, which can still be mid-transition from the previous cut. The frame budget
+then buys *reach* instead: the same ~14 a side now covers more shots, which is what a 5-minute
+window needs.
+
+**The speech and on-screen text of the window**, capped at `CHECK_SAID_CHARS` (2400) — and when
+the window doesn't fit, the lines **closest to the moment** are kept, not however far a cut from
+the window's start happens to reach (`_said`). A Q&A answer lives in the transcript of the
+segment as much as in its pixels, and a ±5 minute window of a fast-cut news bulletin can hold far
+more text than the budget: a real one around a Colombia flower-parade frame ran to 11.5k
+characters spanning a dozen unrelated stories, and the single line naming the answer ("...tại
+Medellin.") sat at offset 5580 — past a from-the-start cutoff, so the model never saw it and
+answered "unknown" to "which city" however right the frame and the query were.
 
 ## Caching — the point of the design
 

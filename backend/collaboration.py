@@ -15,13 +15,15 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from . import video_ids
+
 
 MAX_ARCHIVE_BYTES = 1024 * 1024
 MAX_EXPANDED_BYTES = 2 * 1024 * 1024
 MAX_QUERY_BYTES = 64 * 1024
 MAX_QUERY_FILES = 200
 QUERY_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*-(kis|qa|trake)\.txt$")
-VIDEO_ID = re.compile(r"^[A-Z]\d{2}[_-]V\d{3}$")
+VIDEO_ID = video_ids.VIDEO_ID
 _MISSING = object()
 
 

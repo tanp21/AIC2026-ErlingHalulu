@@ -1,4 +1,11 @@
-"""Build the Polars/Parquet object store from detector samples and FAISS keyframes."""
+"""Build the Polars/Parquet object store from detector samples and FAISS keyframes.
+
+Only keyframes of a profile's videos can be matched to detector samples, and only the groups
+in ``SEARCH_PREFIXES`` can be matched at all -- the 2025 ``K`` *catalogue* rows are in the
+base index without any detector source. Every sample still lands in the playback partition of
+its video, whether or not it is one of them, which is what lets a video be looked at before it
+is searchable.
+"""
 from __future__ import annotations
 
 import argparse
@@ -23,6 +30,11 @@ from backend import frame_maps
 
 ROOT = Path(__file__).resolve().parents[2]
 MAX_DELTA = 0.25
+#: Groups whose keyframes can be matched to a detector source. N was playback-only while no
+#: FAISS profile carried its videos; the extended profiles (`extend_flat_profile`) do now, and
+#: the builder follows the profile, not a list: a group in a profile but not here would index
+#: its frames for playback and silently never match them.
+SEARCH_PREFIXES = ("L", "M", "S", "N")
 SOURCE_COLUMNS = ["video_id", "frame_idx", "time", "labels", "scores", "boxes"]
 PLAYBACK_SCHEMA = pa.schema([
     ("video_id", pa.string()), ("frame_idx", pa.int64()), ("time", pa.float64()),
@@ -42,7 +54,7 @@ DETECTION_SCHEMA = pa.schema([
 ])
 
 
-def _profile_frames(profiles_dir, maps_dir):
+def _profile_frames(profiles_dir, maps_dir, prefixes=SEARCH_PREFIXES):
     manifest = json.loads((profiles_dir / "manifest.json").read_text())
     names = sorted(manifest["profiles"])
     if len(names) > 64:
@@ -59,7 +71,7 @@ def _profile_frames(profiles_dir, maps_dir):
         frame_indexes = np.load(directory / "id_frame.npy", mmap_mode="r")
         for video_idx, frame_idx in zip(video_indexes, frame_indexes):
             video_id, frame_idx = videos[int(video_idx)], int(frame_idx)
-            if not video_id.startswith(("L", "M", "S")):
+            if not video_id.startswith(prefixes):
                 continue
             key = (video_id, frame_idx)
             frame = frames.get(key)
@@ -204,12 +216,12 @@ def _write_search(stage, frames, best, labels, masks, stats):
     return {name: {"mask": mask, "keyframes": profile_counts[name]} for name, mask in masks.items()}
 
 
-def build(sources, profiles_dir, maps_dir, output_dir):
+def build(sources, profiles_dir, maps_dir, output_dir, prefixes=SEARCH_PREFIXES):
     output_dir.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=".objects-", dir=output_dir))
     try:
         (stage / "labels").mkdir()
-        frames, targets, maps, masks = _profile_frames(profiles_dir, maps_dir)
+        frames, targets, maps, masks = _profile_frames(profiles_dir, maps_dir, prefixes)
         best, labels, stats = _read_sources(sources, stage, targets, maps, maps_dir)
         profiles = _write_search(stage, frames, best, labels, masks, stats)
         (stage / "manifest.json").write_text(json.dumps({
@@ -237,6 +249,9 @@ def main(argv=None):
     parser.add_argument("--profiles-dir", type=Path, default=ROOT / "indexes" / "profiles")
     parser.add_argument("--maps-dir", type=Path, default=ROOT / "indexes" / "frame_maps")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "indexes" / "objects")
+    parser.add_argument("--search-prefixes", default=",".join(SEARCH_PREFIXES),
+                        help="comma-separated video groups whose keyframes may be matched; "
+                             "every other group stays playback-only")
     args = parser.parse_args(argv)
     sources = []
     for entry in args.source:
@@ -246,8 +261,11 @@ def main(argv=None):
         sources.append((prefix, Path(value)))
     if not {"L", "M", "S"}.issubset({prefix for prefix, _ in sources}):
         parser.error("L, M and S sources are required for keyframe search")
+    prefixes = tuple(p.strip() for p in args.search_prefixes.split(",") if p.strip())
+    if not prefixes:
+        parser.error("--search-prefixes must name at least one group")
     started = time.monotonic()
-    print(json.dumps({**build(sources, args.profiles_dir, args.maps_dir, args.output_dir),
+    print(json.dumps({**build(sources, args.profiles_dir, args.maps_dir, args.output_dir, prefixes),
                       "seconds": round(time.monotonic() - started, 1)}, indent=2), flush=True)
 
 

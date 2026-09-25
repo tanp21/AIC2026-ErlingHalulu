@@ -52,8 +52,8 @@ function mockAuthenticatedFetch(...responses: Array<Response | Promise<Response>
       return Promise.resolve(jsonResponse({ login: "owner@example.com", is_admin: true }));
     }
     if (String(input) === "/profiles") return Promise.resolve(jsonResponse([
-      { name: "l2025", label: "L · embeddings 2025", is_default: true, count: 293239, video_count: 873, indexes: ["flat"] },
-      { name: "l2026", label: "L · embeddings 2026", is_default: false, count: 289875, video_count: 873, indexes: ["flat"] },
+      { name: "l2026-v2", label: "L+M+S · embeddings 2026", is_default: false, count: 590325, video_count: 1189, indexes: ["flat"] },
+      { name: "l2026-v3", label: "L+M+S+N · embeddings 2026", is_default: true, count: 678778, video_count: 1487, indexes: ["flat"] },
     ]));
     if (String(input) === "/api/collab/rounds") return Promise.resolve(jsonResponse([]));
     // Background polls must not eat the queue: whether one lands before the test's own first
@@ -131,16 +131,20 @@ describe("competition search workspace", () => {
     expect(fetchMock.mock.calls.some(([input]) => ["/api/dres/prepare", "/api/dres/submit"].includes(String(input)))).toBe(false);
   });
 
-  it("sends the fixed competition profile with searches", async () => {
+  it("searches the profile the compute host's manifest names", async () => {
     const fetchMock = mockAuthenticatedFetch(jsonResponse(response([])));
     render(<App />);
+    // The SPA asks /profiles at load and adopts the default the manifest names, so a rebuilt
+    // index is searched without a frontend change; the switcher stays hidden either way.
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/profiles")).toBe(true));
+    await act(async () => {});
 
     fireEvent.change(screen.getByLabelText("Visual query (English)"), { target: { value: "red car" } });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/search")).toBe(true));
     const call = fetchMock.mock.calls.find(([input]) => String(input) === "/search");
-    expect(JSON.parse(call?.[1]?.body as string).profile).toBe("l2026");
+    expect(JSON.parse(call?.[1]?.body as string).profile).toBe("l2026-v3");
     expect(screen.queryByLabelText("Embedding profile")).not.toBeInTheDocument();
   });
 
@@ -1441,5 +1445,73 @@ describe("checking a moment with AI", () => {
     });
     expect(JSON.parse(String(posted[1]?.body))).toMatchObject({ ocr_text: "Nà Ní" });
     expect(JSON.parse(String(posted[1]?.body)).visual_text).toBeUndefined();
+  });
+
+  it("sends the typed Q&A question so the check answers what was actually asked, not the search text", async () => {
+    // The search box holds a scene description ("two people with a phone"), never the question
+    // itself ("which city?") -- without this field the checker had to guess `asked` from that
+    // description (`CheckQuery.asked`'s fallback), which is not a question at all.
+    const fetchMock = mockCheckFetch(true);
+    await searchAndSelect();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "DRES task type" }), { target: { value: "qa" } });
+    fireEvent.change(await screen.findByLabelText("Q&A question for Check by AI"),
+      { target: { value: "Tên thành phố của lễ hội này là gì?" } });
+
+    fireEvent.click(await screen.findByRole("button", { name: "✓ Check by AI" }));
+
+    const posted = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input]) => String(input) === "/api/check");
+      expect(call).toBeDefined();
+      return call!;
+    });
+    expect(JSON.parse(String(posted[1]?.body))).toMatchObject({
+      question: "Tên thành phố của lễ hội này là gì?",
+    });
+  });
+
+  it("checks against every channel the person wrote, not only the tab that was active", async () => {
+    // Reported live: the composer keeps a visual, a transcript and an OCR query side by side and
+    // shows one at a time (the tabs restore each modality's own text), but a classic search reads
+    // `temporalEvents[0]` alone -- so the check judged the candidate against the audio query only
+    // and showed "3/3 details", all of them from it, "while I also have a query by visual".
+    const fetchMock = mockCheckFetch(true);
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Visual query (English)"),
+      { target: { value: "a flower parade" } });
+    fireEvent.click(screen.getByRole("button", { name: "Transcript for event E1" }));
+    fireEvent.change(screen.getByLabelText("Transcript query (Vietnamese)"),
+      { target: { value: "lễ hội hoa" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Select frame L01_V001 at 2:03" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "✓ Check by AI" }));
+
+    const posted = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input]) => String(input) === "/api/check");
+      expect(call).toBeDefined();
+      return call!;
+    });
+    expect(JSON.parse(String(posted[1]?.body))).toMatchObject({
+      visual_text: "a flower parade",      // the tab that was NOT active when Search was pressed
+      audio_text: "lễ hội hoa",
+    });
+  });
+
+  it("keeps each modality's own text when switching tabs", async () => {
+    // The tabs restore from visualQuery/audioQuery/ocrQuery, so what is typed under one must be
+    // readable under another without retyping -- the premise the check above depends on.
+    mockCheckFetch(true);
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Visual query (English)"),
+      { target: { value: "a flower parade" } });
+    fireEvent.click(screen.getByRole("button", { name: "Transcript for event E1" }));
+    expect(screen.getByLabelText("Transcript query (Vietnamese)")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Transcript query (Vietnamese)"),
+      { target: { value: "lễ hội hoa" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Visual text for event E1" }));
+
+    expect(screen.getByLabelText("Visual query (English)")).toHaveValue("a flower parade");
   });
 });

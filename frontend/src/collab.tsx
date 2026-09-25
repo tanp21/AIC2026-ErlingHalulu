@@ -590,7 +590,8 @@ function FramePreview({ videoId, frameId, label, rowIndex, onOpen }: {
     const timer = window.setTimeout(() => setShown({ videoId, frameId }), 400);
     return () => window.clearTimeout(timer);
   }, [videoId, frameId]);
-  const valid = /^[A-Z]\d{2}[_-]V\d{3}$/.test(shown.videoId)
+  // Three group digits too: the N traffic-camera groups are N001..N100 (backend/video_ids.py).
+  const valid = /^[A-Z]\d{2,3}[_-]V\d{3}$/.test(shown.videoId)
     && Number.isInteger(shown.frameId) && (shown.frameId ?? -1) >= 0;
   const url = valid ? `/thumb/${shown.videoId}/${shown.frameId}?w=160` : null;
   const caption = label ? `${label} · ${shown.frameId ?? "—"}` : `Frame ${shown.frameId ?? "—"}`;

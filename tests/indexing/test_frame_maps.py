@@ -58,6 +58,21 @@ class FrameMapTests(unittest.TestCase):
         self.assertEqual(mapping.time_base_den, 12800)
         np.testing.assert_array_equal(mapping.pts, [512, 1024])
 
+    def test_repairs_a_decoded_timeline_that_repeats_or_steps_backwards(self):
+        mapping = build_frame_maps.parse_probe({
+            "streams": [{"time_base": "1/12800"}],
+            "frames": [
+                {"best_effort_timestamp": "512"},
+                {"best_effort_timestamp": "1024"},
+                {"best_effort_timestamp": "900"},
+                {"best_effort_timestamp": "900"},
+            ],
+        })
+
+        # Sorted, then a repeat of the frame before it bumped one tick: one entry per frame,
+        # still strictly increasing, and every frame that did not need it keeps its own time.
+        np.testing.assert_array_equal(mapping.pts, [512, 900, 901, 1024])
+
     def test_builds_times_aligned_with_index_rows(self):
         maps = {
             "A": frame_maps.FrameMap(np.array([10, 20]), 1, 100),

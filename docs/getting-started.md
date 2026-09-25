@@ -50,6 +50,52 @@ uv run python -m scripts.indexing.build_flat_profile \
 
 The generated `indexes/profiles/manifest.json` activates Round 1 mode. Only L videos and the exact Flat index are exposed; choose the 2025 or 2026 embedding profile in the search sidebar. Removing or moving the local manifest restores the legacy full-dataset index on the next application restart.
 
+### Adding a group to a built profile
+
+`l2026-v2`/`naflex-l2026-v2` are the L+M+S profiles; `l2026-v3`/`naflex-l2026-v3` are the same
+profiles with the N traffic-camera groups appended. A group that arrives later goes in with
+`extend_flat_profile` rather than a rebuild — the base profile's vectors and ids are carried
+over unchanged, so every hit the old profile returned comes back at the same index, and the
+switch is one manifest edit (`--base` is left on disk, so going back is another).
+
+```bash
+uv run python -m scripts.indexing.extend_flat_profile \
+  --base l2026-v2 --name l2026-v3 --label 'L+M+S+N · embeddings 2026' \
+  --source data/2026/embeddings_n2026/pe-core --frame-from pts-ms --default
+```
+
+`--frame-from pts-ms` is what the N groups need. Their videos are VFR and the organisers'
+map-keyframes say their `frame_idx` is only a relative label there, scoring KIS/QA on
+`pts_time`; so each keyframe is placed at the frame of *our* copy whose PTS carries its
+`pts_ms` (the column `scripts.embedding.attach_pts_ms` joins in from the organisers' own
+`map-keyframes` CSV). Indexing the label instead would put 78 of the 298 videos seconds away
+from the moment the query asked for — up to 69 s on `N029_V002` — while the video and the
+keyframe image would still look plausible. The profile's `info.json` records the worst
+placement error it saw, which is bounded by the frame gaps in our copy (0.05 s for 98.9% of
+the 88,453 N keyframes, 1.0 s at worst).
+
+If the videos need frame maps first, `scripts.indexing.build_batch2_frame_maps --groups N031`
+builds them from `data/<year>/videos/<group>/` (it reads both `.mp4` and the N groups' `.mov`).
+
+### The N keyframe thumbnails
+
+`/thumb` cannot cut a frame out of an N video at all: those files are VFR with a container whose
+sample table disagrees with its packets, so a seek decodes nothing and a `pts` match finds
+nothing. Their thumbnails come from the organisers' own keyframe archives instead — which are
+also what the N embeddings were taken from — resized offline into a store keyed by the
+`(video_id, frame_idx)` a hit reports:
+
+```bash
+uv run python -m scripts.indexing.build_keyframe_thumbnails \
+  --zips /path/to/Keyframes_N*.zip --workers 8
+```
+
+It writes `data/2026/keyframe_thumbs/{160,320,640,1280}/<group>/<video_id>/<frame>.jpg` (~17 GB
+for the 88k N keyframes; 1280 is what `/frame` and the agent's judging use). `backend.thumb`
+consults it before touching a video, so both hosts that serve media to the team need the
+directory — and a frame with no stored image falls back to an index-based extraction, which
+works but decodes the video from the start (seconds, not milliseconds).
+
 ## 2. Prepare dependencies and models
 
 ```bash

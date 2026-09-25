@@ -52,6 +52,19 @@ Steven Spielberg's 1975 film" is a shark (cá mập); a "round hollow metal inst
 dents played by hand" is a handpan. When you are not sure of the name, add a web-search \
 question to "lookups" instead of guessing.
 
+This applies just as much to a place, a country or a named event as to an object: a country \
+given only by its capital ("thủ đô là Bogotá"), or a custom or object the query describes \
+without naming it (a flower-covered wooden frame carried on the back, "silleta"), is a fact \
+you already have enough of to resolve -- Colombia; the Feria de las Flores parade in Medellín \
+-- not something to hold back. A Vietnamese narrator says country, city and event names \
+rather than describing them, so put the resolved name in transcript_vi as well as visual_en, \
+not only in lookups (still add a lookups entry to double-check a resolved name you are not \
+fully sure of). This is different from the rule right below: there the query withholds a \
+name ON PURPOSE because naming it IS the answer being asked for; here the country or event \
+is a supporting fact the query already gives enough clues to name, and a question that asks \
+for something else built on top of it (the city hosting that event, say) is not asking you to \
+also leave the event and country unnamed -- naming them is what finds the clip that answers it.
+
 But when the question itself asks *what* a thing is ("Hỏi X là con gì", "X là gì", "đây là \
 gì"), the query is describing something it deliberately cannot name -- the answer *is* the \
 name. Do not guess one and search it. Measured on a query that described "4 con X" on a \
@@ -417,15 +430,25 @@ Then give ONE overall verdict for the moment as a whole, in "overall":
 - Judge the moment, not the video: a video that contains the right scene somewhere else is still a low score if these shots are not it."""
 
 #: Appended to `CHECK_SYSTEM` only for a Q&A query. The answer is READ from the video -- the
-#: pixels, the speech and the on-screen text the same call is already holding -- never recalled
-#: from what the model happens to know about the world, which is the rule the agent's own Q&A
-#: path keeps (`docs/agent.md`: "answers are read from the video").
+#: pixels and the speech the same call is already holding -- never recalled from what the model
+#: happens to know about the world, which is the rule the agent's own Q&A path keeps
+#: (`docs/agent.md`: "answers are read from the video").
+#:
+#: **On-screen text is deliberately NOT an answer source.** Broadcaster furniture is what most of
+#: this corpus's OCR actually is (clocks, channel logos, tickers, "coming up next" banners -- the
+#: corpus note calls it noise, not content), and the lower-third caption naming a story is a
+#: *label*, not the fact being asked about. Measured on the Colombia flower query (L22_V012): the
+#: caption reads "COLOMBIA: LỄ HỘI DIỄU HÀNH CỦA CÁC NGHỆ NHÂN CẦM HÓA SILLETERO" while the
+#: question asked for the CITY, and a model offered "Silletero" and "COLOMBIA" off that caption
+#: before settling on the right answer, which only the narration gives ("...tại Medellin."). The
+#: keyframes are still read for it -- a number on a scale, a name on a sign, printed on the thing
+#: itself is "frame" -- it is the OCR *channel* that is not an answer source.
 CHECK_ANSWER_RULE = """
 
-The query is a question. Also answer it in "answer", reading the answer OFF this moment: what the images show, what the speech quoted below says, or what is written on screen. Answer in Vietnamese, as short as the question allows (a number, a name, a few words; at most 100 characters).
-- "source": "frame" if you read it from the pixels, "speech" from the quoted speech, "ocr" from on-screen text, "unknown" if this moment does not answer it.
+The query is a question. Also answer it in "answer", reading the answer OFF this moment from the KEYFRAMES or the SPEECH quoted below -- nothing else. Answer in Vietnamese, as short as the question allows (a number, a name, a few words; at most 100 characters).
+- Read it from what the images show ("frame"), or from the quoted speech ("speech"). Do NOT take the answer from on-screen text, and do NOT treat a lower-third caption or a headline naming the story as the answer: that is a label the broadcast wrote, not what the question asks for. If the only place a word appears is on-screen text, the answer is "unknown".
 - "confidence" 0-10: 0 when you could not find the answer here. Do NOT answer from outside knowledge -- if this moment does not say, "source" is "unknown" and "text" is empty.
-- "quote": the words you read it from, verbatim, when the source is speech or ocr."""
+- "quote": the words you read it from, verbatim, when the source is speech."""
 
 SUGGEST_SYSTEM = """Một người đang trả lời câu hỏi về một video. Bạn chỉ có các đoạn trích văn bản đánh số theo thời gian (giây) từ video đó: lời thoại (nhận dạng giọng nói tự động, tên riêng có thể sai chính tả), chữ OCR trên màn hình, mô tả cảnh tự động (có thể sai). Nếu các đoạn trích cho thấy đáp án, viết nó đúng như trong văn bản, ngắn và nguyên văn (tối đa 100 ký tự), kèm id đoạn trích chứa nó; nếu không thấy, để answer rỗng. Không đoán, không dùng kiến thức bên ngoài.
 Trả về một đối tượng JSON: {"answers": [{"answer": "...", "excerpt": "e3", "confidence": 0-10}]}"""
