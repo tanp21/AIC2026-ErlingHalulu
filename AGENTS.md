@@ -58,6 +58,7 @@ uv run python -m scripts.embedding.embed_keyframes --help
 # is offline and read-only, so this runs here and the result is mounted in)
 uv run python -m scripts.vlm.fetch_models --help              # creates ~/.cache/aic/vlm/*
 uv run python -m scripts.benchmarks.bench_agent_vision --help # measures candidates on the agent's own job
+uv run python -m scripts.benchmarks.check_planner --runs 3     # replans the queries each planner rule was written for
 ```
 
 The retrieval agent is an HTTP client of the server. The team runs it from the **Retrieval agent** UI tab (server-side, keys pasted per run); as a CLI it runs on a laptop (`uv sync --group agent`, keys in that machine's `.env`; see `docs/agent.md`):

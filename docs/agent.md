@@ -55,6 +55,12 @@ keyframe. **Submit to DRES** sends exactly what is on screen through the app's D
 (`submitAgentAnswer` in `App.tsx`: the DRES task is switched to the run's kind first); a Q&A
 submits the answer in the box above, pre-filled with the agent's.
 
+**When a run misses, steer it.** Under the result, **Edit query and run again** puts the query
+back in the form to reword the part that matters. **Think harder when planning** plans with
+DeepSeek's thinking on (`plan_thinking`, per run; on by default in deep mode, `--plan-thinking`
+on the CLI): measured on the planner regressions, a plan then takes 5-50 s (usually 15-30 s)
+instead of 2-3 s.
+
 The live view shows the plan, the strategies, each web lookup as it lands and each candidate as
 Qwen judges it; **Stop** ends a run early with its current ranking. The tab no longer starts a
 run with a person as the judge; the API still accepts `judge: "human"` and such a run still opens
@@ -654,7 +660,7 @@ at your own app so runs use your local orchestrator; see
 | `AIC_AGENT_TRUSTED_USER` | unset | Direct-to-uvicorn development only: sent as `X-AIC-User` |
 | `DEEPSEEK_MODEL` / `GEMINI_MODEL` | `deepseek-flash` / `gemini-3.8-flash` | |
 | `DEEPSEEK_THINKING` | `enabled` | Thinking mode for deep-mode loop turns (fast mode never thinks) |
-| `DEEPSEEK_PLAN_THINKING` | `disabled` | Planning takes 2-3 s without thinking and 12-28 s with it, and plan quality was comparable |
+| `DEEPSEEK_PLAN_THINKING` | `disabled` | Planning takes 2-3 s without thinking and 12-28 s with it, and plan quality was comparable. Deep mode and a run with **Think harder when planning** think anyway |
 | `GEMINI_THINKING_LEVEL` | `low` | |
 | `AIC_AGENT_SEARCH_API` | `auto` | `batch` requires `/agent/search`; `compat` always uses the public routes |
 | `AIC_AGENT_SPOKEN_NUMBERS` | `0` | `1` spells digits out in transcript queries (raw-ASR index only) |
@@ -751,6 +757,17 @@ direction, not exact margin.
 
 - Prompts: all in `agent/prompts.py`. Iterate with `python -m agent plan`, which is
   cheap and fast.
+- **The planner prompt states rules, not cases.** It once carried the stories of the queries
+  its rules came from ("hai mẹ con", the fish on a scale, "4 con X", the tug-of-war slide),
+  and the planner copied their words into other plans -- a lecture query searched the speech
+  for the very topic words an example had used. Those stories now live here, and the prompt
+  says an example only illustrates a kind of case. `python -m scripts.benchmarks.check_planner
+  --runs 3` replans each of those queries and checks the property its rule protects (no
+  relationship words in a caption, the scale's display kept, the unknown "X" never named, one
+  slide planned as one lecture scene, no phrase copied from the prompt, ...). Run it after any
+  prompt edit: the first general rewrite lost "hai mẹ con" 3 times out of 3 until the rule
+  listed the words a caption must not contain. 18/18 with the current prompt; 11/12 with
+  thinking on (the miss was the check's own stale word list, since fixed).
 - Budgets: `--mode`, `--time-budget` (default 20 s fast, 300 s deep), `--max-steps`
   (deep), and `AgentOptions` / `FAST_DEFAULTS` in `agent/orchestrator.py`
   (`verify_top`, `verify_chunk`, `accept_score`, `early_stop_score`, `trake_refine`).

@@ -70,7 +70,7 @@ describe("agent panel", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(fetchMock.mock.calls[0][0]).toBe("/api/agent/runs");
     expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({
-      text: "a red boat", kind: "kis", mode: "fast", judge: "model",
+      text: "a red boat", kind: "kis", mode: "fast", judge: "model", plan_thinking: false,
       deepseek_api_key: "dsk", gemini_api_key: "gmk",
     });
   });
@@ -90,7 +90,39 @@ describe("agent panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)).mode).toBe("deep");
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body.mode).toBe("deep");
+    expect(body.plan_thinking).toBe(true); // deep mode thinks while planning by default
+  });
+
+  it("can ask a fast run to think harder while planning", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse(running, { status: 202 }));
+    render(<AgentPanel />);
+    fillForm();
+    fireEvent.click(screen.getByLabelText("Think harder when planning"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect([body.mode, body.plan_thinking]).toEqual(["fast", true]);
+  });
+
+  it("puts a finished run's query back in the form to reword and run again", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ ...done, kind: "qa", query: "câu hỏi cũ" }, { status: 202 }))
+      .mockResolvedValue(jsonResponse({ video_id: "L01_V001", frame_idx: 10, frames: [] }));
+    render(<AgentPanel />);
+    fireEvent.change(screen.getByLabelText("Agent query"), { target: { value: "câu hỏi cũ" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
+    fireEvent.change(await screen.findByLabelText("Agent query"), { target: { value: "" } });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit query and run again" }));
+
+    expect(screen.getByLabelText("Agent query")).toHaveValue("câu hỏi cũ");
+    expect(screen.getByLabelText("Query kind")).toHaveValue("qa");
+    expect(screen.getByLabelText("Agent query")).toHaveFocus();
   });
 
   it("starts with no keys at all, so the owner does not have to type them", async () => {

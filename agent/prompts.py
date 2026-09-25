@@ -47,20 +47,19 @@ VBS-style video retrieval competition.
 
 {CHANNELS}
 
-Resolve indirect descriptions into concrete names before searching: "the sea animal from \
-Steven Spielberg's 1975 film" is a shark (cá mập); a "round hollow metal instrument with \
-dents played by hand" is a handpan. When you are not sure of the name, add a web-search \
-question to "lookups" instead of guessing.
+Resolve indirect descriptions into concrete names before searching (a riddle-like \
+description of a well-known animal, object or place becomes its name). When you are not \
+sure of the name, add a web-search question to "lookups" instead of guessing.
 
-But when the question itself asks *what* a thing is ("Hỏi X là con gì", "X là gì", "đây là \
-gì"), the query is describing something it deliberately cannot name -- the answer *is* the \
-name. Do not guess one and search it. Measured on a query that described "4 con X" on a \
-white plate beside a vase of purple ginger flowers: the planner's guess was "cua" (crab), \
-the video says "nghêu" (clam) fifteen times, and the guess does not appear anywhere in it. \
-A caption naming no animal at all -- "a girl in a white apron holds a white plate of small \
-shellfish" -- returned that video 2nd of 200. So describe the unknown thing by what is \
-visible: size, colour, count, what is done with it, and what sits beside it. Keep the name \
-out of visual_en and out of transcript_vi, and put the question in "lookups".
+But when the question itself asks WHAT a thing is ("X là gì", "là con gì"), the answer is \
+the name, so never guess one and search it: a wrong guess finds nothing, while the visible \
+description finds the clip. Describe the unknown thing only by what a camera shows (size, \
+colour, count, what is done with it, what is next to it), keep any name out of visual_en \
+and transcript_vi, and put the question in "lookups".
+
+Examples in these rules only illustrate a KIND of case. Never reuse their words, objects \
+or phrases in a plan: every caption, phrase and question comes from the query in front of \
+you.
 
 Reply with one JSON object and nothing else:
 {{
@@ -70,7 +69,7 @@ Reply with one JSON object and nothing else:
       "visual_en": ["English caption", "paraphrase 1", "paraphrase 2", "paraphrase 3"]}}
   ],
   "target_scene": 0,
-  "readings_en": ["a different plausible reading of the ambiguous part"],
+  "readings_en": ["a different plausible picture of the ambiguous part"],
   "events_en": [],
   "transcript_vi": ["spoken phrase"],
   "caption_en": ["English sentence as a shot caption would word it"],
@@ -83,74 +82,60 @@ Reply with one JSON object and nothing else:
 
 Rules:
 - scenes: one entry per visually distinct scene, in time order (usually 1-3). Things the \
-query lists as being on ONE slide, screen or frame ("Trên slide bao gồm: ...", "trong khung \
-hình có ...") are ONE scene: one caption naming all of them together, never separate scenes \
-and never a temporal search. A long caption naming several pictures blurs each of them for \
-CLIP, so also put each listed item alone in readings_en (up to 2, "a slide showing <item>"): \
-the moment that matches both searches is the one that holds both items.
-- Lectures (a recorded lesson with slides, "bài giảng", "slide"): the caption says it is a \
-lecture presentation slide and names its layout ("a lecture presentation slide with a title \
-and two illustrations: ..."), so the search stays among lecture videos. transcript_vi holds \
-1-2 phrases for the SUBJECT the pictures most likely illustrate, worked out from this query's \
-own pictures -- never words copied from these instructions; leave it empty if the pictures \
-do not point at a subject.
+query places together on ONE slide, screen or frame are ONE scene whose caption names all \
+of them -- never separate scenes, never a temporal search. When that caption has to name \
+several separate pictures, also put each picture alone in readings_en (up to 2): CLIP \
+blurs a long list, and the moment matching every single-picture search is the one holding \
+them all.
+- Say what KIND of footage it is when the query does (a lecture slide, a news studio, a \
+cooking show, a stage performance): it keeps the search inside that kind of video.
 - visual_en: the caption first, then 3-4 paraphrases of THAT caption which keep every \
 detail (same counts, colours, clothing, quoted text, names) and change only word order, \
-synonyms or grammar. Never shorten to a subset of the details and never add details: \
-shortened "aspect" captions hurt retrieval in benchmarks, faithful paraphrases helped.
-- Write only what a camera shows, and never more than the query states. A relationship \
-or role no picture can show ("hai mẹ con", "hai vợ chồng", "người con", "đồng nghiệp") \
-becomes the bare count and nothing else -- "two people" -- unless the query itself gives \
-the gender, age or clothing, in which case write exactly that much. Guessing is what \
-loses clips: on one real query "mother and child" sent CLIP after an adult with a small \
-child and "a young man and an older woman" invented a gender, both ranking the right \
-video 66th, while the neutral "two people holding a phone" put it first. The same holds \
-for age: write "child" only where the query says so. A guess about who the people are \
-belongs in readings_en, never in visual_en. This bans inventing what the query leaves \
-open -- it never means dropping a detail the query states or plainly implies: a question \
-about the number shown on a scale implies a scale with a readable display, so the caption \
-says so; writing only "a fish on a scale" throws away the detail that finds the clip.
-- Never settle an interaction the query leaves open. A phone in someone's hand is not a \
-video call, a microphone is not an interview, two people at a table are not eating, \
-unless the query says so. If the query can be pictured in several ways, keep the caption \
-to what is certain and put the other pictures in "readings_en".
-- readings_en: kis and qa only, 0-2 entries. Each is ONE English caption of whichever \
-scene the Vietnamese can picture in more than one way, under a different reading of it: \
-"hai người cầm điện thoại trò chuyện" is two people walking side by side, one holding a \
-phone up, and it is also two people sitting over a phone screen. A reading changes only \
-HOW the stated details look; it never adds a person, object or action the query does not \
-mention (no microphone for an interview, no video call for a phone), and it never moves a \
-detail into another scene. Two readings must differ in something a camera would show \
-differently -- indoors or outdoors, sitting or walking, close-up or wide -- not in \
-wording: "two women sitting at a table with a phone" and "two women sitting over a phone" \
-are the same picture twice, while "two women walking outdoors, one holding a phone up" is \
-a real second reading. One entry may instead be a cautious version that keeps only \
-what is certain and drops the rest. Each is searched on its own and must describe ONE \nframe, like any caption -- never a sentence chaining scenes together ("... then ... \nthen ..."), which matches no single keyframe. Never repeat a visual_en wording here; \nleave the list empty when nothing is ambiguous.
-- target_scene: index of the scene whose frame should be submitted — the scene the query asks \
-to find exactly, otherwise the first scene.
+synonyms or grammar. Never shorten to a subset of the details and never add details.
+- Write only what a camera shows, and never more than the query states. A camera cannot \
+show how people are related, so a Vietnamese relationship or role word (mẹ con, cha con, \
+vợ chồng, anh em, bà cháu, người con, đồng nghiệp, ...) is translated as the bare count -- \
+"two people", "the person" -- and the words mother, father, son, daughter, child, husband, \
+wife, sibling, parent, family, colleague never appear in visual_en, not even beside the \
+count. Gender, age and clothing only as far as the query itself states them. A guess about \
+who the people are may go in readings_en, never in visual_en. This bans inventing, not \
+dropping: keep every detail the query states or plainly implies (a question about a number \
+shown on a device implies a readable display, so the caption says so).
+- Never settle an interaction the query leaves open (holding a phone is not a call; a \
+microphone is not an interview; people at a table are not eating) unless the query says \
+so. If the query can be pictured in several ways, keep the caption to what is certain and \
+put the other pictures in readings_en.
+- readings_en: kis and qa only, 0-2 entries, each ONE English caption of ONE frame, \
+searched on its own. Use them for (a) another plausible picture of an ambiguous part -- it \
+changes only HOW stated details look (sitting or walking, indoors or outdoors, close-up or \
+wide), adds no person, object or action, and differs from the caption in something a \
+camera would show, not in wording; (b) a cautious version that keeps only what is certain; \
+or (c) each picture of a one-frame list alone (see scenes). Never chain scenes ("... then \
+..."), never repeat a visual_en wording; leave it empty when none applies.
+- target_scene: index of the scene whose frame should be submitted — the scene the query \
+asks to find exactly, otherwise the first scene.
 - events_en: trake only — exactly one English caption per listed event, in order, each \
 describing the frame at the START of that event. Empty for kis/qa.
-- transcript_vi: news, reports, cooking shows, interviews and lectures are narrated, so give \
-1-3 phrases the narrator would likely say about the topic (e.g. "sạt lở đất", "đèo", \
-"công trình thủy lợi", dish or ingredient names), rarest and most specific first. Leave it \
-empty only when the clip is plausibly unnarrated.
-- caption_en: 1-2 entries for the target scene, phrased as a caption sentence and \
-carrying the details CLIP drops (exact counts, what is written on screen, the order of \
-actions inside the shot). Leave empty only when the scene has no such detail.
+- transcript_vi: news, reports, cooking shows, interviews and lectures are narrated, so \
+give 1-3 phrases the narrator would likely say about THIS clip's topic (place and person \
+names, dish and ingredient names, the subject a lecture's pictures illustrate), rarest and \
+most specific first. Leave it empty when the clip is plausibly unnarrated or the query \
+gives no topic to guess from.
+- caption_en: 1-2 entries for the target scene, phrased as a caption sentence and carrying \
+the details CLIP drops (exact counts, what is written on screen, the order of actions \
+inside the shot). Leave empty only when the scene has no such detail.
 - ocr: only distinctive strings (names, titles, slogans, numbers with context); never \
-generic words or units such as "kg" or "km".
-- topic: what the clip is about, one of cooking, festival (lễ hội, phong tục, lễ rước, \
-tết, múa lân), place (a landmark, pagoda, bridge, pass, village, beauty spot), event (a \
-news event, ceremony, disaster, competition), person (a named or describable public \
-figure, artisan, athlete), sport, lecture, nature, other.
+generic words or units.
+- topic: what the clip is about, one of cooking, festival (festival, custom, ritual, \
+procession, lion dance), place (landmark, pagoda, bridge, pass, village, beauty spot), \
+event (news event, ceremony, disaster, competition), person (a named or describable public \
+figure), sport, lecture, nature, other.
 - lookups: 0-3 Google-Search questions (in Vietnamese) whose answers make the clip \
 findable or answer the question. Search is cheap and runs beside the searches, so ask \
 whenever the query points at something the web knows and the corpus would NAME: which \
-festival/custom matches the description and where it is held; which landmark or place \
-it is and its province; which news event, ceremony or competition; who a described \
-person is. For qa whose answer is world knowledge or a fact about such a festival, \
-place or event (its date, location, founder, meaning), ask the question itself. Leave \
-it empty only for a generic scene the web cannot identify ("a man walking a dog").
+festival, place, event or person it is, and where. For qa whose answer is world knowledge \
+or a fact about such a thing, ask the question itself. Leave it empty only for a generic \
+scene the web cannot identify.
 - question_vi and answer_source: qa only. answer_source is one of on_screen_text, \
 visual_count, visual_attribute, speech, world_knowledge."""
 

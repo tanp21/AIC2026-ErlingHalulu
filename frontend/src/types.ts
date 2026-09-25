@@ -404,6 +404,8 @@ export interface AgentRunRequest {
   kind: QueryKind;
   mode: AgentMode;
   judge?: AgentJudge;
+  /** Plan with DeepSeek's thinking on; omitted, the deployment decides (deep mode thinks). */
+  plan_thinking?: boolean;
   deepseek_api_key: string;
   gemini_api_key: string;
   max_steps?: number;

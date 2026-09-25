@@ -159,6 +159,43 @@ class ExecuteRunTests(unittest.TestCase):
                 execute_run(store, run, req, INT_URL)
 
             self.assertEqual(query.call_args.args[2:], ("deep", 6, 120.0))
+            self.assertIsNone(query.call_args.kwargs["plan_thinking"])  # the deployment decides
+
+    def test_forwards_a_request_to_plan_with_thinking(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, run, _ = self.run_in(directory)
+            req = AgentRunReq(text="a red boat", plan_thinking=True, **KEYS)
+            with (
+                patch("backend.agent_runner.run_query",
+                      return_value=(fake_result(run.run_id), Mock(as_dict=lambda: {}))) as query,
+                patch.dict(os.environ, {"AIC_AGENT_OUT_DIR": directory}),
+            ):
+                execute_run(store, run, req, INT_URL)
+
+            self.assertTrue(query.call_args.kwargs["plan_thinking"])
+
+    def test_deep_mode_plans_with_thinking_unless_told_otherwise(self):
+        from agent.config import AgentSettings
+        from agent.tasks import task_from_text
+
+        settings = AgentSettings.from_env({"DEEPSEEK_API_KEY": "d", "GEMINI_API_KEY": "g",
+                                           "AIC_AGENT_VISION": "gemini"}, dotenv=Path("/nonexistent"))
+        task = task_from_text("q", "a red boat", "kis")
+        seen = []
+
+        class FakeAgent:
+            def __init__(self, deepseek, gemini, search, options, **_):
+                seen.append(options.plan_thinking)
+
+            def run(self, task, **_):
+                return Mock(to_dict=lambda: {})
+
+        with patch("backend.agent_runner.Agent", FakeAgent), \
+                patch("backend.agent_runner.SearchClient"):
+            for mode, asked in (("deep", None), ("fast", None), ("fast", True), ("deep", False)):
+                agent_runner.run_query(task, settings, mode, 6, None, plan_thinking=asked)
+
+        self.assertEqual(seen, [True, False, True, False])
 
     def test_reports_a_failing_run_instead_of_leaking_it(self):
         with tempfile.TemporaryDirectory() as directory:

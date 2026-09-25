@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import {
   AgentApiError, downloadAgentSubmission, fetchActiveAgentRun, fetchAgentRun, reviewAgentRun,
@@ -60,6 +60,9 @@ export function AgentPanel({ onSubmit }: { onSubmit?(request: AgentSubmitRequest
   const [text, setText] = useState("");
   const [kind, setKind] = useState<QueryKind>("kis");
   const [mode, setMode] = useState<AgentMode>("fast");
+  // Deep mode plans with thinking by default; a hard query that went wrong in fast mode can ask for it too.
+  const [thinking, setThinking] = useState(false);
+  const queryRef = useRef<HTMLTextAreaElement>(null);
   const [run, setRun] = useState<AgentRunResponse | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -96,7 +99,7 @@ export function AgentPanel({ onSubmit }: { onSubmit?(request: AgentSubmitRequest
     setRun(null);
     try {
       setRun(await startAgentRun({
-        text: text.trim(), kind, mode, judge: "model",
+        text: text.trim(), kind, mode, judge: "model", plan_thinking: thinking,
         deepseek_api_key: deepseekKey.trim(), gemini_api_key: geminiKey.trim(),
       }));
     } catch (err) {
@@ -144,6 +147,15 @@ export function AgentPanel({ onSubmit }: { onSubmit?(request: AgentSubmitRequest
     }
   }
 
+  /** Back to the form with this run's query, to reword what the agent should focus on. */
+  function editQuery() {
+    if (!run) return;
+    setText(run.query);
+    setKind(run.kind);
+    queryRef.current?.scrollIntoView({ block: "center" });
+    queryRef.current?.focus();
+  }
+
   function updateKey(setter: (value: string) => void, value: string) {
     setter(value);
     setRun(null);
@@ -156,7 +168,7 @@ export function AgentPanel({ onSubmit }: { onSubmit?(request: AgentSubmitRequest
     <div className={`agent-panel${humanLive || finished ? " wide" : ""}`}>
       {!humanLive && <form className="agent-form" onSubmit={submit}>
         <label className="field"><span>Query</span>
-          <textarea rows={3} maxLength={4000} aria-label="Agent query" value={text}
+          <textarea ref={queryRef} rows={3} maxLength={4000} aria-label="Agent query" value={text}
             placeholder="Vietnamese KIS/Q&A/TRAKE query. TRAKE events go on E1:, E2:, ... lines."
             onChange={(event) => setText(event.target.value)} />
         </label>
@@ -169,11 +181,20 @@ export function AgentPanel({ onSubmit }: { onSubmit?(request: AgentSubmitRequest
             </select>
           </label>
           <label className="field"><span>Mode</span>
-            <select aria-label="Agent mode" value={mode} onChange={(event) => setMode(event.target.value as AgentMode)}>
+            <select aria-label="Agent mode" value={mode} onChange={(event) => {
+              const next = event.target.value as AgentMode;
+              setMode(next);
+              setThinking(next === "deep");
+            }}>
               <option value="fast">Fast (about 1–2 min)</option>
               <option value="auto">Auto (fast, then deeper if unsure)</option>
               <option value="deep">Deep (several minutes)</option>
             </select>
+          </label>
+          <label className="agent-thinking" title="DeepSeek reasons before planning: 10-30 s more, for a query whose plan went wrong">
+            <input type="checkbox" aria-label="Think harder when planning" checked={thinking}
+              onChange={(event) => setThinking(event.target.checked)} />
+            <span>Think harder when planning</span>
           </label>
           <button type="submit" className="search-button" disabled={busy || running}>
             {busy ? "Starting…" : running ? "Running…" : "Run agent"}
@@ -198,6 +219,10 @@ export function AgentPanel({ onSubmit }: { onSubmit?(request: AgentSubmitRequest
       </form>}
       {error && <div className="message error" role="alert">{error}</div>}
       {notice && <div className="message" role="status">{notice}</div>}
+      {finished && <div className="agent-rerun">
+        <span>Not what you were looking for? Reword the query to point the agent at the part that matters.</span>
+        <button type="button" className="open-video" onClick={editQuery}>Edit query and run again</button>
+      </div>}
       {run && (running
         ? (humanLive
           ? <AgentReviewWorkspace run={run} onReview={review} />

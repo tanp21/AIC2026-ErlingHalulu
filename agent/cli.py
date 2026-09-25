@@ -33,7 +33,8 @@ def build_agent(settings, options):
     deepseek = DeepSeekClient(
         settings.deepseek_api_key, settings.deepseek_model, settings.deepseek_base_url,
         thinking=settings.deepseek_thinking, usage=usage,
-        **({"timeout": 30.0, "retries": 2} if fast else {}),
+        # A plan with thinking took up to 50 s when measured (scripts/benchmarks/check_planner.py).
+        **({"timeout": 90.0 if options.plan_thinking else 30.0, "retries": 2} if fast else {}),
     )
     # Gemini is still needed for the web lookup whatever `vision` is, but with a
     # local vision backend it stops being required to start a run.
@@ -55,7 +56,10 @@ def build_agent(settings, options):
 
 
 def options_from(args, settings):
-    overrides = {"max_steps": args.max_steps, "plan_thinking": settings.deepseek_plan_thinking,
+    # Deep mode plans with thinking, as the UI's does; --plan-thinking asks for it in any mode.
+    plan_thinking = (getattr(args, "plan_thinking", False) or settings.deepseek_plan_thinking
+                     or args.mode == "deep")
+    overrides = {"max_steps": args.max_steps, "plan_thinking": plan_thinking,
                  "spoken_numbers": settings.spoken_numbers}
     if args.time_budget is not None:
         overrides["time_budget"] = args.time_budget
@@ -213,6 +217,8 @@ def main(argv=None):
         command.add_argument("--max-steps", type=int, default=6, help="deep: agent tool rounds after round 1")
         command.add_argument("--time-budget", type=float, default=None,
                              help="seconds per query (default 20 fast, 300 deep)")
+        command.add_argument("--plan-thinking", action="store_true",
+                             help="plan with DeepSeek thinking (10-30 s more; on by default in deep mode)")
         command.add_argument("--no-web", action="store_true",
                              help="skip the automatic web searches (cooking recipes, spoken QA answers)")
         command.add_argument("--workers", type=int, default=2, help="queries processed concurrently")

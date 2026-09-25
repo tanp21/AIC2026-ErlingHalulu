@@ -85,6 +85,9 @@ class AgentRunReq(BaseModel):
     # so this is only for a teammate who wants the run billed to their own OpenRouter account.
     openrouter_api_key: str = Field(default="", max_length=512)
     max_steps: int = Field(default=6, ge=1, le=12)
+    #: Plan with DeepSeek's thinking on: 10-30 s more, for a hard query whose plan went wrong.
+    #: None follows the deployment (`DEEPSEEK_PLAN_THINKING`), and deep mode always thinks.
+    plan_thinking: bool | None = None
     time_budget: float | None = Field(default=None, ge=30.0, le=900.0)
     deepseek_model: str | None = Field(default=None, max_length=100)
     gemini_model: str | None = Field(default=None, max_length=100)
@@ -262,7 +265,8 @@ class AgentRunStore:
 
 def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
               time_budget: float | None, *, review: HumanReview | None = None, progress=None,
-              judge: str = "model", human_idle_timeout: float | None = None):
+              judge: str = "model", human_idle_timeout: float | None = None,
+              plan_thinking: bool | None = None):
     """Build the clients and run one task; split out so tests can stub it."""
     usage = Usage()
     deepseek = DeepSeekClient(
@@ -287,7 +291,8 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
     search = SearchClient.from_settings(settings)
     overrides = {
         "max_steps": max_steps,
-        "plan_thinking": settings.deepseek_plan_thinking,
+        "plan_thinking": (plan_thinking if plan_thinking is not None
+                          else settings.deepseek_plan_thinking or mode == "deep"),
         "spoken_numbers": settings.spoken_numbers,
     }
     # A model-judged run on OpenRouter judges each candidate as a moment (its keyframe and
@@ -373,6 +378,7 @@ def execute_run(store: AgentRunStore, run: AgentRun, req: AgentRunReq, internal_
             run.task, settings, req.mode, req.max_steps, req.time_budget,
             review=run.review,
             progress=lambda snapshot: store.update_progress(run.run_id, snapshot),
+            plan_thinking=req.plan_thinking,
             **({"judge": "human", "human_idle_timeout": human_idle_timeout()}
                if req.judge == "human" else {}),
         )
