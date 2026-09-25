@@ -1,0 +1,22 @@
+# The venue link: a container that holds an SSH forward to the compute host open forever.
+#
+# It is deliberately not part of the production image. Nothing else in this repo needs an SSH
+# client, and the tunnel is the one piece that exists only for the split deployment.
+FROM alpine:3.20
+
+RUN apk add --no-cache openssh-client
+
+# Run as the uid that owns the mounted key. Two reasons, both fatal on their own:
+#  - the file-sharing layer behind Docker Desktop refuses to let container root read a 0600
+#    key it does not own, so the key has to stay root-inaccessible;
+#  - ssh refuses to start when the uid it runs as has no passwd entry.
+# AIC_UID is the same variable the `app` service uses, and it is the uid of whoever runs
+# docker compose -- i.e. the key's owner.
+ARG TUNNEL_UID=1000
+RUN adduser -D -u "${TUNNEL_UID}" tunnel
+
+COPY tunnel-entry.sh /usr/local/bin/tunnel-entry.sh
+RUN chmod 0755 /usr/local/bin/tunnel-entry.sh
+
+USER tunnel
+ENTRYPOINT ["/usr/local/bin/tunnel-entry.sh"]

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { fetchCaptions, fetchTranscript } from "./api";
-import { copyKeyframe, downloadClip, fetchShots, fetchVideoList, updateShotLabels } from "./clipApi";
+import { fetchCaptions, fetchTopicSegments, fetchTranscript } from "./api";
+import { copyKeyframe, downloadClip, fetchObjectDetections, fetchShots, fetchVideoList, updateShotLabels } from "./clipApi";
 import { fetchFrameMap, frameTime, resolveFrameId } from "./frameMap";
 import type { FrameMap } from "./frameMap";
 import { formatTimestamp } from "./results";
-import type { CaptionWindow, KeyframeSource, Shot, ShotKeyframe, ShotLabelReason, TranscriptCue, VideoSummary } from "./types";
+import type { CaptionWindow, KeyframeSource, ObjectDetectionFrame, Shot, ShotKeyframe, ShotLabelReason, TopicSegment, TranscriptCue, VideoSummary } from "./types";
 
 export type AppTab = "search" | "queries" | "agent" | "clips";
 
@@ -57,6 +57,32 @@ export function captionAt(windows: CaptionWindow[], time: number): CaptionWindow
   return ordered.reduce((best, window) =>
     Math.abs((window.start + window.end) / 2 - time) < Math.abs((best.start + best.end) / 2 - time)
       ? window : best);
+}
+
+/** Nearest detector sample, held for at most 1.5 s between extracted frames. */
+export function detectionsAt(frames: ObjectDetectionFrame[], time: number): ObjectDetectionFrame | null {
+  if (!frames.length || !Number.isFinite(time)) return null;
+  let low = 0;
+  let high = frames.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (frames[middle].time < time) low = middle + 1;
+    else high = middle;
+  }
+  const after = frames[Math.min(low, frames.length - 1)];
+  const before = frames[Math.max(0, low - 1)];
+  const nearest = Math.abs(after.time - time) < Math.abs(before.time - time) ? after : before;
+  return Math.abs(nearest.time - time) <= 1.5 ? nearest : null;
+}
+
+export function containedVideoRect(width: number, height: number, videoWidth: number, videoHeight: number) {
+  if (![width, height, videoWidth, videoHeight].every(Number.isFinite)
+      || width <= 0 || height <= 0 || videoWidth <= 0 || videoHeight <= 0) return null;
+  const scale = Math.min(width / videoWidth, height / videoHeight);
+  const contentWidth = videoWidth * scale;
+  const contentHeight = videoHeight * scale;
+  return { left: (width - contentWidth) / 2, top: (height - contentHeight) / 2,
+    width: contentWidth, height: contentHeight };
 }
 
 /** The caption of the shot under the playhead, in full, with a copy button. */
@@ -132,10 +158,21 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
   const [captions, setCaptions] = useState<CaptionWindow[]>([]);
   const [captionLoading, setCaptionLoading] = useState(false);
   const [captionError, setCaptionError] = useState(false);
+  const [topicSegments, setTopicSegments] = useState<TopicSegment[]>([]);
+  const [topicLoading, setTopicLoading] = useState(false);
+  const [topicError, setTopicError] = useState(false);
+  const [objectFrames, setObjectFrames] = useState<ObjectDetectionFrame[]>([]);
+  const [objectLoading, setObjectLoading] = useState(false);
+  const [objectError, setObjectError] = useState(false);
+  const [showObjectOverlay, setShowObjectOverlay] = useState(true);
+  const [objectConfidence, setObjectConfidence] = useState(0.35);
+  const [videoContentRect, setVideoContentRect] = useState<ReturnType<typeof containedVideoRect>>(null);
+  const [videoFullscreen, setVideoFullscreen] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [followTranscript, setFollowTranscript] = useState(true);
   const [transcriptCopyState, setTranscriptCopyState] = useState<"idle" | "copied" | "error">("idle");
   const videoRef = useRef<HTMLVideoElement>(null);
+  const videoStageRef = useRef<HTMLDivElement>(null);
   const seekingRef = useRef(false);
   const activeShotRef = useRef<HTMLLIElement>(null);
   const followedCueRef = useRef<HTMLLIElement>(null);
@@ -174,6 +211,22 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
   useEffect(() => {
     if (!videoId) return;
     let active = true;
+    setObjectFrames([]);
+    setObjectLoading(true);
+    setObjectError(false);
+    fetchObjectDetections(videoId).then((response) => {
+      if (active) setObjectFrames(response.frames ?? []);
+    }).catch(() => {
+      if (active) setObjectError(true);
+    }).finally(() => {
+      if (active) setObjectLoading(false);
+    });
+    return () => { active = false; };
+  }, [videoId]);
+
+  useEffect(() => {
+    if (!videoId) return;
+    let active = true;
     setCues([]);
     setTranscriptCopyState("idle");
     setTranscriptLoading(true);
@@ -205,6 +258,22 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
   }, [videoId]);
 
   useEffect(() => {
+    if (!videoId) return;
+    let active = true;
+    setTopicSegments([]);
+    setTopicLoading(true);
+    setTopicError(false);
+    fetchTopicSegments(videoId).then((response) => {
+      if (active) setTopicSegments(response.segments ?? []);
+    }).catch(() => {
+      if (active) setTopicError(true);
+    }).finally(() => {
+      if (active) setTopicLoading(false);
+    });
+    return () => { active = false; };
+  }, [videoId]);
+
+  useEffect(() => {
     const video = videoRef.current;
     if (!videoId || !video || typeof video.requestVideoFrameCallback !== "function") return;
     let active = true;
@@ -227,6 +296,27 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
     };
   }, [videoId]);
 
+  useEffect(() => {
+    const video = videoRef.current;
+    const stage = videoStageRef.current;
+    if (!videoId || !video || !stage) return;
+    const update = () => {
+      const bounds = stage.getBoundingClientRect();
+      setVideoContentRect(containedVideoRect(bounds.width, bounds.height, video.videoWidth, video.videoHeight));
+      setVideoFullscreen(document.fullscreenElement === stage);
+    };
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(stage);
+    window.addEventListener("resize", update);
+    document.addEventListener("fullscreenchange", update);
+    update();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+      document.removeEventListener("fullscreenchange", update);
+    };
+  }, [videoId]);
+
   const groups = useMemo(
     () => [...new Set(videos.map((video) => video.group))].sort(),
     [videos],
@@ -244,6 +334,8 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
   // Caption windows are measured on the source clock, so prefer the playhead frame
   // over `timeupdate`, which only ticks a few times a second.
   const playheadSeconds = liveFrameId !== null && mapping ? frameTime(mapping, liveFrameId) : playbackTime;
+  const objectFrame = useMemo(() => detectionsAt(objectFrames, playheadSeconds), [objectFrames, playheadSeconds]);
+  const visibleObjects = objectFrame?.detections.filter((detection) => detection.confidence >= objectConfidence) ?? [];
   const shotCaption = useMemo(() => captionAt(
     currentShot ? captions.filter((caption) => caption.shot_idx === currentShot.index) : [],
     playheadSeconds,
@@ -257,6 +349,9 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
     included: shots.filter((shot) => shot.label?.state === "included").length,
   }), [shots]);
   const shotCues = useMemo(() => cuesForShot(cues, currentShot), [cues, currentShot]);
+  const currentTopicSegmentIndex = topicSegments.findIndex(
+    (segment) => segment.start <= playheadSeconds && playheadSeconds < segment.end,
+  );
   const fullTranscript = useMemo(
     () => cues.map((cue) => cue.text).join(" "),
     [cues],
@@ -307,6 +402,13 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
     video.currentTime = cue.start;
     setPlaybackTime(cue.start);
     setFollowTranscript(true);
+  }
+
+  function seekTopicSegment(segment: TopicSegment) {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = segment.start;
+    setPlaybackTime(segment.start);
   }
 
   async function exportCurrentShot() {
@@ -408,6 +510,18 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
 
   const canExport = Boolean(videoId && currentShot && paused && !seeking && !exporting);
 
+  async function toggleVideoFullscreen() {
+    const stage = videoStageRef.current;
+    if (!stage) return;
+    try {
+      if (document.fullscreenElement === stage) await document.exitFullscreen();
+      else await stage.requestFullscreen();
+    } catch {
+      setMessageIsError(true);
+      setMessage("Fullscreen is unavailable in this browser.");
+    }
+  }
+
   return <section className="clip-studio">
     <aside className="clip-video-list" aria-label="Video list">
       <header>
@@ -441,14 +555,42 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
       {!videoId && <p className="clip-state clip-empty">Select a video to begin.</p>}
       {videoId && <>
         <section className="clip-player">
-          <video ref={videoRef} key={videoId} src={`/video/${videoId}`} controls preload="metadata"
-            aria-label={`Video ${videoId}`}
-            onPlay={() => { setPaused(false); setMessage(""); }}
-            onPause={() => setPaused(true)}
-            onTimeUpdate={() => setPlaybackTime(videoRef.current?.currentTime ?? 0)}
-            onSeeking={() => { seekingRef.current = true; setSeeking(true); }}
-            onSeeked={() => { seekingRef.current = false; setSeeking(false); setPlaybackTime(videoRef.current?.currentTime ?? 0); }}
-            onLoadedData={() => setPaused(videoRef.current?.paused ?? true)} />
+          <div ref={videoStageRef} className="clip-video-stage">
+            <video ref={videoRef} key={videoId} src={`/video/${videoId}`} controls controlsList="nofullscreen" preload="metadata"
+              aria-label={`Video ${videoId}`}
+              onPlay={() => { setPaused(false); setMessage(""); }}
+              onPause={() => setPaused(true)}
+              onTimeUpdate={() => setPlaybackTime(videoRef.current?.currentTime ?? 0)}
+              onSeeking={() => { seekingRef.current = true; setSeeking(true); }}
+              onSeeked={() => { seekingRef.current = false; setSeeking(false); setPlaybackTime(videoRef.current?.currentTime ?? 0); }}
+              onLoadedMetadata={() => {
+                setPaused(videoRef.current?.paused ?? true);
+                const stage = videoStageRef.current;
+                const video = videoRef.current;
+                if (stage && video) {
+                  const bounds = stage.getBoundingClientRect();
+                  setVideoContentRect(containedVideoRect(bounds.width, bounds.height, video.videoWidth, video.videoHeight));
+                }
+              }}
+              onLoadedData={() => setPaused(videoRef.current?.paused ?? true)} />
+            {showObjectOverlay && objectFrame && visibleObjects.length > 0 && <svg
+              className="clip-object-overlay" viewBox="0 0 1 1" preserveAspectRatio="none"
+              style={videoContentRect ? {
+                left: videoContentRect.left, top: videoContentRect.top,
+                width: videoContentRect.width, height: videoContentRect.height,
+              } : undefined}
+              role="img" aria-label={`Object detections near frame ${objectFrame.frame_idx}`}>
+              {visibleObjects.map((detection, index) => {
+                const [x0, y0, x1, y1] = detection.box;
+                return <g key={`${detection.label}-${index}`}>
+                  <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} strokeWidth=".003" />
+                  <text x={x0} y={Math.max(0.025, y0 - 0.008)} fontSize=".028" strokeWidth=".004">
+                    {detection.label} {Math.round(detection.confidence * 100)}%
+                  </text>
+                </g>;
+              })}
+            </svg>}
+          </div>
           <div className="clip-actions">
             <div className="clip-readout">
               <strong>{videoId}</strong>
@@ -459,6 +601,15 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
               <button disabled={!shots.length} aria-label="Previous shot" onClick={() => stepShot(-1)}>‹ Shot</button>
               <button disabled={!shots.length} aria-label="Next shot" onClick={() => stepShot(1)}>Shot ›</button>
             </div>
+            <button type="button" className="clip-fullscreen-button" aria-label={videoFullscreen ? "Exit video fullscreen" : "Fullscreen video"}
+              onClick={() => void toggleVideoFullscreen()}>{videoFullscreen ? "Exit fullscreen" : "Fullscreen"}</button>
+            <label className="clip-object-toggle"><input type="checkbox" checked={showObjectOverlay}
+              onChange={(event) => setShowObjectOverlay(event.target.checked)} /> Object detection</label>
+            {showObjectOverlay && <label className="clip-object-confidence">Confidence {Math.round(objectConfidence * 100)}%
+              <input aria-label="Object overlay confidence" type="range" min="25" max="95" step="5"
+                value={Math.round(objectConfidence * 100)}
+                onChange={(event) => setObjectConfidence(Number(event.target.value) / 100)} />
+            </label>}
             <button className="export-clip" disabled={!canExport} onClick={exportCurrentShot}>
               {exporting ? "Exporting clip…"
                 : currentShot
@@ -467,6 +618,8 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
             </button>
           </div>
           {!paused && <p className="clip-state">Pause the video to export the shot you're viewing.</p>}
+          {objectLoading && <p className="clip-state">Loading object detections…</p>}
+          {objectError && <p className="clip-state error" role="status">Object detections are unavailable for this video.</p>}
           {message && <p className={`clip-state${messageIsError ? " error" : ""}`}
             role={messageIsError ? "alert" : "status"}>{message}</p>}
         </section>
@@ -505,6 +658,26 @@ export function ClipStudio({ profile, isAdmin = false }: { profile?: string; isA
                 <strong>#{shot.index}</strong>
                 <time>{formatTimestamp(shot.start)}</time>
                 <span>{shot.label ? `${shot.label.state} · ${shot.label.reason}` : `${shot.keyframes.length} KF`}</span>
+              </button>
+            </li>)}
+          </ol>
+        </section>
+
+        <section className="topic-segments" aria-label="DeepSeek topic segments">
+          <header>
+            <div><span className="eyebrow">Topic segments · DeepSeek pilot</span>
+              <strong>{topicSegments.length} segment{topicSegments.length === 1 ? "" : "s"}</strong></div>
+          </header>
+          {topicLoading && <p className="clip-state">Loading topic segments…</p>}
+          {!topicLoading && topicError && <p className="clip-state error">Failed to load topic segments.</p>}
+          {!topicLoading && !topicError && !topicSegments.length
+            && <p className="clip-state">No topic segments for this video.</p>}
+          <ol className="topic-segment-list">
+            {topicSegments.map((segment, index) => <li key={`${segment.start}-${index}`}
+              className={index === currentTopicSegmentIndex ? "active" : ""}>
+              <button onClick={() => seekTopicSegment(segment)}>
+                <time>{formatTimestamp(segment.start)}–{formatTimestamp(segment.end)}</time>
+                <span>{segment.text}</span>
               </button>
             </li>)}
           </ol>

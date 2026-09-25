@@ -1,4 +1,4 @@
-import type { CaptionsResponse, CompareResult, ImageSearchRequest, IndexProfile, OcrResponse, SearchRequest, SearchResponse, Session, TemporalSearchRequest, TemporalSearchResponse, TranscriptResponse, SearchResult } from "./types";
+import type { CaptionsResponse, CompareResult, ImageSearchRequest, IndexProfile, ObjectQuery, OcrResponse, RefineRequest, RefineResponse, SearchRequest, SearchResponse, Session, TemporalSearchRequest, TemporalSearchResponse, TopicSegmentsResponse, TranscriptResponse, SearchResult } from "./types";
 
 async function readJson<T>(response: Response): Promise<T> {
   const data = await response.json();
@@ -33,6 +33,16 @@ export async function searchVideosByImage(
   return readJson<SearchResponse>(response);
 }
 
+export async function refineQuery(request: RefineRequest, signal: AbortSignal): Promise<RefineResponse> {
+  const response = await fetch("/search/refine", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+    signal,
+  });
+  return readJson<RefineResponse>(response);
+}
+
 export async function searchNextPage(cursor: string, signal: AbortSignal): Promise<SearchResponse> {
   const response = await fetch("/search/next", {
     method: "POST",
@@ -51,6 +61,35 @@ export async function searchTemporal(request: TemporalSearchRequest, signal: Abo
     signal,
   });
   return readJson<TemporalSearchResponse>(response);
+}
+
+export async function searchTemporalMultimodal(
+  request: Omit<TemporalSearchRequest, "events"> & { events: Array<
+    ({ text: string } | { image: File } | { reference: { video_id: string; frame_idx: number } } | { audio: string } | { ocr: string } | { object: ObjectQuery }) & { object_filter?: ObjectQuery }
+  > },
+  signal: AbortSignal,
+): Promise<TemporalSearchResponse> {
+  const form = new FormData();
+  const images: File[] = [];
+  const events = request.events.map((event) => {
+    const filter = event.object_filter ? { object_filter: event.object_filter } : {};
+    if ("text" in event) return { kind: "text", text: event.text, ...filter };
+    if ("audio" in event) return { kind: "audio", text: event.audio, ...filter };
+    if ("ocr" in event) return { kind: "ocr", text: event.ocr, ...filter };
+    if ("object" in event) return { kind: "object", object_query: event.object, ...filter };
+    if ("reference" in event) return { kind: "reference", reference: event.reference, ...filter };
+    const image_index = images.push(event.image) - 1;
+    return { kind: "upload", image_index, ...filter };
+  });
+  form.append("payload", JSON.stringify({ ...request, events }));
+  images.forEach((image) => form.append("images", image));
+  return readJson<TemporalSearchResponse>(await fetch("/search/temporal/image", {
+    method: "POST", body: form, signal,
+  }));
+}
+
+export async function fetchObjectCatalog(): Promise<{ labels: string[]; profiles: Array<{ profile: string; keyframes: number }>; alignment_max_seconds: number }> {
+  return readJson(await fetch("/objects/catalog"));
 }
 
 export async function searchTemporalNextPage(cursor: string, signal: AbortSignal): Promise<TemporalSearchResponse> {
@@ -88,9 +127,16 @@ export async function fetchTranscript(videoId: string): Promise<TranscriptRespon
   return readJson<TranscriptResponse>(response);
 }
 
-export async function fetchKeyframeContext(videoId: string, frameId: number, profile?: string, radius = 10): Promise<{ video_id: string; frame_idx: number; frames: SearchResult[] }> {
+/** DeepSeek topic/story segments for one video -- Clip Studio's pilot visualization. */
+export async function fetchTopicSegments(videoId: string): Promise<TopicSegmentsResponse> {
+  const response = await fetch(`/audio/topic-segments/${encodeURIComponent(videoId)}`);
+  return readJson<TopicSegmentsResponse>(response);
+}
+
+export async function fetchKeyframeContext(videoId: string, frameId: number, profile?: string, radius = 10, allFrames = false): Promise<{ video_id: string; frame_idx: number; frames: SearchResult[] }> {
   const params = new URLSearchParams({ radius: String(radius) });
   if (profile) params.set("profile", profile);
+  if (allFrames) params.set("all_frames", "true");
   const response = await fetch(`/context/${encodeURIComponent(videoId)}/${frameId}?${params}`, {
     cache: "no-store",
   });

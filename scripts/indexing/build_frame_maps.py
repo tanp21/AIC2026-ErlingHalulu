@@ -45,9 +45,57 @@ def probe(path):
     return parse_probe(json.loads(result.stdout))
 
 
+def probe_packets(path):
+    """Fast timeline check only; never replaces a decoded-frame probe on mismatch."""
+    result = subprocess.run([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=time_base:packet=pts", "-of", "json", str(path),
+    ], check=True, capture_output=True, text=True)
+    return parse_packet_probe(json.loads(result.stdout))
+
+
+def parse_packet_probe(data):
+    streams = data.get("streams", [])
+    packets = data.get("packets", [])
+    if len(streams) != 1 or "time_base" not in streams[0] or not packets or any("pts" not in p for p in packets):
+        raise ValueError("packet PTS unavailable")
+    time_base = Fraction(streams[0]["time_base"])
+    return frame_maps.FrameMap(
+        np.sort(np.asarray([p["pts"] for p in packets], dtype=np.int64)),
+        time_base.numerator,
+        time_base.denominator,
+    )
+
+
+def verify_or_probe(path, existing_map):
+    """Reuse a decoded map only when the new file's entire PTS timeline is identical."""
+    if existing_map.exists():
+        try:
+            packets = probe_packets(path)
+            previous = frame_maps.load_path(existing_map)
+            if (packets.time_base_num == previous.time_base_num
+                    and packets.time_base_den == previous.time_base_den
+                    and np.array_equal(packets.pts, previous.pts)):
+                return previous, True
+        except (OSError, ValueError, subprocess.CalledProcessError):
+            pass
+    return probe(path), False
+
+
 def signature(path):
     stat = Path(path).stat()
     return {"path": str(path), "size": stat.st_size, "mtimeNs": stat.st_mtime_ns}
+
+
+def save_manifest(videos):
+    MAP_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=MAP_DIR, mode="w", suffix=".json", delete=False) as tmp:
+        temp_path = Path(tmp.name)
+        json.dump({"version": 2, "videos": videos}, tmp, indent=2, sort_keys=True)
+    try:
+        os.replace(temp_path, MANIFEST)
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def save_map(video_id, mapping):
@@ -79,6 +127,25 @@ def aligned_times(id_video, id_frame, video_ids, load_map):
     return times
 
 
+def refresh_times(directory, load_map=frame_maps.load):
+    """Refresh search-result seconds from the same PTS maps used by DRES."""
+    directory = Path(directory)
+    rows = pq.read_table(directory / "video_meta.parquet").to_pylist()
+    video_ids = {int(row["video_idx"]): row["video_id"] for row in rows}
+    times = aligned_times(
+        np.load(directory / "id_video.npy"), np.load(directory / "id_frame.npy"),
+        video_ids, load_map,
+    )
+    with tempfile.NamedTemporaryFile(dir=directory, suffix=".npy", delete=False) as tmp:
+        temp_path = Path(tmp.name)
+    try:
+        np.save(temp_path, times)
+        os.replace(temp_path, directory / "id_time.npy")
+    finally:
+        temp_path.unlink(missing_ok=True)
+    return len(times)
+
+
 def build(workers):
     MAP_DIR.mkdir(parents=True, exist_ok=True)
     rows = pq.read_table(INDEX_DIR / "video_meta.parquet").to_pylist()
@@ -95,28 +162,31 @@ def build(workers):
 
     failures = []
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        jobs = {executor.submit(probe, path): (video_id, sig) for video_id, path, sig in pending}
+        jobs = {executor.submit(verify_or_probe, path, MAP_DIR / f"{video_id}.npz"): (video_id, sig) for video_id, path, sig in pending}
         for job in as_completed(jobs):
             video_id, sig = jobs[job]
             try:
-                mapping = job.result()
-                save_map(video_id, mapping)
+                mapping, verified = job.result()
+                if not verified:
+                    save_map(video_id, mapping)
                 current[video_id] = sig
-                MANIFEST.write_text(json.dumps({"version": 2, "videos": current}, indent=2, sort_keys=True))
-                print(f"[frame-map] {video_id}: {len(mapping.pts)} frames", flush=True)
+                save_manifest(current)
+                print(f"[frame-map] {video_id}: {len(mapping.pts)} frames{' (PTS verified)' if verified else ' (decoded)'}", flush=True)
             except Exception as exc:
                 failures.append(f"{video_id}: {exc}")
 
-    MANIFEST.write_text(json.dumps({"version": 2, "videos": current}, indent=2, sort_keys=True))
+    save_manifest(current)
     if failures:
         raise RuntimeError("frame-map failures:\n" + "\n".join(failures))
 
-    id_video = np.load(INDEX_DIR / "id_video.npy")
-    id_frame = np.load(INDEX_DIR / "id_frame.npy")
-    video_ids = {int(row["video_idx"]): row["video_id"] for row in rows}
-    times = aligned_times(id_video, id_frame, video_ids, frame_maps.load)
-    np.save(INDEX_DIR / "id_time.npy", times)
-    print(f"[frame-map] complete: {len(rows)} videos, {len(times)} indexed timestamps")
+    frame_maps.load.cache_clear()
+    count = refresh_times(INDEX_DIR)
+    print(f"[frame-map] base: {len(rows)} videos, {count} indexed timestamps")
+    for directory in sorted((INDEX_DIR / "profiles").iterdir()) if (INDEX_DIR / "profiles").exists() else []:
+        if directory.name.startswith(".") or not (directory / "id_frame.npy").exists():
+            continue
+        count = refresh_times(directory)
+        print(f"[frame-map] {directory.name}: {count} indexed timestamps")
 
 
 def main():

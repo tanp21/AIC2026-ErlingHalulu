@@ -142,12 +142,13 @@ def caption_at(captions, time_, default="(none)") -> str:
     return " ".join(str(nearest[0].get("text", "")).split()) or default
 
 
-def transcript_window(cues, center, seconds=40.0) -> str:
+def transcript_window(cues, center, seconds=40.0, empty="(no speech)") -> str:
+    """Timed lines of whatever was said -- or, with another timed stream, written -- nearby."""
     lines = [
         f"[{cue['start']:.0f}s] {cue['text']}" for cue in cues
         if cue["end"] >= center - seconds and cue["start"] <= center + seconds
     ]
-    return "\n".join(lines) or "(no speech)"
+    return "\n".join(lines) or empty
 
 
 class Inspector:
@@ -377,8 +378,9 @@ class Inspector:
         return [min(max(scores.get(f"E{index + 1}", 0.0), 0.0), 10.0) if image else 5.0
                 for index, image in enumerate(data)]
 
-    def answer(self, task, question, candidate, neighbours, cues, hints="", captions=()):
-        """Read a QA answer from one moment: full frame, neighbours, speech and caption."""
+    def answer(self, task, question, candidate, neighbours, cues, hints="", captions=(),
+               on_screen=""):
+        """Read a QA answer from one moment: full frame, neighbours, speech, on-screen text and caption."""
         frames = [(candidate.video_id, candidate.frame_idx)]
         frames += [(f["video_id"], f["frame_idx"]) for f in neighbours
                    if f["frame_idx"] != candidate.frame_idx][:6]
@@ -386,9 +388,15 @@ class Inspector:
         data += self.images(frames[1:])
         labelled = [(f"[{video}:{frame}]", image)
                     for (video, frame), image in zip(frames, data) if image]
+        # The on-screen block is left out entirely when the caller has no OCR for the moment:
+        # `_read_answer` (the model-judged path) never passes one, and its prompt must stay
+        # the prompt this reader was tuned on.
         prompt = QA_PROMPT.format(
             query=task.text, question=question,
             transcript=transcript_window(cues, candidate.time),
+            on_screen=(f"\nText read off the screen in this shot, timed "
+                       f"(OCR of the keyframe; the reading, not what was written, is what can be "
+                       f"wrong here):\n{on_screen}\n" if on_screen else ""),
             caption=caption_at(captions, candidate.time),
             hints=hints or "(none)",
         )

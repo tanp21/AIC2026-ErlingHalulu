@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeFrameMap, frameTime, resolveFrameId } from "./frameMap";
+import { decodeFrameMap, frameTime, frameTimestampMs, resolveFrameId } from "./frameMap";
 
 describe("exact frame map", () => {
   const mapping = decodeFrameMap({
@@ -24,6 +24,7 @@ describe("exact frame map", () => {
   it("converts a source frame id back to its exact presentation time", () => {
     expect(frameTime(mapping, 0)).toBe(0);
     expect(frameTime(mapping, 2)).toBe(6000 / 90000);
+    expect(frameTimestampMs(mapping, 2)).toBe(67);
   });
 
   it("rejects malformed delta payloads", () => {

@@ -45,14 +45,14 @@ from pathlib import Path
 import re
 
 from backend import audio_search
-from backend.audio_search import SemanticChunkConfig, make_passages
-from scripts.audio.pipeline import CleanConfig, clean_corpus, load_words, sweep_configs
-from scripts.audio.postprocess import boilerplate_document_frequency, words_to_tokens
+from backend.audio_search import SemanticChunkConfig, TopicChunkConfig, make_passages
+from scripts.indexing.build_audio_index import CUE_MAX_TOKENS
+from scripts.audio.pipeline import load_words
+from scripts.audio.postprocess import words_to_tokens
 from scripts.ocr.scoring import fold, normalize
 
 ROOT = Path(__file__).resolve().parents[2]
 GROUND_TRUTH = ROOT / "benchmarks" / "audio" / "audio_ground_truth.json"
-CONFIG = ROOT / "benchmarks" / "audio" / "audio_config.json"
 RAW_STEP_DATA = ROOT / "data" / "2026" / "audio" / "step_data.parquet"
 CLEAN_STEP_DATA = ROOT / "data" / "2026" / "audio" / "step_data_clean.parquet"
 #: Passage embeddings are expensive and derived, so they live beside their
@@ -343,6 +343,14 @@ class DenseIndex:
                        (self._device or os.environ.get("AUDIO_EMBED_DEVICE", "cuda")),
                 model_kwargs=kwargs or None,
             )
+            # Same guard as passages_from_words' embed_cues and
+            # build_audio_index.py's own indexer: a passage that couldn't be
+            # split further (a single pathologically long, unpunctuated
+            # sentence -- see the embed_cues guard above) still gets handed
+            # to *this* separate encoder instance for its passage-level
+            # vector, which had no cap of its own and OOM'd a 12 GB card the
+            # same way.
+            self._encoder.max_seq_length = CUE_MAX_TOKENS
         return self._encoder
 
     def rank_videos(self, query: str) -> list[str]:
@@ -370,6 +378,8 @@ def passages_from_words(words_by_video, window_seconds: int = 60, stride_seconds
                         *, strategy: str = "sliding", similarity_threshold: float = 0.5,
                         device: str | None = None, batch_size: int = 32,
                         chunk_config: "audio_search.SemanticChunkConfig | None" = None,
+                        topic_config: "audio_search.TopicChunkConfig | None" = None,
+                        llm_segment_fn=None, deepseek_concurrency: int = 8,
                         quantize: str | None = None, device_map: str | None = None):
     """Build passages exactly the way ``build_audio_index`` will.
 
@@ -377,14 +387,27 @@ def passages_from_words(words_by_video, window_seconds: int = 60, stride_seconds
     directly is deliberate: the bench then exercises the same round-trip the
     indexer does, so a bug in it shows up here rather than in production.
 
-    ``strategy in ("semantic", "semantic_duration")`` loads a Qwen encoder on
-    first use (same model, same device-resolution order as
+    ``strategy in ("semantic", "semantic_duration", "topic")`` loads a Qwen
+    encoder on first use (same model, same device-resolution order as
     ``DenseIndex.encoder``) to embed cues for boundary detection — a separate
     concern from ``DenseIndex``'s own passage-level embeddings, so it is not
-    shared with that cache.
+    shared with that cache. ``topic`` only uses this encoder for its
+    max-duration fallback splitter (``_split_oversized_topic_segment``), not
+    for the LLM's own boundary decisions.
+
+    ``topic`` is the one strategy that is network-bound rather than
+    GPU-bound: each video makes several sequential DeepSeek calls inside
+    ``make_topic_passages`` (one per sentence window --
+    ``_stitch_topic_boundaries`` deliberately stays single-threaded, see its
+    docstring), so a corpus-wide run is dispatched across videos on a bounded
+    thread pool instead -- otherwise a ~1,200-video corpus would run one API
+    call at a time. ``DeepSeekTopicSegmenter``'s cache reads/writes and
+    ``_RateLimiter`` are shared safely across these threads (independent
+    cache files per distinct sentence batch; the rate limiter's own lock is
+    exactly what keeps the *combined* dispatch rate bounded across threads).
     """
     embed_cues = None
-    if strategy in ("semantic", "semantic_duration"):
+    if strategy in ("semantic", "semantic_duration", "topic"):
         import os
 
         from sentence_transformers import SentenceTransformer
@@ -396,10 +419,46 @@ def passages_from_words(words_by_video, window_seconds: int = 60, stride_seconds
                    (device or os.environ.get("AUDIO_EMBED_DEVICE", "cuda")),
             model_kwargs=kwargs or None,
         )
+        # Same guard as build_audio_index.py's own embed_cues: cleaning is
+        # decided per chunk, so a video can come out part cleaned and part
+        # raw, and a raw stretch with no punctuation for the sentence
+        # splitter to find merges into one gigantic "sentence" (measured on
+        # this exact corpus: S01-V001 produced a 52,589-character merged
+        # sentence). Encoding that uncapped OOMs a 12 GB card via a
+        # quadratic attention allocation, well before any --strategy or
+        # boundary-detection logic runs.
+        encoder.max_seq_length = CUE_MAX_TOKENS
 
         def embed_cues(texts):
             return encoder.encode(texts, batch_size=batch_size, normalize_embeddings=True,
                                   convert_to_numpy=True, show_progress_bar=False)
+
+    if strategy == "topic":
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        items = sorted(words_by_video.items())
+
+        def build_one(video_id, words):
+            rows = words_to_tokens(video_id, words)
+            return video_id, audio_search.make_topic_passages(
+                video_id, rows, llm_segment_fn, embed_cues=embed_cues, config=topic_config
+            )
+
+        results: dict[str, list] = {}
+        with ThreadPoolExecutor(max_workers=max(1, deepseek_concurrency)) as pool:
+            futures = [pool.submit(build_one, video_id, words) for video_id, words in items]
+            done = 0
+            for future in as_completed(futures):
+                video_id, video_passages = future.result()
+                results[video_id] = video_passages
+                done += 1
+                if done % 20 == 0 or done == len(futures):
+                    print(f"[bench-audio] topic strategy: {done}/{len(futures)} "
+                          f"videos segmented", flush=True)
+        passages = []
+        for video_id, _words in items:
+            passages.extend(results[video_id])
+        return passages
 
     passages = []
     for video_id, words in sorted(words_by_video.items()):
@@ -532,6 +591,11 @@ def main():
     parser.add_argument("--model", default=None,
                         help="override audio_search.MODEL_NAME, e.g. to bench "
                              "Qwen3-Embedding-4B/8B instead of the shipped 0.6B")
+    parser.add_argument("--batch-size", type=int, default=32,
+                        help="encode batch size for both boundary-detection cues "
+                             "and DenseIndex passage embeddings; raise this on a "
+                             "GPU with VRAM to spare (e.g. a rented card) to cut "
+                             "wall-clock time, especially with a larger --model")
     parser.add_argument("--quantize", choices=["int8", "int4"], default=None,
                         help="load the embedding model with bitsandbytes quantization "
                              "(implies device_map='auto' unless --device-map is given)")
@@ -539,19 +603,10 @@ def main():
                         help="accelerate device_map, e.g. 'balanced' to shard a model "
                              "too large for one GPU across all visible GPUs; overrides "
                              "--device when set")
-    parser.add_argument("--capu", metavar="MODEL_ID", default=None,
-                        help="compare raw against restoration by this model; only "
-                             "meaningful with --dense, since BM25 discards case "
-                             "and punctuation")
-    parser.add_argument("--sweep", action="store_true",
-                        help="score every candidate cleaning config against the raw baseline")
-    parser.add_argument("--write-config", action="store_true",
-                        help="write the winning config to benchmarks/audio/audio_config.json")
-    parser.add_argument("--detail", action="store_true",
-                        help="list per-query rank changes for the winner")
     parser.add_argument("--window-seconds", type=int, default=60)
     parser.add_argument("--stride-seconds", type=int, default=15)
-    parser.add_argument("--strategy", choices=["sliding", "semantic", "semantic_duration"],
+    parser.add_argument("--strategy",
+                        choices=["sliding", "semantic", "semantic_duration", "topic"],
                         default="sliding",
                         help="passage-construction strategy (default: today's sliding window)")
     parser.add_argument("--similarity-threshold", type=float, default=0.5,
@@ -567,7 +622,28 @@ def main():
     parser.add_argument("--min-duration-seconds", type=float, default=8.0)
     parser.add_argument("--target-duration-seconds", type=float, default=25.0)
     parser.add_argument("--max-duration-seconds", type=float, default=40.0)
-    parser.add_argument("--overlap-sentences", type=int, default=1)
+    # None, not a literal default: semantic_duration's default (1) and
+    # topic's (0, see TopicChunkConfig) genuinely differ, so this shared flag
+    # is resolved per --strategy below.
+    parser.add_argument("--overlap-sentences", type=int, default=None)
+    # --strategy topic only.
+    parser.add_argument("--sentences-per-batch", type=int, default=60)
+    parser.add_argument("--batch-overlap-sentences", type=int, default=10)
+    parser.add_argument("--fallback-context-window-sentences", type=int, default=3)
+    parser.add_argument("--fallback-breakpoint-percentile", type=float, default=15.0)
+    parser.add_argument("--deepseek-model", default=None)
+    parser.add_argument("--deepseek-base-url", default=None)
+    parser.add_argument("--deepseek-api-key", default=None,
+                        help="falls back to the DEEPSEEK_API_KEY env var")
+    parser.add_argument("--deepseek-rpm", type=float, default=None)
+    parser.add_argument("--deepseek-cache-dir", type=Path, default=None,
+                        help="persist this between sweep runs so repeated "
+                             "--lexical/--dense passes never re-pay DeepSeek "
+                             "for an unchanged video")
+    parser.add_argument("--deepseek-concurrency", type=int, default=8,
+                        help="videos segmented in parallel for --strategy topic "
+                             "(each video itself makes several sequential "
+                             "DeepSeek calls, one per sentence window)")
     # Phase 2, off by default -- not exercised by --duration-sweep below yet.
     pause = parser.add_mutually_exclusive_group()
     pause.add_argument("--pause-boost", dest="pause_boost", action="store_true", default=False)
@@ -595,11 +671,34 @@ def main():
         min_duration_seconds=args.min_duration_seconds,
         target_duration_seconds=args.target_duration_seconds,
         max_duration_seconds=args.max_duration_seconds,
-        overlap_sentences=args.overlap_sentences,
+        overlap_sentences=(args.overlap_sentences if args.overlap_sentences is not None
+                           else SemanticChunkConfig().overlap_sentences),
         pause_boost_enabled=args.pause_boost,
         pause_relative_percentile=args.pause_relative_percentile,
         pause_borderline_semantic_percentile=args.pause_borderline_semantic_percentile,
     )
+    topic_config = TopicChunkConfig(
+        sentences_per_batch=args.sentences_per_batch,
+        batch_overlap_sentences=args.batch_overlap_sentences,
+        min_duration_seconds=args.min_duration_seconds,
+        target_duration_seconds=args.target_duration_seconds,
+        max_duration_seconds=args.max_duration_seconds,
+        overlap_sentences=(args.overlap_sentences if args.overlap_sentences is not None
+                           else TopicChunkConfig().overlap_sentences),
+        fallback_context_window_sentences=args.fallback_context_window_sentences,
+        fallback_breakpoint_percentile=args.fallback_breakpoint_percentile,
+    )
+    llm_segment_fn = None
+    if args.strategy == "topic":
+        # Lazily imported so every other strategy stays free of DeepSeek and
+        # its API-key requirement.
+        from scripts.audio.deepseek_topic_segment import build_segmenter
+
+        llm_segment_fn = build_segmenter(
+            model=args.deepseek_model, api_key=args.deepseek_api_key,
+            base_url=args.deepseek_base_url, cache_dir=args.deepseek_cache_dir,
+            requests_per_minute=args.deepseek_rpm,
+        )
 
     if args.mode == "elasticsearch":
         report = evaluate(
@@ -610,7 +709,8 @@ def main():
 
     def score_file(path: Path, *, strategy: str = "sliding",
                    similarity_threshold: float = 0.5,
-                   duration_config: SemanticChunkConfig | None = None) -> Report:
+                   duration_config: SemanticChunkConfig | None = None,
+                   topic_chunk_config: "TopicChunkConfig | None" = None) -> Report:
         """Score a parquet as it stands, applying no transforms.
 
         Deliberately a separate path from ``score``: it holds one word stream at
@@ -620,7 +720,10 @@ def main():
         words = load_words(path)
         passages = passages_from_words(words, args.window_seconds, args.stride_seconds,
                                        strategy=strategy, similarity_threshold=similarity_threshold,
-                                       device=args.device, chunk_config=duration_config,
+                                       device=args.device, batch_size=args.batch_size,
+                                       chunk_config=duration_config,
+                                       topic_config=topic_chunk_config, llm_segment_fn=llm_segment_fn,
+                                       deepseek_concurrency=args.deepseek_concurrency,
                                        quantize=args.quantize, device_map=args.device_map)
         if strategy == "semantic_duration":
             cfg = duration_config or SemanticChunkConfig()
@@ -630,6 +733,12 @@ def main():
                      f"-{cfg.max_duration_seconds:g}]ov{cfg.overlap_sentences}")
         elif strategy == "semantic":
             label = f"{path.stem}:semantic@{similarity_threshold:.1f}"
+        elif strategy == "topic":
+            cfg = topic_chunk_config or TopicChunkConfig()
+            label = (f"{path.stem}:topic@b{cfg.sentences_per_batch}"
+                     f"o{cfg.batch_overlap_sentences}"
+                     f"[{cfg.min_duration_seconds:g}-{cfg.max_duration_seconds:g}]"
+                     f"ov{cfg.overlap_sentences}")
         else:
             label = path.stem
         print(f"[bench-audio] {label:<34} "
@@ -637,7 +746,8 @@ def main():
               f"{len(passages):>7,} passages")
         print_duration_stats(passages, label=label)
         del words
-        index = (DenseIndex(passages, device=args.device, cache_dir=args.embedding_cache,
+        index = (DenseIndex(passages, device=args.device, batch_size=args.batch_size,
+                            cache_dir=args.embedding_cache,
                             quantize=args.quantize, device_map=args.device_map)
                  if args.mode == "dense" else LexicalIndex(passages))
         return evaluate(label, queries, index.rank_videos)
@@ -672,9 +782,8 @@ def main():
             return winner
 
         # One axis at a time against the raw baseline, each stage fixing the
-        # previous stage's winner before moving on — mirrors how
-        # scripts.audio.pipeline.sweep_configs stages the cleaning sweep.
-        # Pause- and shot-aware boosting are a later phase, not swept here.
+        # previous stage's winner before moving on. Pause- and shot-aware
+        # boosting are a later phase, not swept here.
         stage("context_window_sentences", (1, 2, 3, 4),
              lambda cfg, v: replace(cfg, context_window_sentences=v))
         stage("breakpoint_percentile", (10.0, 15.0, 20.0, 25.0),
@@ -691,105 +800,23 @@ def main():
     if args.baseline_transcripts:
         baseline = score_file(args.baseline_transcripts, strategy=args.strategy,
                               similarity_threshold=args.similarity_threshold,
-                              duration_config=chunk_config)
+                              duration_config=chunk_config, topic_chunk_config=topic_config)
         candidate = score_file(args.transcripts, strategy=args.strategy,
                                similarity_threshold=args.similarity_threshold,
-                               duration_config=chunk_config)
+                               duration_config=chunk_config, topic_chunk_config=topic_config)
         print_summary([baseline, candidate], baseline)
         print_report(candidate, baseline)
         return
 
-    raw_words = load_words(args.transcripts)
-    total_words = sum(len(w) for w in raw_words.values())
-    print(f"[bench-audio] {len(raw_words)} videos, {total_words:,} words "
-          f"from {args.transcripts.name}")
-
-    # Counting 8-gram document frequency over 1.4M words is the expensive part
-    # of boilerplate removal and does not depend on the threshold, so every
-    # candidate that leaves the word stream intact shares one count.
-    frequency_cache: dict[int, object] = {}
-
-    def document_frequency_for(config: CleanConfig):
-        if config.boilerplate_min_videos is None or math.isfinite(config.max_nll):
-            return None
-        width = config.boilerplate_phrase_words
-        if width not in frequency_cache:
-            frequency_cache[width] = boilerplate_document_frequency(
-                raw_words, phrase_words=width
-            )
-        return frequency_cache[width]
-
-    # One loaded restorer, shared by every candidate that needs it.
-    capu_model = None
-
-    def restorer(config: CleanConfig):
-        nonlocal capu_model
-        if not config.capu_model:
-            return None
-        if capu_model is None:
-            from scripts.audio.capu import CapuModel
-
-            print(f"[bench-audio] loading {config.capu_model}")
-            capu_model = CapuModel(config.capu_model, device=args.device).load()
-        return capu_model
-
-    def score(config: CleanConfig) -> Report:
-        words = clean_corpus(
-            raw_words,
-            config,
-            document_frequency=document_frequency_for(config),
-            capu=restorer(config),
-        )
-        passages = passages_from_words(words, args.window_seconds, args.stride_seconds,
-                                       strategy=args.strategy,
-                                       similarity_threshold=args.similarity_threshold,
-                                       device=args.device, chunk_config=chunk_config,
-                                       quantize=args.quantize, device_map=args.device_map)
-        kept = sum(len(w) for w in words.values())
-        print(f"[bench-audio] {config.label:<34} {kept:>9,} words  "
-              f"{len(passages):>7,} passages")
-        print_duration_stats(passages, label=config.label)
-        if args.mode == "dense":
-            index = DenseIndex(passages, device=args.device,
-                               cache_dir=args.embedding_cache,
-                               quantize=args.quantize, device_map=args.device_map)
-        else:
-            index = LexicalIndex(passages)
-        return evaluate(config.label, queries, index.rank_videos)
-
-    if args.capu:
-        from dataclasses import replace
-
-        configs = [CleanConfig(), replace(CleanConfig(), capu_model=args.capu)]
-    elif args.sweep:
-        configs = sweep_configs()
-    else:
-        configs = [CleanConfig()]
-    reports = [score(config) for config in configs]
-    baseline = reports[0]
-    print_summary(reports, baseline)
-
-    if args.detail and len(reports) > 1:
-        best = max(reports[1:], key=lambda r: (r.recall_at(1), r.recall_at(10)))
-        print_report(best, baseline)
-
-    if args.write_config:
-        best_index = max(
-            range(len(reports)),
-            key=lambda i: (reports[i].recall_at(1), reports[i].recall_at(10)),
-        )
-        payload = {
-            "notes": [
-                "Generated by scripts.benchmarks.bench_audio_search --sweep --write-config.",
-                "Re-run the sweep instead of editing this by hand.",
-            ],
-            "metric": "gold-video recall over benchmarks/audio/audio_ground_truth.json (lexical mode)",
-            "baseline": {k: baseline.recall_at(k) for k in RECALL_AT},
-            "selected": {k: reports[best_index].recall_at(k) for k in RECALL_AT},
-            "clean": configs[best_index].to_json(),
-        }
-        CONFIG.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        print(f"\n[bench-audio] wrote {CONFIG} ({configs[best_index].label})")
+    # No sweep, no baseline comparison: a single report on --transcripts as it
+    # stands. Comparing a cleaned parquet against the raw one is
+    # --baseline-transcripts' job (above) — cleaning now happens out-of-process
+    # via scripts.audio.build_clean_transcripts, not as an in-memory config
+    # this bench applies itself.
+    report = score_file(args.transcripts, strategy=args.strategy,
+                        similarity_threshold=args.similarity_threshold,
+                        duration_config=chunk_config, topic_chunk_config=topic_config)
+    print_report(report)
 
 
 if __name__ == "__main__":

@@ -87,7 +87,7 @@ AIC_ALLOWED_USERS=owner@example.com,teammate1@example.com,teammate2@example.com,
 AIC_ADMIN_USER=owner@example.com
 ```
 
-Exactly five unique HAProxy usernames are required, and the administrator must be included in the allowlist. Never commit `.env.secure` or `haproxy-users.cfg`.
+Exactly five unique Tailscale account logins are required, and the administrator must be included in the allowlist. Never commit `.env.secure`.
 
 ## 5. Start the stack
 
@@ -107,7 +107,7 @@ curl -fsS http://127.0.0.1:8000/healthz
 curl -i http://127.0.0.1:8000/session
 ```
 
-The health endpoint returns `200`; `/session` requires HAProxy Basic Auth. Continue with [Direct-IP Team Deployment](team-deployment.md) to create the password file and expose the application to teammates.
+The health endpoint returns `200`; everything else requires an identity, which HAProxy takes from the `Tailscale-User-Login` header `tailscale serve` adds. Continue with [Venue Deployment](venue-deployment.md) to run this alongside a rented GPU instance.
 
 ## Search with an example image
 

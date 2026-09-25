@@ -26,6 +26,8 @@ services:
     build: .
     env_file:
       - .env.secure
+      - path: .env.dres
+        required: false
     environment:
       AIC_DATA_DIR: /data
       AIC_TRANSCRIPT_PATH: /data/2026/audio/generated/step_data_clean.parquet
@@ -85,6 +87,41 @@ services:
       timeout: 3s
       retries: 5
       start_period: 180s
+    restart: unless-stopped
+    logging: *default-logging
+
+  # The venue link to the compute host. It lives inside the docker network, not on the host:
+  # a host-side tunnel would have to bind 0.0.0.0 for `app` to reach it, which would put the
+  # compute host on the venue LAN, where any client could present any X-AIC-User header.
+  # Only needed when AIC_CORE_URL points here (docs/venue-deployment.md); leave it out or
+  # down when the app computes locally.
+  core-tunnel:
+    build:
+      context: .
+      dockerfile: Dockerfile.tunnel
+      args:
+        TUNNEL_UID: ${AIC_UID:-1000}
+    environment:
+      AIC_CORE_SSH_HOST: ${AIC_CORE_SSH_HOST:?Set AIC_CORE_SSH_HOST to the compute host}
+      AIC_CORE_SSH_PORT: ${AIC_CORE_SSH_PORT:-22}
+      AIC_CORE_SSH_USER: ${AIC_CORE_SSH_USER:-root}
+      AIC_CORE_SSH_KEY: /key/identity
+      AIC_TUNNEL_PORT: "9000"
+    volumes:
+      - ${AIC_CORE_SSH_KEY:?Set AIC_CORE_SSH_KEY to the private key that reaches the compute host}:/key/identity:ro
+    tmpfs:
+      - /tmp:rw,size=16m,mode=1777
+    # Run as the key's owner: the file-sharing layer behind Docker Desktop refuses to let
+    # root read a 0600 key it does not own.
+    user: "${AIC_UID:-1000}:${AIC_GID:-1000}"
+    networks:
+      - aic-internal
+      - aic-egress
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
     restart: unless-stopped
     logging: *default-logging
 

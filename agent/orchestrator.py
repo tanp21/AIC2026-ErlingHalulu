@@ -41,7 +41,7 @@ from .vision import Inspector, caption_at, label_context, transcript_window
 from .web import cooking_lookup, dish_name, fact_lookup, is_cooking, recipe_lookup, similar, tagged
 
 logger = logging.getLogger("agent")
-VIDEO_ID = re.compile(r"^[A-Z]\d{2}_V\d{3}$")
+VIDEO_ID = re.compile(r"^[A-Z]\d{2}[_-]V\d{3}$")
 OBSERVE_TOP = 12
 #: How many candidates the live review view shows (every pending one is added on top).
 PROGRESS_TOP = 24
@@ -104,14 +104,20 @@ class AgentOptions:
     #: `human` only: seconds of the reviewer doing nothing before the run finishes with
     #: what it has, so an abandoned tab does not hold a worker forever.
     human_idle_timeout: float = 900.0
-    #: `human` only: also show DeepSeek the pixels of each candidate's own moment while building the
+    #: `human` only: also show a model the pixels of each candidate's own moment while building the
     #: checklist (`agent.evidence.vision_summarize`). A caption is one model's guess about a frame, made
     #: once, offline, and can misname or miscount; the candidate's own pixels, plus the frames of the
     #: shots around it, are ground truth the text-only checklist never had. This never decides anything
     #: by itself -- the checklist stays a hint, and the person still accepts, rejects or scores every
-    #: candidate -- and it costs one more DeepSeek call per candidate, server to DeepSeek, not the
-    #: reviewer's own bandwidth.
+    #: candidate -- and it costs one more call per candidate, server to whichever backend judges, not
+    #: the reviewer's own bandwidth.
     checklist_vision: bool = True
+    #: `checklist_vision` only: which client reads those pixels -- `deepseek` (the default: the same
+    #: client already used for planning, no extra key) or `gemini` (`agent.gemini`, the same client the
+    #: web lookup already uses whatever `AIC_AGENT_VISION` is -- deliberately NOT `agent.vision`, which
+    #: a human-judged run builds as `OfflineGemini` precisely so a human-judged run never reaches a
+    #: model-judge vision backend; see `backend/agent_runner.py`).
+    checklist_vision_model: str = "deepseek"
 
     @classmethod
     def for_mode(cls, mode="fast", **overrides):
@@ -624,9 +630,14 @@ class _Run:
             return
         items = [{"id": c.cid, "video_id": c.video_id, "frame_idx": c.frame_idx, "time": c.time} for c in fresh]
         self._summary_tried.update(item["id"] for item in items)
-        self._suggest_tried = self._suggest_tried or suggest
-        top = ([{"id": c.cid, "video_id": c.video_id, "frame_idx": c.frame_idx, "time": c.time} for c in ordered[:2]]
-               if suggest else [])
+        # The candidate objects themselves, not dicts: the answer reader in the job reads
+        # their attributes, and the job runs on the background pool, which must not walk
+        # the pool itself while the orchestrator thread is adding to it.
+        top = ordered[:2] if suggest else []
+        # Tried only once there is a moment to ask about. The first kick lands while the
+        # first batch is still in flight -- the pool is empty, `top` is empty, and marking
+        # the question answered here is how a run kept its calls and got no chips at all.
+        self._suggest_tried = self._suggest_tried or bool(top)
         self.summarizing = True
         self.background.submit(self._summary_job, items, top)
 
@@ -640,18 +651,98 @@ class _Run:
                 self.summaries.update(found)
                 self.review.changed.set()  # the loop publishes; see _kick_summaries
 
-            vision = self.agent.deepseek if self.options.checklist_vision else None
-            summarize_all(self.agent.deepseek, self.details, self.evidence, items, workers=SUMMARY_WORKERS,
-                          on_batch=store, vision=vision, search=self.agent.search)
-            if top:
-                question = (self.plan.question_vi if self.plan else None) or self.task.text
-                self.suggestions = suggest_answers(self.agent.deepseek, question, self.details, self.evidence, top)
+            vision = None
+            if self.options.checklist_vision:
+                vision = (self.agent.gemini if self.options.checklist_vision_model == "gemini"
+                         else self.agent.deepseek)
+            # The answer is what the reviewer submits, so its chips are read BESIDE the checklist
+            # and published the moment they are ready, not when the checklist ends: the checklist
+            # is minutes of work on 80 candidates, and a reading that waited for it kept the answer
+            # waiting too (measured: a run stopped 0.1 s before the reading started showed no chips
+            # at all, though the reading would have given four).
+            def chips_ready(future):
+                try:
+                    self.suggestions = future.result()
+                except Exception as exc:  # an answer hint, like the checklist, is never the run
+                    logger.warning("%s answer chips failed: %s", self.task.query_id, exc)
+                finally:
+                    self.review.changed.set()  # the loop publishes; see _kick_summaries
+
+            with ThreadPoolExecutor(1) as pool:
+                answers = pool.submit(self._answer_chips, top, vision) if top else None
+                if answers is not None:
+                    answers.add_done_callback(chips_ready)
+                summarize_all(self.agent.deepseek, self.details, self.evidence, items,
+                              workers=SUMMARY_WORKERS, on_batch=store, vision=vision,
+                              search=self.agent.search)
         except Exception:  # a checklist is a hint; the person can judge without it
             logger.exception("%s evidence summary failed", self.task.query_id)
         finally:
             self.summarizing = False
             self.review.changed.set()
             self.log("summaries", {"n": len(items)}, f"{len(self.summaries)} summarised", started)
+
+    def _answer_chips(self, top: list[Candidate], vision) -> list[dict]:
+        """Everything the run can offer as a Q&A answer, best evidence first.
+
+        The models' own readings lead: they look at the pixels as well as the words, and a chip
+        nobody typed is what gets submitted when the reviewer is sure.
+        """
+        question = (self.plan.question_vi if self.plan else None) or self.task.text
+        moments = [{"id": c.cid, "video_id": c.video_id, "frame_idx": c.frame_idx, "time": c.time}
+                   for c in top]
+        return ((self._answer_readings(top, question) if vision else [])
+                + suggest_answers(self.agent.deepseek, question, self.details, self.evidence, moments))
+
+    def _answer_readings(self, moments: list[Candidate], question: str) -> list[dict]:
+        """What each vision model reads off the leading moments: frames, speech and on-screen text.
+
+        A Q&A answer is the reviewer's to submit, so this only offers chips -- but it is the one
+        place the answer is looked for in the pixels as well as the words, and both models read
+        the *same* moments so the two readings can be compared with each other, with the
+        transcript and with what the reviewer sees in the frame. Gemini leads because it is this
+        deployment's vision backend; DeepSeek is the same client that already reads the checklist,
+        so the second reading costs no extra key. A model that fails contributes nothing.
+        """
+        found = []
+        readers = [(name, Inspector(client, self.agent.search))
+                   for name, client in (("gemini", self.agent.gemini), ("deepseek", self.agent.deepseek))]
+        # Moment first, then model, so the two readings of one moment sit next to each other
+        # in the chips and can be compared at a glance.
+        for moment in moments:
+            for name, reader in readers:
+                try:
+                    cues = self.cues.get(moment.video_id) or self.agent.search.transcript(moment.video_id)
+                    self.cues[moment.video_id] = cues
+                    reply = reader.answer(
+                        self.task, question, moment,
+                        self.agent.search.neighbours(moment.video_id, moment.frame_idx, 3),
+                        cues, self._web_hints(), self._captions(moment.video_id),
+                        on_screen=self._on_screen(moment),
+                    )
+                except Exception as exc:  # one reading is a hint; the reviewer judges without it
+                    logger.warning("%s answer reading failed for %s: %s", name, moment.cid, exc)
+                    continue
+                answer = " ".join(str(reply.get("answer") or "").split())[:100]
+                if not answer:
+                    continue
+                try:
+                    confidence = float(reply.get("confidence") or 0)
+                except (TypeError, ValueError):
+                    confidence = 0.0
+                found.append({"answer": answer, "cid": moment.cid, "source": name,
+                              "quote": " ".join(str(reply.get("evidence") or "").split())[:160],
+                              "confidence": min(max(confidence, 0.0), 10.0)})
+        return found
+
+    def _web_hints(self) -> str:
+        return "\n".join(f"- {entry['question']}: {entry['answer'][:300]}"
+                         for entry in self.result.lookups if entry.get("answer"))
+
+    def _on_screen(self, moment: Candidate) -> str:
+        """The OCR of the shots around a moment, timed, as the answer prompt wants it."""
+        return transcript_window(self.evidence.ocr(moment.video_id), moment.time, 20.0,
+                                 empty="(no text read on screen)")
 
     def _answer_suggestions(self) -> list[dict]:
         """Answers for a Q&A question that the words around the top moments or the web offer."""
@@ -1384,8 +1475,7 @@ class _Run:
             cues = self.cues.get(top_video) or self.agent.search.transcript(top_video)
         except Exception:
             cues = []
-        hints = "\n".join(f"- {entry['question']}: {entry['answer'][:300]}"
-                          for entry in self.result.lookups if entry.get("answer"))
+        hints = self._web_hints()
         question = self.plan.question_vi or self.task.text
 
         captions = self._captions(top_video)

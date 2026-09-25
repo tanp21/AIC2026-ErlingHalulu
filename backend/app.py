@@ -1,5 +1,6 @@
 """FastAPI VBS-style search app."""
 import os
+import dataclasses
 import json
 import logging
 import secrets
@@ -21,6 +22,8 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from starlette.background import BackgroundTask
 
 from . import core, thumb, shots, shot_labels, audio_search, ocr_search, frame_maps, subquery_fusion
+from . import object_search
+from . import query_refine
 from . import caption_search
 from . import core_service, search_core
 from .temporal_search import (
@@ -28,7 +31,11 @@ from .temporal_search import (
 )
 from .access_control import AccessConfig, LatestWinsCoordinator, install_access_control
 from .agent_runner import AgentRunStore, install_agent_routes, shutdown_agent_runs
+from .checker import (
+    CheckStore, DetailsStore, check_config, install_check_routes, shutdown_checks,
+)
 from .collaboration import CollaborationStore, install_collaboration_routes
+from .dres import DresConfig, DresService, DresSubmissionStore, install_dres_routes
 
 ROOT = core.ROOT
 FRONTEND_DIST = ROOT / "static" / "dist"
@@ -53,6 +60,12 @@ _SEARCH_FANOUT_EXECUTOR = ThreadPoolExecutor(max_workers=10, thread_name_prefix=
 # submits to _SEARCH_FANOUT_EXECUTOR, so sharing one pool could starve that inner work.
 _AGENT_BATCH_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="agent-batch")
 
+# Built once at import time from indexes/profiles/manifest.json (same source
+# ProfileStore itself reads) so a newly registered profile is selectable without a
+# code change -- previously hardcoded to Literal["l2026"], which silently rejected
+# every other registered profile (including new ones) with a 422.
+_PROFILE_NAMES = tuple(core.PROFILE_STORE.profiles.keys())
+
 
 class SearchReq(BaseModel):
     text: str | None = Field(default=None, max_length=2000)
@@ -60,16 +73,22 @@ class SearchReq(BaseModel):
     audio_text: str | None = Field(default=None, max_length=2000)
     audio_method: Literal["semantic", "keyword"] = "semantic"
     ocr_text: str | None = Field(default=None, max_length=2000)
+    object_query: object_search.ObjectQuery | None = None
     pe_weight: float = Field(default=.75, ge=0, le=1)
-    mode: Literal["visual", "audio", "hybrid", "ocr"] = "visual"
+    mode: Literal["visual", "audio", "hybrid", "ocr", "object"] = "visual"
     index: str = "flat"
-    profile: Literal["l2026"] = "l2026"
+    profile: Literal[_PROFILE_NAMES] = core.PROFILE_STORE.default
     nprobe: int = Field(default=0, ge=0, le=4096)
     ef: int = Field(default=0, ge=0, le=4096)
 
 
+class RefineReq(BaseModel):
+    text: str = Field(max_length=2000)
+    kind: Literal["kis", "qa", "trake"] = "kis"
+
+
 class ImageReference(BaseModel):
-    video_id: str = Field(pattern=r"^[A-Z]\d{2}_V\d{3}$")
+    video_id: str = Field(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")
     frame_idx: int = Field(ge=0)
 
 
@@ -89,7 +108,7 @@ class TemporalSearchReq(BaseModel):
     audio_method: Literal["semantic", "keyword"] = "semantic"
     pe_weight: float = Field(default=.75, ge=0, le=1)
     max_gap_seconds: int = Field(default=120, ge=1, le=600)
-    profile: Literal["l2026"] = "l2026"
+    profile: Literal[_PROFILE_NAMES] = core.PROFILE_STORE.default
 
     @field_validator("events")
     @classmethod
@@ -105,12 +124,45 @@ class TemporalSearchReq(BaseModel):
         return text.strip() if text is not None else None
 
 
+class TemporalImageEvent(BaseModel):
+    kind: Literal["text", "upload", "reference", "audio", "ocr", "object"]
+    text: str | None = Field(default=None, max_length=2000)
+    image_index: int | None = Field(default=None, ge=0, le=5)
+    reference: ImageReference | None = None
+    object_query: object_search.ObjectQuery | None = None
+    object_filter: object_search.ObjectQuery | None = None
+
+    @model_validator(mode="after")
+    def validate_payload(self):
+        if self.kind in {"text", "audio", "ocr"}:
+            if self.text is None or not self.text.strip():
+                raise ValueError(f"{self.kind} event must contain text")
+        elif self.kind == "upload" and self.image_index is None:
+            raise ValueError("upload event must reference an image")
+        elif self.kind == "reference" and self.reference is None:
+            raise ValueError("reference event must contain a keyframe")
+        elif self.kind == "object" and self.object_query is None:
+            raise ValueError("object event must contain an object query")
+        if self.kind == "object" and self.object_filter is not None:
+            raise ValueError("object event already includes its position query")
+        return self
+
+
+class TemporalImageSearchReq(BaseModel):
+    events: list[TemporalImageEvent] = Field(min_length=2, max_length=6)
+    audio_text: str | None = Field(default=None, max_length=2000)
+    audio_method: Literal["semantic", "keyword"] = "semantic"
+    pe_weight: float = Field(default=.75, ge=0, le=1)
+    max_gap_seconds: int = Field(default=120, ge=1, le=600)
+    profile: Literal[_PROFILE_NAMES] = core.PROFILE_STORE.default
+
+
 class CompareReq(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     k: int = Field(default=50, ge=1, le=200)
 
 
-VideoId = Annotated[str, Field(pattern=r"^[A-Z]\d{2}_V\d{3}$")]
+VideoId = Annotated[str, Field(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")]
 AgentQueryId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.:-]{1,40}$")]
 AgentText = Annotated[str, Field(min_length=1, max_length=2000)]
 
@@ -178,7 +230,7 @@ AgentQuery = Annotated[
 
 class AgentBatchReq(BaseModel):
     queries: list[AgentQuery] = Field(min_length=1, max_length=AGENT_BATCH_MAX_QUERIES)
-    profile: Literal["l2026"] = "l2026"
+    profile: Literal[_PROFILE_NAMES] = core.PROFILE_STORE.default
 
     @field_validator("queries")
     @classmethod
@@ -309,6 +361,12 @@ class TemporalSnapshotStore(SearchSnapshotStore):
         return self._rename(super().next(owner, cursor))
 
 
+# A media host has the corpus on local disk but no GPU and no Elasticsearch: it answers
+# the SPA and the heavy bytes itself and forwards every other route to the compute host.
+# See docs/venue-deployment.md.
+MEDIA_ROLE = os.environ.get("AIC_ROLE", "").strip().lower() == "media"
+
+
 def warmup_search():
     mode = os.environ.get("AIC_WARMUP", "metadata").strip().lower()
     total_start = time.perf_counter()
@@ -328,11 +386,24 @@ def warmup_search():
                     "core API version mismatch: client %s, host %s; pull/merge before trusting results",
                     search_core.CORE_API_VERSION, status.get("api_version"),
                 )
+        if MEDIA_ROLE:
+            # Local corpus, remote compute: media routes read the videos and frame maps
+            # straight off disk, so only the metadata `resolve` needs has to load here.
+            started = time.perf_counter()
+            core.load_meta()
+            logger.info("warm-up media host metadata: %.1f ms", (time.perf_counter() - started) * 1000)
         return
 
     started = time.perf_counter()
     core.load_meta()
     logger.info("warm-up metadata: %.1f ms", (time.perf_counter() - started) * 1000)
+
+    try:
+        started = time.perf_counter()
+        object_search.warmup()
+        logger.info("warm-up object data: %.1f ms", (time.perf_counter() - started) * 1000)
+    except Exception as exc:
+        logger.warning("object data is unavailable at warm-up: %s", exc)
 
     # Loading PE-Core, the Flat index and Qwen3-Embedding-4B together can consume
     # nearly all RAM on a development workstation. Keep startup cheap; production
@@ -361,6 +432,11 @@ async def lifespan(app):
     app.state.collaboration_store = CollaborationStore(
         os.environ.get("AIC_COLLAB_DB", ROOT / "artifacts" / "collaboration.sqlite3")
     )
+    app.state.dres_service = DresService(
+        DresConfig.from_env(),
+        DresSubmissionStore(os.environ.get("AIC_COLLAB_DB", ROOT / "artifacts" / "collaboration.sqlite3")),
+        resolve,
+    )
     app.state.search_coordinator = LatestWinsCoordinator(
         # One concurrent search per trusted user; only explicit index operations lock.
         max_running=5,
@@ -371,6 +447,10 @@ async def lifespan(app):
     app.state.search_snapshots = SearchSnapshotStore()
     app.state.temporal_snapshots = TemporalSnapshotStore()
     app.state.agent_runs = AgentRunStore()
+    # Not owner-scoped: what a check says about a shot is a fact about the video and the query,
+    # so the second teammate to look at a candidate gets the first one's answer for free.
+    app.state.check_results = CheckStore()
+    app.state.check_details = DetailsStore()
     core.start_text_batcher()
     audio_search.start_audio_text_batcher()
     try:
@@ -380,16 +460,20 @@ async def lifespan(app):
         core.close_text_batcher()
         audio_search.close_audio_text_batcher()
         search_core.close_client()
+        app.state.dres_service.close()
         _SEARCH_FANOUT_EXECUTOR.shutdown(wait=False, cancel_futures=True)
         _AGENT_BATCH_EXECUTOR.shutdown(wait=False, cancel_futures=True)
         shutdown_agent_runs()
+        shutdown_checks()
 
 
 app = FastAPI(lifespan=lifespan)
-core_service.install_core_service(app)
+core_service.install_core_service(app, mode="api" if MEDIA_ROLE else "media")
 install_access_control(app)
 install_collaboration_routes(app)
+install_dres_routes(app)
 install_agent_routes(app)
+install_check_routes(app)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.mount("/static", StaticFiles(directory=FRONTEND_DIST, check_dir=False), name="static")
 
@@ -475,7 +559,75 @@ def _with_ocr_filter(req, ocr_text, primary_operation):
     }
 
 
-def search(req: SearchReq):
+def object_search_response(req, query, k=SEARCH_RESULT_LIMIT):
+    started = time.perf_counter()
+    profile = req.profile or search_core.default_profile()
+    try:
+        found = search_core.search_objects(profile, query, k)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, f"object search unavailable: {exc}") from exc
+    results = []
+    for rank, hit in enumerate(found["hits"], 1):
+        video_id, frame_idx = hit["video_id"], hit["frame_idx"]
+        results.append({
+            "rank": rank - 1, "score": hit["score"],
+            "video_id": video_id, "frame_idx": frame_idx,
+            "pts": int(hit["pts"]), "time": hit["time"],
+            "thumb": f"/thumb/{video_id}/{frame_idx}",
+            "frame": f"/frame/{video_id}/{frame_idx}",
+            "video": f"/video/{video_id}", "source": "object",
+            "matched_objects": hit["matched_objects"],
+            "object_delta_ms": hit["delta_ms"],
+            "scores": {"object_score": hit["score"], "object_rank": rank},
+        })
+    return {
+        "results": results, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+        "mode": "object", "index": "sqlite", "index_info": {"type": "Object positions"},
+        "profile": profile, "truncated": found["truncated"],
+    }
+
+
+def _match_object_hits(profile, query, hits):
+    try:
+        matches = search_core.match_objects(
+            profile, query,
+            [{"video_id": hit["video_id"], "frame_idx": hit["frame_idx"]} for hit in hits],
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, f"object search unavailable: {exc}") from exc
+    filtered = []
+    for hit, match in zip(hits, matches):
+        if match is None:
+            continue
+        filtered.append({
+            **hit, "matched_objects": match["matched_objects"],
+            "object_delta_ms": match["delta_ms"],
+            "scores": {**hit.get("scores", {}), "object_score": match["score"]},
+        })
+    return filtered
+
+
+def _with_object_filter(req, response):
+    query = req.object_query
+    if query is None:
+        return response
+    started = time.perf_counter()
+    filtered = _match_object_hits(req.profile, query, response["results"])
+    elapsed = round((time.perf_counter() - started) * 1000, 1)
+    return {**response, "results": filtered,
+            "latency_ms": round(response["latency_ms"] + elapsed, 1),
+            "latencies": {**response.get("latencies", {}), "object_ms": elapsed}}
+
+
+def _search_without_objects(req: SearchReq):
     legacy_text = (req.text or "").strip()
     visual_text = (req.visual_text or legacy_text).strip()
     audio_text = (req.audio_text or legacy_text).strip()
@@ -521,6 +673,14 @@ def search(req: SearchReq):
     )
 
 
+def search(req: SearchReq):
+    if req.mode == "object":
+        if req.object_query is None:
+            raise HTTPException(422, "object query is required")
+        return object_search_response(req, req.object_query)
+    return _with_object_filter(req, _search_without_objects(req))
+
+
 @app.post("/search")
 async def search_endpoint(req: SearchReq, request: Request):
     if req.index != "flat" and not request.state.is_admin:
@@ -532,6 +692,48 @@ async def search_endpoint(req: SearchReq, request: Request):
         exclusive=req.index != "flat",
     )
     return request.app.state.search_snapshots.create(request.state.login, response)
+
+
+#: Built on first refine request, not at import: constructing it costs nothing but
+#: an Authorization header, and a deployment without a DeepSeek key never builds it.
+_refiner = None
+
+
+def _refiner_client():
+    global _refiner
+    if _refiner is None:
+        from agent.llm import DeepSeekClient
+
+        # Far below the client's own 180 s / 3-retry defaults: a person is watching
+        # this one, and a slow answer is worse than telling them it is unavailable.
+        _refiner = DeepSeekClient(
+            os.environ["DEEPSEEK_API_KEY"], thinking=False, timeout=25.0, retries=1,
+        )
+    return _refiner
+
+
+@app.post("/search/refine")
+async def refine_endpoint(req: RefineReq):
+    """The agent's DeepSeek planner over one typed query, as search suggestions.
+
+    Deliberately its own route rather than a step inside /search: the per-user
+    search lock is held for a whole request, so an LLM call there would stall the
+    next search behind it, and a refusal here leaves plain search untouched.
+    """
+    from agent.tasks import Task
+
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(422, "query text is required")
+    if not os.environ.get("DEEPSEEK_API_KEY"):
+        raise HTTPException(503, "query refinement is not configured")
+    try:
+        refinement = await run_in_threadpool(
+            query_refine.refine, Task("search", req.kind, text), _refiner_client()
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(503, f"query refinement unavailable: {exc}") from exc
+    return dataclasses.asdict(refinement)
 
 
 def image_conditioned_search(req: ImageSearchReq, image_data=None):
@@ -578,7 +780,7 @@ def image_conditioned_search(req: ImageSearchReq, image_data=None):
     visual_operation = lambda: visual_vector_search(
         req, query_vector, exclude_global_id
     )
-    return _with_ocr_filter(
+    response = _with_ocr_filter(
         req,
         (req.ocr_text or "").strip(),
         lambda: _visual_audio_search(
@@ -587,6 +789,29 @@ def image_conditioned_search(req: ImageSearchReq, image_data=None):
             (req.audio_text or "").strip() if req.mode == "hybrid" else "",
         ),
     )
+    return _with_object_filter(req, response)
+
+
+@app.get("/objects/catalog")
+def object_catalog_endpoint():
+    try:
+        return search_core.object_catalog()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, f"object search unavailable: {exc}") from exc
+
+
+@app.get("/objects/{video_id}/detections")
+def object_video_detections_endpoint(
+    video_id: str = Path(pattern=r"^[A-Z]\d{2,3}_V\d{3}$"),
+):
+    try:
+        return search_core.object_video_detections(video_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, f"object search unavailable: {exc}") from exc
 
 
 @app.post("/search/image")
@@ -656,6 +881,79 @@ async def temporal_search_endpoint(req: TemporalSearchReq, request: Request):
     return request.app.state.temporal_snapshots.create(request.state.login, response)
 
 
+@app.post("/search/temporal/image")
+async def temporal_image_search_endpoint(
+    request: Request,
+    payload: str = Form(max_length=20_000),
+    images: list[UploadFile] = File(default=[]),
+):
+    try:
+        req = TemporalImageSearchReq.model_validate_json(payload)
+    except ValidationError as exc:
+        raise HTTPException(422, "invalid temporal image search payload") from exc
+    event_specs = []
+    visual_vectors = []
+    used_images = set()
+    for event_index, event in enumerate(req.events):
+        if event.kind == "text":
+            visual_vectors.append((event_index, "text", event.text.strip()))
+            event_specs.append({"kind": "visual"})
+        elif event.kind in {"audio", "ocr"}:
+            event_specs.append({"kind": event.kind, "text": event.text.strip()})
+        elif event.kind == "object":
+            event_specs.append({"kind": "object", "query": event.object_query})
+        elif event.kind == "upload":
+            if event.image_index >= len(images):
+                raise HTTPException(422, "upload event references a missing image")
+            if event.image_index in used_images:
+                raise HTTPException(422, "each uploaded image must belong to one event")
+            used_images.add(event.image_index)
+            data = await images[event.image_index].read(MAX_QUERY_IMAGE_BYTES + 1)
+            if not data:
+                raise HTTPException(422, "query image is empty")
+            if len(data) > MAX_QUERY_IMAGE_BYTES:
+                raise HTTPException(413, "query image exceeds 6 MiB")
+            try:
+                visual_vectors.append((event_index, "vector", search_core.encode_image(data)))
+                event_specs.append({"kind": "visual"})
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        else:
+            try:
+                vector, _ = search_core.frame_embedding(
+                    "flat", event.reference.video_id, event.reference.frame_idx, req.profile
+                )
+            except (KeyError, RuntimeError) as exc:
+                raise HTTPException(404, "referenced keyframe is unavailable") from exc
+            visual_vectors.append((event_index, "vector", vector))
+            event_specs.append({"kind": "visual"})
+        if event.object_filter is not None:
+            event_specs[-1]["object_filter"] = event.object_filter
+    if len(used_images) != len(images):
+        raise HTTPException(422, "unused query image supplied")
+
+    texts = [value for _, kind, value in visual_vectors if kind == "text"]
+    encoded_texts = iter(search_core.encode_texts(texts)) if texts else iter(())
+    query_vectors = np.stack([next(encoded_texts) if kind == "text" else np.asarray(value).reshape(-1)
+                              for _, kind, value in visual_vectors]) if visual_vectors else None
+    for visual_index, (event_index, _, _) in enumerate(visual_vectors):
+        event_specs[event_index]["visual_index"] = visual_index
+    temporal_req = TemporalSearchReq(
+        events=[event.text.strip() if event.text else "event" for event in req.events], audio_text=req.audio_text,
+        audio_method=req.audio_method, pe_weight=req.pe_weight,
+        max_gap_seconds=req.max_gap_seconds, profile=req.profile,
+    )
+    candidate_k, scoring_method, min_gap_seconds = load_temporal_config()
+    response = await request.app.state.search_coordinator.run(
+        request.state.login,
+        lambda: run_in_threadpool(
+            temporal_search_response, temporal_req, candidate_k, scoring_method,
+            min_gap_seconds, query_vectors, event_specs,
+        ),
+    )
+    return request.app.state.temporal_snapshots.create(request.state.login, response)
+
+
 @app.post("/search/temporal/next")
 async def next_temporal_page(req: SearchPageReq, request: Request):
     try:
@@ -712,10 +1010,16 @@ def visual_vector_search(req: SearchReq, q, exclude_global_id=None, started=None
 
 
 def temporal_visual_paths(req: TemporalSearchReq, candidate_k, scoring_method, beam_size=1,
-                          candidate_pool_k=None, dedup_seconds=0, min_gap_seconds=0.0):
+                          candidate_pool_k=None, dedup_seconds=0, min_gap_seconds=0.0,
+                          queries=None, event_specs=None):
     total_start = time.perf_counter()
     profile = req.profile or search_core.default_profile()
-    queries = search_core.encode_texts(req.events)
+    if event_specs is not None:
+        return temporal_multimodal_paths(
+            req, event_specs, candidate_k, scoring_method, beam_size,
+            candidate_pool_k, dedup_seconds, min_gap_seconds, queries, profile, total_start,
+        )
+    queries = queries if queries is not None else search_core.encode_texts(req.events)
     try:
         result = search_core.visual_search(
             "flat", profile, queries, candidate_pool_k or candidate_k, with_pts=True
@@ -760,6 +1064,131 @@ def temporal_visual_paths(req: TemporalSearchReq, candidate_k, scoring_method, b
         "faiss_latency_ms": faiss_ms,
         "profile": profile,
     }
+
+
+def temporal_multimodal_paths(req, event_specs, candidate_k, scoring_method, beam_size,
+                              candidate_pool_k, dedup_seconds, min_gap_seconds,
+                              queries, profile, total_start):
+    candidates = [[] for _ in event_specs]
+    faiss_ms = 0.0
+    visual_indexes = [index for index, event in enumerate(event_specs) if event["kind"] == "visual"]
+    if visual_indexes:
+        visual = search_core.visual_search(
+            "flat", profile, queries, candidate_pool_k or candidate_k, with_pts=True,
+        )
+        faiss_ms = round(visual["faiss_latency_ms"], 1)
+        for hit in visual["hits"]:
+            event_index = next(index for index in visual_indexes
+                               if event_specs[index]["visual_index"] == hit["vector_index"])
+            candidates[event_index].append({
+                "event_index": event_index, "event_rank": hit["rank"], "rank": hit["rank"] - 1,
+                "score": hit["distance"], "video_id": hit["video_id"],
+                "frame_idx": hit["frame_idx"], "time": hit["time"], "pts": int(hit["pts"]),
+                "thumb": f"/thumb/{hit['video_id']}/{hit['frame_idx']}",
+                "frame": f"/frame/{hit['video_id']}/{hit['frame_idx']}",
+                "video": f"/video/{hit['video_id']}", "source": "visual",
+                "scores": {"visual_score": round(hit["distance"], 4), "visual_rank": hit["rank"]},
+            })
+
+    for event_index, event in enumerate(event_specs):
+        if event["kind"] == "object":
+            try:
+                found = search_core.search_objects(profile, event["query"], candidate_k)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(503, f"object search unavailable: {exc}") from exc
+            for rank, hit in enumerate(found["hits"], 1):
+                video_id, frame_idx = hit["video_id"], hit["frame_idx"]
+                candidates[event_index].append({
+                    "event_index": event_index, "event_rank": rank, "rank": rank - 1,
+                    "score": hit["score"], "video_id": video_id, "frame_idx": frame_idx,
+                    "time": hit["time"], "pts": int(hit["pts"]),
+                    "thumb": f"/thumb/{video_id}/{frame_idx}",
+                    "frame": f"/frame/{video_id}/{frame_idx}",
+                    "video": f"/video/{video_id}", "source": "object",
+                    "matched_objects": hit["matched_objects"],
+                    "object_delta_ms": hit["delta_ms"],
+                    "scores": {"object_score": hit["score"], "object_rank": rank},
+                })
+        elif event["kind"] == "audio":
+            hits = _temporal_audio_hits(event["text"], req.audio_method, candidate_k)
+            profile_videos = search_core.known_videos(profile)
+            points = [{"video_id": hit["video_id"], "time": hit["time"]}
+                      for hit in hits if hit["video_id"] in profile_videos]
+            marks = iter(search_core.annotate(points, profile))
+            rank = 0
+            for hit in hits:
+                if hit["video_id"] not in profile_videos:
+                    continue
+                mark = next(marks)
+                if mark is None:
+                    continue
+                rank += 1
+                candidates[event_index].append({
+                    "event_index": event_index, "event_rank": rank, "rank": rank - 1,
+                    "score": hit["score"], "video_id": hit["video_id"],
+                    "frame_idx": mark["frame_idx"], "time": mark["time"], "pts": int(mark["pts"]),
+                    "thumb": f"/thumb/{hit['video_id']}/{mark['frame_idx']}",
+                    "frame": f"/frame/{hit['video_id']}/{mark['frame_idx']}",
+                    "video": f"/video/{hit['video_id']}", "source": "transcript",
+                    "transcript_snippet": hit["transcript_snippet"],
+                    "transcript_start": hit["transcript_start"], "transcript_end": hit["transcript_end"],
+                    "audio_method": req.audio_method,
+                    "scores": {"audio_score": hit["score"], "audio_rank": rank,
+                               "bm25_rank": hit["bm25_rank"], "vector_rank": hit["vector_rank"]},
+                })
+                if rank >= candidate_k:
+                    break
+        elif event["kind"] == "ocr":
+            hits = ocr_search.search_ocr_keyword(event["text"], candidate_k)
+            profile_videos = search_core.known_videos(profile)
+            points = [{"video_id": hit.video_id, "frame_idx": hit.frame_idx}
+                      for hit in hits if hit.video_id in profile_videos]
+            marks = iter(search_core.annotate(points, profile))
+            rank = 0
+            for hit in hits:
+                if hit.video_id not in profile_videos:
+                    continue
+                mark = next(marks)
+                if mark is None:
+                    continue
+                rank += 1
+                candidates[event_index].append({
+                    "event_index": event_index, "event_rank": rank, "rank": rank - 1,
+                    "score": hit.score, "video_id": hit.video_id,
+                    "frame_idx": mark["frame_idx"], "time": mark["time"], "pts": int(mark["pts"]),
+                    "thumb": f"/thumb/{hit.video_id}/{mark['frame_idx']}",
+                    "frame": f"/frame/{hit.video_id}/{mark['frame_idx']}",
+                    "video": f"/video/{hit.video_id}", "source": "ocr",
+                    "ocr_snippet": hit.text, "ocr_start": hit.start_sec, "ocr_end": hit.end_sec,
+                    "ocr_shot_index": hit.shot_idx,
+                    "scores": {"ocr_score": hit.score, "ocr_rank": rank},
+                })
+                if rank >= candidate_k:
+                    break
+
+    for index, event in enumerate(event_specs):
+        if event.get("object_filter") is not None:
+            candidates[index] = _match_object_hits(profile, event["object_filter"], candidates[index])
+
+    mixed = any(event["kind"] != "visual" for event in event_specs)
+    for index, event_hits in enumerate(candidates):
+        if mixed:
+            for hit in event_hits:
+                hit["score"] = max(0.0, 1.0 - (hit["event_rank"] - 1) / max(candidate_k, 1))
+        if dedup_seconds:
+            candidates[index] = deduplicate_candidates(event_hits, dedup_seconds, candidate_k)
+        else:
+            candidates[index] = event_hits[:candidate_k]
+
+    paths = build_sequences(candidates, req.max_gap_seconds, scoring_method, candidate_k, beam_size,
+                            min_gap_seconds=min_gap_seconds)
+    return {"paths": paths, "latency_ms": round((time.perf_counter() - total_start) * 1000, 1),
+            "faiss_latency_ms": faiss_ms, "profile": profile,
+            "score_basis": "event_rank" if mixed else "visual_similarity"}
 
 
 def finalize_temporal_response(paths, metadata, scoring_method, candidate_k, audio_hits=None):
@@ -817,22 +1246,22 @@ def finalize_temporal_response(paths, metadata, scoring_method, candidate_k, aud
 
 
 def temporal_visual_search(req: TemporalSearchReq, candidate_k, scoring_method,
-                           min_gap_seconds=0.0):
+                           min_gap_seconds=0.0, queries=None):
     visual = temporal_visual_paths(
-        req, candidate_k, scoring_method, min_gap_seconds=min_gap_seconds
+        req, candidate_k, scoring_method, min_gap_seconds=min_gap_seconds, queries=queries
     )
     return finalize_temporal_response(
         visual["paths"], visual, scoring_method, candidate_k
     )
 
 
-def _audio_hits(text, method):
+def _audio_hits(text, method, k=SEARCH_RESULT_LIMIT):
     search_fn = (audio_search.search_audio_semantic if method == "semantic"
                  else audio_search.search_audio_keyword)
-    return search_fn(text, SEARCH_RESULT_LIMIT)
+    return search_fn(text, k)
 
 
-def _temporal_audio_hits(text, method):
+def _temporal_audio_hits(text, method, k=SEARCH_RESULT_LIMIT):
     return [
         {
             "video_id": hit.video_id,
@@ -848,20 +1277,25 @@ def _temporal_audio_hits(text, method):
             "audio_method": method,
             "matched_keywords": list(hit.matched_keywords),
         }
-        for hit in _audio_hits(text, method)
+        for hit in _audio_hits(text, method, k)
     ]
 
 
 def temporal_search_response(req: TemporalSearchReq, candidate_k, scoring_method,
-                             min_gap_seconds=0.0):
+                             min_gap_seconds=0.0, queries=None, event_specs=None):
     audio_text = (req.audio_text or "").strip()
     if not audio_text:
-        return temporal_visual_search(req, candidate_k, scoring_method, min_gap_seconds)
+        if event_specs is None:
+            return temporal_visual_search(req, candidate_k, scoring_method, min_gap_seconds, queries)
+        visual = temporal_visual_paths(req, candidate_k, scoring_method,
+                                       min_gap_seconds=min_gap_seconds, queries=queries,
+                                       event_specs=event_specs)
+        return finalize_temporal_response(visual["paths"], visual, scoring_method, candidate_k)
 
     executor = _SEARCH_FANOUT_EXECUTOR
     visual_future = executor.submit(
         temporal_visual_paths, req, candidate_k, scoring_method,
-        min_gap_seconds=min_gap_seconds,
+        min_gap_seconds=min_gap_seconds, queries=queries, event_specs=event_specs,
     )
     audio_future = executor.submit(_temporal_audio_hits, audio_text, req.audio_method)
     visual = visual_future.result()
@@ -1399,12 +1833,15 @@ async def healthz():
 
 @app.get("/session")
 async def session(request: Request):
-    return {"login": request.state.login, "is_admin": request.state.is_admin}
+    # `check` says only whether the deployment has an OpenRouter key, never the key: it is what
+    # hides the Search tab's "Check by AI" button instead of letting it fail when pressed.
+    return {"login": request.state.login, "is_admin": request.state.is_admin,
+            "check": check_config()}
 
 
 @app.get("/thumb/{video_id}/{frame_idx}")
 def get_thumb(
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$"),
+    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
     frame_idx: int = Path(ge=0),
     w: int = Query(default=320, ge=32, le=1920),
 ):
@@ -1423,12 +1860,13 @@ def get_thumb(
 @app.get("/context/{video_id}/{frame_idx}")
 def keyframe_context(
     response: Response,
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$"),
+    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
     frame_idx: int = Path(ge=0),
     profile: str | None = Query(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$"),
     radius: int = Query(default=10, ge=0, le=25),
+    all_frames: bool = Query(default=False),
 ):
-    """Return indexed neighbours only; image decoding remains entirely client-side."""
+    """Return indexed keyframe metadata; image decoding remains client-side."""
     response.headers["Cache-Control"] = "no-store"
     source = profile or core.default_profile()
     try:
@@ -1442,7 +1880,8 @@ def keyframe_context(
         pos -= 1
     mapping = frame_maps.load(video_id)
     neighbours = []
-    for frame in frames[max(0, pos - radius):pos + radius + 1]:
+    selected_frames = frames if all_frames else frames[max(0, pos - radius):pos + radius + 1]
+    for frame in selected_frames:
         value = int(frame)
         neighbours.append({
             "video_id": video_id, "frame_idx": value, "pts": int(mapping.pts[value]),
@@ -1455,7 +1894,7 @@ def keyframe_context(
 @app.get("/captions/{video_id}/frames")
 def shot_captions(
     response: Response,
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$"),
+    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
     frames: str = Query(pattern=r"^\d+(,\d+)*$"),
 ):
     """CapRL shot captions for `frames`, keyed by frame index.
@@ -1496,7 +1935,7 @@ def shot_captions(
 
 @app.get("/frame/{video_id}/{frame_idx}")
 def get_frame(
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$"),
+    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
     frame_idx: int = Path(ge=0),
 ):
     row = resolve(video_id)
@@ -1510,13 +1949,14 @@ def get_frame(
 
 
 @app.get("/video/{video_id}")
-def get_video(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
+def get_video(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"), original: bool = False):
     row = resolve(video_id)
-    return FileResponse(shots.streaming_path(row), media_type="video/mp4")
+    source = row["path"] if original else shots.streaming_path(row)
+    return FileResponse(source, media_type="video/quicktime" if str(source).lower().endswith(".mov") else "video/mp4")
 
 
 @app.get("/frame-map/{video_id}")
-def get_frame_map(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
+def get_frame_map(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
     try:
         return frame_maps.load(video_id).payload(video_id)
     except FileNotFoundError as exc:
@@ -1562,7 +2002,7 @@ def _shot_index(video_id):
 
 @app.get("/shots/{video_id}")
 def get_shots(
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$"),
+    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
     keyframe_source: str | None = Query(
         default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$"
     ),
@@ -1627,7 +2067,7 @@ def get_shots(
 def update_shot_labels(
     patch: ShotLabelPatch,
     request: Request,
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$"),
+    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
 ):
     if not request.state.is_admin:
         raise HTTPException(403, "shot labels are restricted to the owner")
@@ -1652,7 +2092,7 @@ def update_shot_labels(
 
 @app.get("/clip/{video_id}/{shot_index}")
 def get_clip(
-    video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$"),
+    video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$"),
     shot_index: int = Path(ge=0),
 ):
     row, mapping, index = _shot_index(video_id)
@@ -1681,7 +2121,7 @@ def get_clip(
 
 
 @app.get("/transcript/{video_id}")
-def get_transcript(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
+def get_transcript(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
     try:
         cues = audio_search.load_transcript_cues(video_id)
     except (FileNotFoundError, OSError) as exc:
@@ -1689,8 +2129,70 @@ def get_transcript(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
     return {"videoId": video_id, "cues": cues}
 
 
+#: Lazily built on first request, not at import: constructing a DeepSeekClient
+#: needs no network call (it only sets an Authorization header), but there is
+#: no reason to pay even that before something asks for it. A missing/dummy
+#: DEEPSEEK_API_KEY is fine as long as the on-disk boundary cache covers the
+#: requested video (see get_topic_segments) -- the client is never actually
+#: called on a cache hit.
+_topic_segmenter = None
+
+
+def _get_topic_segmenter():
+    global _topic_segmenter
+    if _topic_segmenter is None:
+        from agent.llm import DeepSeekClient
+        from scripts.audio.deepseek_topic_segment import DEFAULT_MODEL, DeepSeekTopicSegmenter
+
+        client = DeepSeekClient(
+            os.environ.get("DEEPSEEK_API_KEY", "unused"), model=DEFAULT_MODEL, thinking=False,
+        )
+        _topic_segmenter = DeepSeekTopicSegmenter(client)
+    return _topic_segmenter
+
+
+@app.get("/audio/topic-segments/{video_id}")
+def get_topic_segments(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
+    """DeepSeek topic/story segments for one video -- a Clip Studio visualization
+    of the `topic` chunking pilot (see docs/audio-search.md), not a production
+    search channel: no index is built from this. Reads the same on-disk
+    boundary cache the corpus-wide pilot run populated
+    (`data/2026/audio/.deepseek_topic_cache`); a video outside that cache
+    degrades to zero boundaries (one segment covering the whole transcript)
+    rather than making a live DeepSeek call from a page view.
+    """
+    import pyarrow.parquet as pq
+
+    try:
+        table = pq.read_table(
+            audio_search.transcript_path(), columns=["offset", "token"],
+            filters=[("audio_key", "=", video_id)],
+        )
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(503, "transcript data unavailable") from exc
+    columns = table.to_pydict()
+    rows = [
+        {"offset": offset, "token": token}
+        for offset, token in zip(columns["offset"], columns["token"])
+    ]
+    if not rows:
+        return {"videoId": video_id, "segments": []}
+
+    config = audio_search.TopicChunkConfig(
+        min_duration_seconds=0, target_duration_seconds=300, max_duration_seconds=300,
+        overlap_sentences=0,
+    )
+    passages = audio_search.make_topic_passages(
+        video_id, rows, _get_topic_segmenter(), config=config,
+    )
+    return {"videoId": video_id, "segments": [
+        {"start": round(p.start_sec, 3), "end": round(p.end_sec, 3), "text": p.text}
+        for p in passages
+    ]}
+
+
 @app.get("/captions/{video_id}/windows")
-def get_caption_windows(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
+def get_caption_windows(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
     """Every caption window of one video, in time order, whether or not the index exists.
 
     Where `/captions/{video_id}` answers from Elasticsearch (503 on a deployment that has
@@ -1714,7 +2216,7 @@ def get_caption_windows(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
 
 
 @app.get("/captions/{video_id}")
-def get_captions(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
+def get_captions(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
     """Every shot caption of one video, in time order (empty when not indexed)."""
     try:
         hits = caption_search.captions_for_video(video_id)
@@ -1729,7 +2231,7 @@ def get_captions(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
 
 
 @app.get("/ocr/{video_id}")
-def get_ocr(video_id: str = Path(pattern=r"^[A-Z]\d{2}_V\d{3}$")):
+def get_ocr(video_id: str = Path(pattern=r"^[A-Z]\d{2}[_-]V\d{3}$")):
     """The on-screen text of every OCR'd shot of one video, in time order.
 
     Read by the review view of the retrieval agent, which shows the text of a

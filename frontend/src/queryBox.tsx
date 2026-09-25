@@ -10,7 +10,8 @@ interface QueryBoxProps {
   rows?: number;
   maxLength?: number;
   autoFocus?: boolean;
-  footer: ReactNode;
+  disabled?: boolean;
+  footer?: ReactNode;
 }
 
 export function QueryBox(props: QueryBoxProps) {
@@ -27,9 +28,10 @@ export function QueryBox(props: QueryBoxProps) {
           rows={props.rows ?? 2}
           maxLength={props.maxLength}
           autoFocus={props.autoFocus}
+          disabled={props.disabled}
         />
       </label>
-      <div className="composer-query-footer">{props.footer}</div>
+      {props.footer != null && <div className="composer-query-footer">{props.footer}</div>}
     </div>
   );
 }

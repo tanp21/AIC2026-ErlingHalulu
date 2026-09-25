@@ -52,11 +52,21 @@ class OcrConfig:
     # "v4" uses the bundled rapidocr-onnxruntime DBNet; "v5-mobile"/"v5-server"
     # pull PP-OCRv5 detectors through the newer `rapidocr` package.
     #
-    # v4 wins on measurement despite v5 being newer. v5-mobile does resolve the
-    # flood-gauge digit unaided (making the rescan redundant), but it emits extra
-    # spurious boxes outside the text columns, and those break the reading-order
-    # cut on the two-column pillar — phrase recall drops 0.667 -> 0.500. Correct
-    # reading order is worth more than a cheaper gauge.
+    # v4 wins on measurement despite v5 being newer, on both axes.
+    #
+    # Accuracy: v5-mobile does resolve the flood-gauge digit unaided (making the
+    # rescan redundant), but it emits extra spurious boxes outside the text
+    # columns, and those break the reading-order cut on the two-column pillar —
+    # phrase recall drops 0.667 -> 0.500. Correct reading order is worth more than
+    # a cheaper gauge.
+    #
+    # Speed, measured GPU-against-GPU (both confirmed on CUDAExecutionProvider, 18
+    # real 1920x1080 keyframes): v4 197 ms/frame, v5-mobile 269, v5-server 695.
+    # v5-mobile is 1.36x *slower* here, and finds more boxes (7.8/frame against
+    # v4's 5.6), which is the same over-detection the accuracy note describes.
+    # An earlier v4-vs-v5 comparison was invalid: this branch passed no device
+    # setting at all and the `rapidocr` default is use_cuda=False, so every v5
+    # run on record was a CPU run — see the EngineConfig keys passed below.
     det_model: str = "v4"
 
     # --- small-text rescan ----------------------------------------------
@@ -141,6 +151,11 @@ class OcrConfig:
     # corrected text rather than the raw draft. See scripts/ocr/reader.py.
     reader: bool = False
     reader_model: str = "5CD-AI/Vintern-1B-v3_5"
+
+    # Bumped when this pipeline's *behaviour* changes without any other field changing, so
+    # the resume manifest invalidates previously extracted videos rather than silently mixing
+    # outputs from two different pipelines. 2 = detection runs det-only; see _detect.
+    pipeline_version: int = 2
 
     def fingerprint(self) -> str:
         payload = json.dumps(asdict(self), sort_keys=True).encode()
@@ -376,6 +391,14 @@ class OcrPipeline:
                     "Det.thresh": cfg.det_thresh,
                     "Det.unclip_ratio": cfg.det_unclip_ratio,
                     "Det.limit_side_len": cfg.det_limit_side_len,
+                    # Without these two the entire branch runs on CPU. The package's own
+                    # default is ``EngineConfig.onnxruntime.use_cuda = False`` and nothing
+                    # here used to pass it, so ``OcrConfig.det_use_cuda`` was silently
+                    # ignored on every v5/v6 run -- which is why every v5 number on record
+                    # is a CPU number, and why v5-mobile looked 6.8x slower than v4 when
+                    # the two were compared at all.
+                    "EngineConfig.onnxruntime.use_cuda": cfg.det_use_cuda,
+                    "EngineConfig.onnxruntime.cuda_ep_cfg.device_id": 0,
                     # Recognition is VietOCR's job; this recogniser is never
                     # consulted, but the package requires one to be configured.
                     "Rec.ocr_version": OCRVersion.PPOCRV4,
@@ -411,10 +434,27 @@ class OcrPipeline:
     # -- stages -------------------------------------------------------------
 
     def _detect(self, image: np.ndarray) -> list[list[list[float]]]:
+        """Detector boxes only -- every other stage of the engine is switched off here.
+
+        ``RapidOCR.__call__`` otherwise also runs its angle classifier and its Chinese CRNN
+        recogniser on every crop, and this method throws that text away. Measured on 24 real
+        1920x1080 keyframes at 335 ms/frame with those stages on against 106 ms/frame with
+        them off (3.16x).
+
+        The cost is not even the worst of it: the built-in recogniser's confidence floor is
+        what decides which boxes survive, so genuinely Vietnamese on-screen text scores below
+        it and disappears. With the stages off those same frames yield 108 lines where the
+        full pipeline yielded 98, and every extra line is real text (a tax-authority graphic's
+        "Thông tin các nguồn thu nhập của cá nhân"). Line quality is this pipeline's own
+        business anyway -- ``rec_min_conf`` filters it, from the recogniser that can read the
+        language.
+        """
         if self.config.det_model == "v4":
-            result, _ = self.detector(image)
-            return [box for box, _text, _conf in (result or [])]
-        output = self.detector(image)
+            # With cls/rec off, RapidOCR returns the polygons on their own rather than
+            # [box, text, conf] triples (get_final_res' `rec_res is None` branch).
+            result, _ = self.detector(image, use_cls=False, use_rec=False)
+            return [list(box) for box in (result or [])]
+        output = self.detector(image, use_cls=False, use_rec=False)
         boxes = getattr(output, "boxes", None)
         if boxes is None:
             return []

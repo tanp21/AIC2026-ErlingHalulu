@@ -13,7 +13,7 @@ import threading
 
 ROOT = Path(__file__).resolve().parent.parent
 LABEL_DIR = Path(os.environ.get("AIC_SHOT_LABEL_DIR", ROOT / "artifacts" / "shot-labels"))
-VIDEO_ID = re.compile(r"^[A-Z]\d{2}_V\d{3}$")
+VIDEO_ID = re.compile(r"^[A-Z]\d{2}[_-]V\d{3}$")
 STATES = {"suggested", "excluded", "included"}
 REASONS = {"intro", "preview", "presenter", "outro", "other"}
 _write_lock = threading.Lock()

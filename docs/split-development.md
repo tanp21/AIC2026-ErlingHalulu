@@ -5,6 +5,11 @@ hardware-bound pieces — PE-Core, FAISS, Qwen3-Embedding, Elasticsearch and the
 `data/` disk — stay on the owner's host. Code changes are then tested locally
 without pushing a branch, waiting for a merge, and redeploying the team server.
 
+`AIC_CORE_URL` also runs in the other direction. When the media is what has to stay
+local — a venue whose network is too congested to stream video and frames over — the
+laptop sets `AIC_ROLE=media` and forwards the *API* instead, while `/thumb`, `/frame`,
+`/video` and `/clip` are answered from its own disk. See `docs/venue-deployment.md`.
+
 ## How it splits
 
 ```text

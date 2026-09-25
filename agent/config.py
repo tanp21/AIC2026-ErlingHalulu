@@ -15,7 +15,12 @@ VISION_ENV = (
     "AIC_AGENT_VISION", "AIC_VLM_URL", "AIC_VLM_MODEL", "AIC_VLM_DIR",
     "AIC_VLM_DEVICE", "AIC_VLM_MAX_NEW_TOKENS", "AIC_VLM_IMAGE_SIDE",
     "AIC_VLM_ANSWER_SIDE", "AIC_VLM_MAX_TILES", "AIC_AGENT_CAPTIONS",
+    "OPENROUTER_MODEL",
 )
+
+#: Which vision backends `AIC_AGENT_VISION` accepts. `openrouter` is a remote API like
+#: `gemini`, and is what the team falls back to when the Gemini quota is gone.
+VISION_BACKENDS = ("gemini", "local", "deepseek", "openrouter")
 
 
 def deployment_vision() -> str:
@@ -62,6 +67,11 @@ class AgentSettings:
     gemini_api_key: str
     gemini_model: str
     gemini_thinking_level: str
+    # One key, many models. Required only when it is the thing doing the looking
+    # (vision == "openrouter", or checklist_vision_model == "openrouter").
+    openrouter_api_key: str = ""
+    openrouter_model: str = "qwen/qwen3.7-flash"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
     # Only for a server whose transcript index is raw ASR (numbers spelled out).
     spoken_numbers: bool = False
     # auto | batch | compat -- see SearchClient.
@@ -84,9 +94,12 @@ class AgentSettings:
     # Read the CapRL shot caption into each candidate's label. Ignored by Gemini,
     # which looks at the frame itself; it is the local models that benefit.
     captions: bool = True
-    # human judge only: show DeepSeek each candidate's own frame while building the checklist
+    # human judge only: show a model each candidate's own frame while building the checklist
     # (agent/evidence.py). A caption is a guess made once offline; the pixels are ground truth.
     checklist_vision: bool = True
+    # human judge only, checklist_vision: which client reads those pixels -- deepseek (default,
+    # no extra key) or gemini (agent.gemini; see AgentOptions.checklist_vision_model).
+    checklist_vision_model: str = "deepseek"
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None, dotenv: Path = ROOT / ".env"):
@@ -103,9 +116,14 @@ class AgentSettings:
             return int(raw) if raw else default
 
         vision = merged.get("AIC_AGENT_VISION", "gemini").strip().lower()
-        if vision not in ("gemini", "local", "deepseek"):
+        if vision not in VISION_BACKENDS:
+            allowed = ", ".join(repr(name) for name in VISION_BACKENDS)
+            raise RuntimeError(f"AIC_AGENT_VISION must be one of {allowed}, not {vision!r}")
+        checklist_vision_model = merged.get("AIC_AGENT_CHECKLIST_MODEL", "deepseek").strip().lower()
+        if checklist_vision_model not in ("deepseek", "gemini", "openrouter"):
             raise RuntimeError(
-                f"AIC_AGENT_VISION must be 'gemini', 'local' or 'deepseek', not {vision!r}")
+                f"AIC_AGENT_CHECKLIST_MODEL must be 'deepseek', 'gemini' or 'openrouter', "
+                f"not {checklist_vision_model!r}")
 
         return cls(
             server_url=merged.get("AIC_AGENT_URL", "http://127.0.0.1:8000").rstrip("/"),
@@ -118,11 +136,24 @@ class AgentSettings:
             deepseek_thinking=merged.get("DEEPSEEK_THINKING", "enabled").lower() != "disabled",
             deepseek_plan_thinking=merged.get("DEEPSEEK_PLAN_THINKING", "disabled").lower() == "enabled",
             # Optional when the vision backend is local: an offline competition day
-            # has no Gemini anyway, and only the web lookup goes without.
+            # has no Gemini anyway, and only the web lookup goes without. Also optional
+            # for checklist_vision_model == "gemini": unlike the autonomous judge, a
+            # missing key there just leaves the checklist without its vision half
+            # (`vision_summarize` catches a `judge()` failure per candidate and falls
+            # back to the text-only checklist) rather than failing the whole run --
+            # a teammate without their own Gemini key can still run human-judge mode.
             gemini_api_key=(required("GEMINI_API_KEY") if vision == "gemini"
                             else merged.get("GEMINI_API_KEY", "").strip()),
             gemini_model=merged.get("GEMINI_MODEL", "gemini-3.8-flash"),
             gemini_thinking_level=merged.get("GEMINI_THINKING_LEVEL", "low"),
+            # Required only when OpenRouter is the one doing the looking. As a checklist
+            # model a missing key costs the checklist its vision half and nothing else,
+            # exactly as a missing Gemini key does there.
+            openrouter_api_key=(required("OPENROUTER_API_KEY") if vision == "openrouter"
+                                else merged.get("OPENROUTER_API_KEY", "").strip()),
+            openrouter_model=merged.get("OPENROUTER_MODEL", "qwen/qwen3.7-flash"),
+            openrouter_base_url=merged.get(
+                "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/"),
             spoken_numbers=merged.get("AIC_AGENT_SPOKEN_NUMBERS", "0").lower() in ("1", "true", "yes"),
             search_api=merged.get("AIC_AGENT_SEARCH_API", "auto"),
             vision=vision,
@@ -135,4 +166,5 @@ class AgentSettings:
             vlm_max_tiles=integer("AIC_VLM_MAX_TILES", 6),
             captions=merged.get("AIC_AGENT_CAPTIONS", "1").lower() not in ("0", "false", "no"),
             checklist_vision=merged.get("AIC_AGENT_CHECKLIST_VISION", "1").lower() not in ("0", "false", "no"),
+            checklist_vision_model=checklist_vision_model,
         )

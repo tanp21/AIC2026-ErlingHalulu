@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import httpx
 from google.genai import errors as genai_errors
 
 from concurrent.futures import ThreadPoolExecutor
@@ -112,6 +113,37 @@ def _quota_error(quota_id: str) -> genai_errors.APIError:
             ],
         }
     })
+
+
+class RequestTimeoutTests(unittest.TestCase):
+    """A stalled connection must not hang the run — see REQUEST_TIMEOUT_SECONDS."""
+
+    def test_load_sets_the_timeout_on_the_client_in_milliseconds(self):
+        # The SDK builds its httpx client with timeout=None, so if this is not
+        # set a request that never returns blocks forever and max_retries never
+        # fires, because a call that never returns never raises.
+        with patch("google.genai.Client") as client:
+            GeminiCleaner("m", api_key="k", timeout=90.0).load()
+        self.assertEqual(client.call_args.kwargs["http_options"], {"timeout": 90_000})
+
+    def test_a_transport_timeout_is_retried_rather_than_treated_as_permanent(self):
+        # httpx.ReadTimeout is neither an APIError nor a builtin TimeoutError;
+        # unlisted, it would fall through to the bare `except Exception` and be
+        # misread as permanent, leaving the chunk raw for the whole run.
+        def stall():
+            raise httpx.ReadTimeout("read timed out")
+
+        cleaner = cleaner_with([stall, lambda: FakeResponse("Xin chào.")])
+        with patch("time.sleep", return_value=None):
+            self.assertEqual(cleaner.restore_or_none("xin chao"), "Xin chào.")
+
+    def test_a_stall_that_never_clears_gives_up_after_the_retry_budget(self):
+        def stall():
+            raise httpx.ReadTimeout("read timed out")
+
+        cleaner = cleaner_with([stall, stall, stall])
+        with patch("time.sleep", return_value=None):
+            self.assertIsNone(cleaner.restore_or_none("xin chao"))
 
 
 class DailyQuotaErrorDetectionTests(unittest.TestCase):
@@ -269,9 +301,16 @@ class RealignWordsTests(unittest.TestCase):
         self.assertEqual(aligned[-1].offset, 1.0)
 
     def test_a_dropped_raw_word_leaves_no_trace_in_the_output(self):
-        raw = [Word("xin", 0.0, 0.1), Word("um", 1.0, 0.1), Word("chao", 2.0, 0.1)]
-        aligned = realign_words(raw, "Xin chào.")
-        self.assertEqual([w.text for w in aligned], ["Xin", "chào."])
+        # Within the allowance (1 word per 1000), a dropped word is applied and
+        # simply has no counterpart in the result.
+        raw = [Word(f"tu{i}", float(i), 0.1) for i in range(1000)]
+        raw[500] = Word("um", 500.0, 0.1)
+        cleaned = " ".join(
+            f"Tu{i}." for i in range(1000) if i != 500
+        )
+        aligned = realign_words(raw, cleaned)
+        self.assertEqual(len(aligned), 999)
+        self.assertNotIn("um", [w.text for w in aligned])
 
     def test_a_replaced_span_carries_the_worst_confidence_of_what_it_replaced(self):
         raw = [Word("mot", 0.0, 0.1), Word("hai", 1.0, 9.0), Word("ba", 2.0, 0.1)]
@@ -285,6 +324,76 @@ class RealignWordsTests(unittest.TestCase):
         raw = words("xin chao cac ban hom nay troi dep qua")
         garbled = "hoàn toàn không liên quan gì đến nội dung gốc cả đâu bạn nhé"
         self.assertEqual(realign_words(raw, garbled), raw)
+
+
+class RemovalGuardTests(unittest.TestCase):
+    """Cleaning repairs mistakes; it never removes content."""
+
+    def test_a_response_that_drops_content_is_rejected(self):
+        # The dangerous case: the response keeps the first half and silently
+        # loses the rest. Everything present still matches, so similarity stays
+        # ~0.67 -- above MIN_SIMILARITY_RATIO -- and the old similarity-only
+        # guard let the diff drop the missing half outright.
+        raw = words(" ".join(f"tu{i}" for i in range(1000)))
+        truncated = " ".join(f"tu{i}" for i in range(500))
+        self.assertEqual(realign_words(raw, truncated), raw)
+
+    def test_a_localized_removal_is_rejected_however_short_the_video_is(self):
+        # A long video can lose a whole stretch in the middle and still come
+        # back at 98% overall, which is why the guard counts deletions rather
+        # than comparing total lengths.
+        raw = words(" ".join(f"tu{i}" for i in range(1000)))
+        with_gap = " ".join(
+            f"Tu{i}." for i in range(1000) if not 400 <= i < 600
+        )
+        self.assertEqual(realign_words(raw, with_gap), raw)
+
+    def test_a_response_within_the_allowance_is_still_applied(self):
+        # The guard must not be so tight that ordinary correction is rejected.
+        # 99.5% of the words survive here, well inside MAX_DELETED_PER_1000.
+        raw = words(" ".join(f"tu{i}" for i in range(1000)))
+        trimmed = " ".join(f"Tu{i}." for i in range(995))
+        result = realign_words(raw, trimmed)
+        self.assertEqual(len(result), 995)
+        self.assertEqual(result[0].text, "Tu0.")
+
+    def test_the_prompt_forbids_removal_explicitly(self):
+        # The guard is the backstop; the instruction is the primary lever, and
+        # an earlier looser wording was demonstrably ignored.
+        from scripts.audio.gemini_clean import _PROMPT
+
+        for phrase in ("Do not delete, drop, skip, shorten or merge",
+                       "advertisements, sponsor reads, song lyrics",
+                       "Do not convert spoken words into symbols",
+                       "Every word of the input must appear in your output"):
+            self.assertIn(phrase, _PROMPT)
+
+    def test_a_content_removing_response_is_not_cached_and_is_retried(self):
+        calls = []
+
+        class TruncatingCleaner:
+            model_id = "fake-model"
+            concurrency = 1
+
+            def __init__(self, cache_dir):
+                self.cache_dir = cache_dir
+
+            def restore_or_none(self, text):
+                calls.append(text)
+                # Half the input back, as a cut-off generation returns.
+                return " ".join(text.split()[:50])
+
+        raw = words(" ".join(f"tu{i}" for i in range(100)))
+        with tempfile.TemporaryDirectory() as directory:
+            cleaner = TruncatingCleaner(Path(directory))
+            full = len(raw)
+            first = restore_words_gemini(raw, cleaner, chunk_words=full)
+            second = restore_words_gemini(raw, cleaner, chunk_words=full)
+        # Raw kept both times (never the truncated text) and never cached, so
+        # the second run re-asks instead of replaying a bad answer forever.
+        self.assertEqual([w.text for w in first], [w.text for w in raw])
+        self.assertEqual([w.text for w in second], [w.text for w in raw])
+        self.assertEqual(len(calls), 2)
 
 
 class RestoreWordsGeminiTests(unittest.TestCase):

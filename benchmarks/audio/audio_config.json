@@ -1,10 +1,5 @@
 {
-  "capu": {
-    "model_id": "dragonSwing/xlm-roberta-capu",
-    "word_count_preserved": 0.9804,
-    "punctuation_macro_f1": 0.5044,
-    "capitalisation_f1": 0.6809,
-    "words_per_second": 873.8,
-    "eval": "strip-and-restore over queries/ and RULES_GUIDELINES.md"
+  "clean": {
+    "gemini_model": "gemini-flash-lite-latest"
   }
 }

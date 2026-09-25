@@ -39,6 +39,11 @@ class Usage:
     #: reported: the local models do not bill, and the HTTP backend would have to
     #: round-trip its own usage for it to mean anything.
     vlm_calls: int = 0
+    #: OpenRouter, which bills per token like the other two remote APIs and reports
+    #: its usage in the same OpenAI-compatible envelope.
+    openrouter_calls: int = 0
+    openrouter_input: int = 0
+    openrouter_output: int = 0
 
     def __post_init__(self):
         self._lock = threading.Lock()
@@ -52,6 +57,7 @@ class Usage:
         return {name: getattr(self, name) for name in (
             "deepseek_calls", "deepseek_input", "deepseek_output",
             "gemini_calls", "gemini_input", "gemini_output", "vlm_calls",
+            "openrouter_calls", "openrouter_input", "openrouter_output",
         )}
 
 

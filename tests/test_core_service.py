@@ -242,6 +242,95 @@ class CoreProxyTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
 
 
+class _AsLogin:
+    """Stands in for TrustedIngressAccessMiddleware, which runs outside the proxy."""
+
+    def __init__(self, app, login):
+        self.app = app
+        self.login = login
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and self.login:
+            scope.setdefault("state", {})["login"] = self.login
+        return await self.app(scope, receive, send)
+
+
+class MediaHostProxyTests(unittest.TestCase):
+    """`mode="api"`: the media host answers the SPA and the heavy bytes, forwards the rest.
+
+    The venue link carries only the small JSON the compute host returns, never a frame.
+    """
+
+    # The DRES routes are the media host's: it holds the credentials and the videos the
+    # submission payload is built from, and the rented instance should hold neither. The
+    # frame map is the media host's too -- it is a file in the `indexes/` it mounts, and
+    # sending it across the tunnel only made the player wait for it.
+    LOCAL = ("/", "/healthz", "/favicon.ico", "/thumb/L21_V001/10?w=320",
+             "/frame/L21_V001/10", "/video/L21_V001", "/clip/L21_V001/3",
+             "/static/assets/index.js", "/api/dres/status", "/api/dres/submit",
+             "/api/dres/keyframes/L21_V001", "/frame-map/L21_V001")
+
+    def _upstream(self, seen):
+        upstream = FastAPI()
+
+        @upstream.api_route("/{path:path}", methods=["GET", "POST", "PATCH"])
+        async def capture(path: str, request: Request):
+            seen["url"] = str(request.url)
+            seen["delegated"] = request.headers.get("x-aic-delegated-user")
+            return JSONResponse({"source": "upstream"})
+
+        return upstream
+
+    def _client(self, seen, login="mate@example.com"):
+        application = FastAPI()
+
+        @application.api_route("/{path:path}", methods=["GET", "POST", "PATCH"])
+        def local(path: str):
+            return {"source": "local"}
+
+        proxy = core_service.CoreProxyMiddleware(application, "http://core.test", mode="api")
+        proxy._client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=self._upstream(seen)),
+        )
+        return TestClient(_AsLogin(proxy, login))
+
+    def test_spa_and_media_stay_local(self):
+        seen = {}
+        client = self._client(seen)
+
+        for path in self.LOCAL:
+            self.assertEqual(client.get(path).json(), {"source": "local"}, path)
+
+        self.assertEqual(seen, {})
+
+    def test_api_calls_reach_the_compute_host_with_the_forwarded_login(self):
+        seen = {}
+        client = self._client(seen, login="mate@example.com")
+
+        response = client.get("/search")
+
+        self.assertEqual(response.json(), {"source": "upstream"})
+        self.assertEqual(seen["url"], "http://core.test/search")
+        self.assertEqual(seen["delegated"], "mate@example.com")
+
+    def test_everything_the_media_host_cannot_answer_is_forwarded(self):
+        seen = {}
+        client = self._client(seen)
+
+        for path in ("/search", "/api/agent/runs/active", "/api/collab/rounds", "/shots/L21_V001",
+                     "/transcript/L21_V001", "/videos", "/profiles", "/core/encode/text"):
+            client.get(path)
+            self.assertEqual(seen["url"], f"http://core.test{path}", path)
+
+    def test_a_client_supplied_delegation_is_dropped(self):
+        seen = {}
+        client = self._client(seen, login=None)
+
+        client.get("/search", headers={"X-AIC-Delegated-User": "owner@example.com"})
+
+        self.assertIsNone(seen["delegated"])
+
+
 class VisionJudgeTests(unittest.TestCase):
     """The endpoint `AIC_VLM_URL` points a teammate's app at.
 

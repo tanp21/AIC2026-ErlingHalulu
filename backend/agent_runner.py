@@ -61,7 +61,7 @@ _AGENT_RUN_EXECUTOR = ThreadPoolExecutor(max_workers=5, thread_name_prefix="agen
 _NO_DOTENV = Path("/nonexistent")
 
 
-VIDEO_ID_PATTERN = r"^[A-Z]\d{2}_V\d{3}$"
+VIDEO_ID_PATTERN = r"^[A-Z]\d{2}[_-]V\d{3}$"
 
 
 class AgentRunConflict(RuntimeError):
@@ -80,6 +80,9 @@ class AgentRunReq(BaseModel):
     # answers, not a client-side error.
     deepseek_api_key: str = Field(default="", max_length=512)
     gemini_api_key: str = Field(default="", max_length=512)
+    # The team's shared key (see `_SHARED_KEYS`): anyone's run falls back to the deployment's,
+    # so this is only for a teammate who wants the run billed to their own OpenRouter account.
+    openrouter_api_key: str = Field(default="", max_length=512)
     max_steps: int = Field(default=6, ge=1, le=12)
     time_budget: float | None = Field(default=None, ge=30.0, le=900.0)
     deepseek_model: str | None = Field(default=None, max_length=100)
@@ -291,6 +294,7 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
     if judge == "human":
         overrides["judge"] = "human"
         overrides["checklist_vision"] = settings.checklist_vision
+        overrides["checklist_vision_model"] = settings.checklist_vision_model
         if human_idle_timeout is not None:
             overrides["human_idle_timeout"] = human_idle_timeout
     try:
@@ -306,7 +310,15 @@ def run_query(task: Task, settings: AgentSettings, mode: str, max_steps: int,
 #: (compose `env_file: .env.secure`). They belong to the owner, so only an
 #: admin-started run may spend them -- a teammate's run always supplies its own, and
 #: nothing in the API can reach these.
-_DEPLOYMENT_KEY_ENV = {"deepseek": "DEEPSEEK_API_KEY", "gemini": "GEMINI_API_KEY"}
+_DEPLOYMENT_KEY_ENV = {"deepseek": "DEEPSEEK_API_KEY", "gemini": "GEMINI_API_KEY",
+                       "openrouter": "OPENROUTER_API_KEY"}
+#: ...with one deliberate exception. `OPENROUTER_API_KEY` is the TEAM's key, not the owner's
+#: personal quota: it is what the Search tab's "Check by AI" already spends for whoever presses
+#: the button, at well under a cent a call, and it is the fallback for the whole tab now that
+#: the Gemini quota is gone. Admin-gating it would leave four of the five teammates unable to
+#: run the agent at all. It still never leaves the server -- a run reads it here, the API
+#: cannot set it, and nothing echoes it back.
+_SHARED_KEYS = frozenset({"openrouter"})
 
 
 def _deployment_key(name: str) -> str:
@@ -316,14 +328,17 @@ def _deployment_key(name: str) -> str:
 def execute_run(store: AgentRunStore, run: AgentRun, req: AgentRunReq, internal_url: str):
     try:
         def key(supplied: str, name: str) -> str:
-            """The request's key, or this deployment's for the owner's own run."""
+            """The request's key, or this deployment's -- for the owner, or for a shared key."""
             if supplied.strip():
                 return supplied.strip()
-            return _deployment_key(name) if run.deployment_keys else ""
+            if run.deployment_keys or name in _SHARED_KEYS:
+                return _deployment_key(name)
+            return ""
 
         env = {
             "DEEPSEEK_API_KEY": key(req.deepseek_api_key, "deepseek"),
             "GEMINI_API_KEY": key(req.gemini_api_key, "gemini"),
+            "OPENROUTER_API_KEY": key(req.openrouter_api_key, "openrouter"),
             "AIC_AGENT_URL": internal_url,
             "AIC_AGENT_TRUSTED_USER": run.owner,
             # The server has /agent/search; skip the compat fallback.
@@ -337,6 +352,10 @@ def execute_run(store: AgentRunStore, run: AgentRun, req: AgentRunReq, internal_
         for name in VISION_ENV:
             if os.environ.get(name):
                 env[name] = os.environ[name]
+        # Which client reads the checklist's pixels is also the deployment's call, same
+        # reasoning as the vision backend above -- a teammate's pasted key just pays for it.
+        if os.environ.get("AIC_AGENT_CHECKLIST_MODEL"):
+            env["AIC_AGENT_CHECKLIST_MODEL"] = os.environ["AIC_AGENT_CHECKLIST_MODEL"]
         if req.judge == "human":
             # `AgentSettings` demands a Gemini key for a Gemini vision backend, and a
             # human-judged run has no vision backend at all (`run_query` builds none).
@@ -405,6 +424,11 @@ def install_agent_routes(app) -> None:
         if (req.judge == "model" and deployment_vision() == "gemini"
                 and not usable(req.gemini_api_key, "gemini")):
             raise HTTPException(422, "a Gemini API key is required")
+        # OpenRouter is the team's shared key, so every teammate may fall back to the
+        # deployment's -- unlike the two above. Only a deployment with no key at all fails.
+        if (req.judge == "model" and deployment_vision() == "openrouter"
+                and not (req.openrouter_api_key.strip() or _deployment_key("openrouter"))):
+            raise HTTPException(422, "an OpenRouter API key is required")
         run_id = secrets.token_hex(8)
         task = task_from_text(run_id, req.text, req.kind)
         runs = store(request)

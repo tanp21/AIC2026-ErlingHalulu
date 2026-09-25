@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 
 import { searchVideosByImage } from "./api";
 import { activateRound, CollabApiError, downloadExport, fetchExportPreview, patchQuery, reviewQuery, uploadRound } from "./collabApi";
-import type { AnswerDraft, CollabQuery, RoundSnapshot, RoundSummary, SearchResult } from "./types";
-import { VideoDialog } from "./videoDialog";
+import type { AnswerDraft, CollabQuery, QueryKind, RoundSnapshot, RoundSummary, SearchResult } from "./types";
+import { VideoDialog, type TrakeSequence } from "./videoDialog";
 import { formatTimestamp } from "./results";
 
 const STATUS_LABEL = {
@@ -262,6 +262,11 @@ interface Props {
   searchResults?: SearchResult[];
   openResult?: SearchResult | null;
   onCloseVideo?(): void;
+  onDresPick?(videoId: string, frameId: number): void;
+  onDresSubmit?(videoId: string, frameId: number, time: number, answer: string, kind: QueryKind): Promise<{ message: string; uncertain?: boolean; completed?: boolean }>;
+  dresKind?: QueryKind | null;
+  /** The TRAKE events staged so far, so the player can list and renumber them as they are added. */
+  trakeSequence?: TrakeSequence;
   onSelect(id: number): void;
   onQueryChange(query: CollabQuery): void;
 }
@@ -309,15 +314,23 @@ export function CollaborationPanels(props: Props) {
       </aside>
       <AnswerEditor key={selected?.id ?? "none"} query={selected} login={props.login}
         selectedResult={props.selectedResult} searchResults={props.searchResults} openResult={props.openResult} onCloseVideo={props.onCloseVideo}
+        onDresPick={props.onDresPick}
+        onDresSubmit={props.onDresSubmit}
+        dresKind={props.dresKind}
+        trakeSequence={props.trakeSequence}
         active={props.round.active} isAdmin={props.isAdmin ?? false} onChange={props.onQueryChange} />
     </>
   );
 }
 
-function AnswerEditor({ query, login, selectedResult, searchResults = [], openResult, onCloseVideo, active, isAdmin, onChange }: {
+function AnswerEditor({ query, login, selectedResult, searchResults = [], openResult, onCloseVideo, onDresPick, onDresSubmit, dresKind, trakeSequence, active, isAdmin, onChange }: {
   query: CollabQuery | null; login: string; selectedResult: SearchResult | null;
   searchResults?: SearchResult[];
-  openResult?: SearchResult | null; onCloseVideo?(): void; active: boolean;
+  openResult?: SearchResult | null; onCloseVideo?(): void; onDresPick?(videoId: string, frameId: number): void;
+  onDresSubmit?(videoId: string, frameId: number, time: number, answer: string, kind: QueryKind): Promise<{ message: string; uncertain?: boolean; completed?: boolean }>;
+  active: boolean;
+  dresKind?: QueryKind | null;
+  trakeSequence?: TrakeSequence;
   isAdmin: boolean;
   onChange(query: CollabQuery): void;
 }) {
@@ -394,7 +407,7 @@ function AnswerEditor({ query, login, selectedResult, searchResults = [], openRe
     const reference = answerReference(current, answers);
     void mutate(async () => {
       const results = reference
-        ? (await searchVideosByImage({ mode: "visual", index: "flat", nprobe: 0, ef: 64, profile: "l2026", image_weight: 1, reference }, null, new AbortController().signal)).results
+        ? (await searchVideosByImage({ mode: "visual", index: "flat", nprobe: 0, ef: 64, profile: "l2026-v2", image_weight: 1, reference }, null, new AbortController().signal)).results
         : searchResults;
       return patchQuery(current.id, { expected_version: current.version, answers: filledAnswers(current, answers, results, qaAutoAnswer) });
     });
@@ -510,7 +523,18 @@ function AnswerEditor({ query, login, selectedResult, searchResults = [], openRe
       video: `/video/${answerFrame.videoId}`, source: "visual", scores: {},
     } : openResult!} initialFrameId={answerFrame?.frameId} initialRowIndex={answerFrame?.rowIndex}
       initialEventIndex={answerFrame?.eventIndex} startPaused
-      onClose={() => answerFrame ? setAnswerFrame(null) : onCloseVideo?.()} capture={{
+      originalVideo={Boolean(onDresSubmit)}
+      onClose={() => answerFrame ? setAnswerFrame(null) : onCloseVideo?.()}
+      picker={onDresPick || onDresSubmit ? {
+        actions: onDresPick ? [{ label: dresKind === "trake" ? "Add frame to DRES TRAKE" : "Use frame for DRES", onPick: (frameId) =>
+          onDresPick(answerFrame?.videoId ?? openResult!.video_id, frameId) }] : [],
+        submit: onDresSubmit ? { label: dresKind === "trake" ? "Add event to TRAKE" : "Submit exact frame to DRES",
+          kind: dresKind ?? query?.kind ?? "kis", needsAnswer: dresKind === "qa", onSubmit: onDresSubmit } : undefined,
+        // Handed over whenever it exists: the player shows it only for a TRAKE picker, and gating it
+        // here as well would leave a TRAKE task (which the DRES context can select on its own) with
+        // no event list and a submit button stuck at "Add E1".
+        trakeSequence,
+      } : undefined} capture={{
       query: editorQuery, answers, active, onCapture: captureFrame,
     }} />, document.body)}
   </>;
@@ -566,7 +590,7 @@ function FramePreview({ videoId, frameId, label, rowIndex, onOpen }: {
     const timer = window.setTimeout(() => setShown({ videoId, frameId }), 400);
     return () => window.clearTimeout(timer);
   }, [videoId, frameId]);
-  const valid = /^[A-Z]\d{2}_V\d{3}$/.test(shown.videoId)
+  const valid = /^[A-Z]\d{2}[_-]V\d{3}$/.test(shown.videoId)
     && Number.isInteger(shown.frameId) && (shown.frameId ?? -1) >= 0;
   const url = valid ? `/thumb/${shown.videoId}/${shown.frameId}?w=160` : null;
   const caption = label ? `${label} · ${shown.frameId ?? "—"}` : `Frame ${shown.frameId ?? "—"}`;

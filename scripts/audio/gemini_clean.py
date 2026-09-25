@@ -1,17 +1,16 @@
 """Vietnamese transcript cleaning via the Gemini API.
 
-Same job as :mod:`scripts.audio.capu` — restore capitalisation and punctuation
-over a timed word stream — but conservatively more capable: Gemini can also
-fix an obvious ASR mistranscription (a word that makes no sense in context),
-not just add case and punctuation. It is a drop-in alternative to
-``capu_model`` in :class:`scripts.audio.pipeline.CleanConfig`, not a new
-pipeline stage.
+Restores capitalisation and punctuation over a timed word stream, and
+conservatively fixes an obvious ASR mistranscription (a word that makes no
+sense in context) along the way. The sole restoration path in
+:class:`scripts.audio.pipeline.CleanConfig` — an earlier local-model
+alternative (a Vietnamese capitalisation/punctuation restorer, word-index
+aligned) was retired in favour of this one.
 
 **Free-form prompting, not word-constrained JSON.** An earlier version of
 this module asked Gemini for a JSON array of exactly one string per input
-word, so restoration could be applied index-by-index the same way
-:func:`scripts.audio.postprocess.apply_capu_output` applies capu's output.
-That constraint measurably hurt quality — a model asked to fill exactly N
+word, so restoration could be applied index-by-index by position. That
+constraint measurably hurt quality — a model asked to fill exactly N
 independent JSON slots gets historical names and set phrases wrong far more
 often than the same model asked to just rewrite the passage as prose, even
 though nothing else about the prompt changed. So this module asks for free
@@ -24,9 +23,9 @@ free-form rewrite no longer has a 1:1 word correspondence to the input — but
 it is close enough for subtitle cues and passage boundaries, both of which
 already tolerate second-level slop elsewhere in this codebase.
 
-Unlike ``capu.py``, this is not a local model: every chunk is one Gemini API
-call, so a whole corpus run is bounded by network latency and API rate limits
-rather than GPU memory. Two things follow from that:
+This is not a local model: every chunk is one Gemini API call, so a whole
+corpus run is bounded by network latency and API rate limits rather than GPU
+memory. Two things follow from that:
 
 * **Bounded concurrency**, not GPU batching — chunks are dispatched across a
   small thread pool, with retry/backoff on transient errors.
@@ -45,8 +44,7 @@ Get a key at https://aistudio.google.com/apikey and run:
     uv run python -m scripts.audio.build_clean_transcripts --gemini-model gemini-flash-lite-latest
 
 This is the only module in :mod:`scripts.audio` that talks to a model over
-the network, so everything else stays testable offline (mirrors how
-``capu.py`` is the only module that loads a local model).
+the network, so everything else stays testable offline.
 """
 from __future__ import annotations
 
@@ -101,6 +99,21 @@ CONCURRENCY = 4
 MAX_RETRIES = 8
 BASE_BACKOFF_SECONDS = 1.0
 
+#: Per-request HTTP timeout, in seconds. **Must be set explicitly** — the SDK
+#: builds its httpx client with ``timeout=None`` (no limit at all), so without
+#: this a stalled connection blocks forever and :data:`MAX_RETRIES` never gets
+#: a chance to fire, because a call that never returns never raises. A whole
+#: corpus run was killed by exactly that: one request hung for 17+ minutes with
+#: no error and no progress.
+#:
+#: Sized for the *largest* chunk, not the average one: ``generate_content`` is
+#: not streamed here, so the read timeout covers the entire generation, and
+#: ``CHUNK_WORDS`` allows a 12,000-word Vietnamese chunk (the longest response
+#: seen in practice is 10,606 words, on an S01 video). A tight bound would time
+#: out the real long-tail chunks rather than the stalled ones it is meant to
+#: catch.
+REQUEST_TIMEOUT_SECONDS = 180.0
+
 #: Below this fraction of matched (folded, punctuation-stripped) tokens
 #: between the raw chunk and Gemini's response, the response is treated as
 #: broken rather than trusted — see :func:`realign_words`. A real cleaning
@@ -109,21 +122,93 @@ BASE_BACKOFF_SECONDS = 1.0
 #: is far more likely a truncated, off-topic, or otherwise mangled answer.
 MIN_SIMILARITY_RATIO = 0.5
 
+#: Below this fraction of the raw chunk's word count, a response is rejected
+#: and the raw words are kept instead. Similarity alone cannot catch this: a
+#: response that drops a whole stretch of the input still matches closely
+#: everywhere it does exist, scoring ~0.63-0.88 — comfortably above
+#: :data:`MIN_SIMILARITY_RATIO` — while realign then treats the missing
+#: stretch as a ``delete`` opcode and drops those raw words outright. That is
+#: real transcript content disappearing, not merely text left uncleaned.
+#:
+#: Measured, not guessed. Chunks a human read and judged faithful come back at
+#: 98.6-99.8% of input length; every chunk that had lost real content landed
+#: at 50.0-89.0%. Re-fetching the worst ones (S01-V007, 50.0% and 57.8%)
+#: returned 98%+ responses that covered the whole chunk, confirming those were
+#: a transient bad generation rather than something inherent to the input.
+MIN_LENGTH_RATIO = 0.9
+
+#: How many words per 1000 a response may *drop* (a raw word with no
+#: counterpart in the response at all) before it is rejected. This is the
+#: guard that encodes the actual definition of cleaning this corpus wants:
+#: repair what the recogniser got wrong, **remove nothing**.
+#:
+#: :data:`MIN_LENGTH_RATIO` alone is not enough, because it compares whole
+#: responses: a long video can lose a 668-word stretch and still come in at
+#: 98.6% overall, so a localized removal sails through while the ratio looks
+#: perfectly healthy. Measuring deletions directly catches it wherever it sits.
+#:
+#: 20 is set from the corpus's own distribution rather than taste. Words
+#: deleted per 1000 across 525 long chunks: median 2.4, p90 8.9, p99 94.4. The
+#: bulk is genuine repair — ASR stutters dropped ("khu công nghiệp **nghiệp**
+#: bình đường"), mishearings swapped ("dù **giảm như** làm phát" -> "Dù **lạm
+#: phát**", which difflib renders as delete+insert rather than a replacement).
+#: The tail is content removal: university ad reads, song lyrics, repeated
+#: formulas, at 49-196 per 1000. 20 sits above the repair noise floor and
+#: below every confirmed removal, with room for the word-merging that legitimate
+#: correction sometimes does.
+MAX_DELETED_PER_1000_WORDS = 20.0
+
+#: Absolute slack on top of :data:`MIN_LENGTH_RATIO`, in words. A pure ratio
+#: misjudges small inputs: a 3-word chunk losing one word is a 33% shortfall
+#: and would be rejected, even though a single dropped word is ordinary
+#: correction (Gemini is told it may fix an obvious mistranscription) and not
+#: remotely what a cut-off generation looks like. Truncation always loses a
+#: lot, so requiring *both* a ratio breach and a shortfall larger than this
+#: keeps the guard aimed at the real thing. At production chunk sizes
+#: (~12,000 words) this slack is negligible.
+MIN_TRUNCATION_SHORTFALL_WORDS = 20
+
+#: The instruction Gemini actually receives. Deliberately written as a short
+#: list of permitted edits followed by an explicit list of forbidden ones:
+#: an earlier version only said "do not remove any content" once, buried in a
+#: paragraph, and Gemini went on removing university ad reads, song lyrics and
+#: repeated formulas anyway. The corpus's definition of cleaning is narrow —
+#: repair what the recogniser got wrong, drop nothing — so the wording spells
+#: out each removal it was caught doing, including the two transformations
+#: that look like tidying but are content changes (digits, formula notation).
+#:
+#: Changing this string invalidates every cached response automatically, via
+#: :func:`_cache_key` — otherwise a prompt change would silently keep serving
+#: answers produced under the old one.
 _PROMPT = (
-    "You are cleaning a Vietnamese speech-to-text transcript for a search "
-    "index. Below is the raw transcript: no punctuation, no capitalisation, "
-    "and occasional speech-recognition mistakes.\n\n"
-    "Rewrite it as clean, natural Vietnamese prose:\n"
-    "- Add correct punctuation and capitalisation.\n"
-    "- Fix an obvious speech-recognition mistranscription (a word that makes "
-    "no sense in context) with the word that was almost certainly spoken. "
-    "If you are unsure, leave it as-is rather than guessing.\n"
-    "- Preserve the original wording, meaning, and order otherwise. This is "
-    "a correction pass, not a summary or a creative rewrite: do not add "
-    "information that is not already there, and do not remove any content.\n"
-    "- Output plain prose only: no markdown formatting (no asterisks, no "
-    "bullet points, no headings), no speaker labels, no added structure "
-    "beyond ordinary paragraph breaks.\n\n"
+    "You are correcting a Vietnamese speech-to-text transcript for a search "
+    "index. The raw transcript has no punctuation, no capitalisation, and "
+    "occasional speech-recognition mistakes.\n\n"
+    "The ONLY changes you may make are:\n"
+    "1. Add punctuation and paragraph breaks.\n"
+    "2. Fix capitalisation.\n"
+    "3. Correct a word the recogniser got wrong — wrong spelling, wrong tone "
+    "mark, or an obvious mishearing. If you are not confident what was "
+    "actually said, leave that word exactly as it is.\n\n"
+    "You must NOT do any of the following, even when it looks like an "
+    "improvement:\n"
+    "- Do not delete, drop, skip, shorten or merge any word, phrase or "
+    "sentence.\n"
+    "- Do not remove repeated words, stutters, filler, false starts, "
+    "advertisements, sponsor reads, song lyrics, or anything else you judge "
+    "unimportant.\n"
+    "- Do not merge passages that repeat or resemble each other.\n"
+    "- Do not summarise, paraphrase, condense or reorder.\n"
+    "- Do not convert spelled-out numbers into digits — write \"hai ngàn "
+    "không trăm hai mươi tư\", never \"2024\".\n"
+    "- Do not convert spoken words into symbols, abbreviations or formulas — "
+    "write \"e mũ trừ lam nhân t\", never \"e^(-λt)\".\n"
+    "- Do not add any information that is not in the input.\n\n"
+    "Every word of the input must appear in your output, in the same order. "
+    "The output must be at least as long as the input. If you are unsure "
+    "whether a change is allowed, make no change.\n\n"
+    "Output plain prose only: no markdown formatting (no asterisks, no "
+    "bullet points, no headings), and no speaker labels.\n\n"
     "Raw transcript:\n{text}"
 )
 
@@ -135,8 +220,22 @@ def _retryable_errors() -> tuple[type[BaseException], ...]:
     (4xx, including 429 rate limits) and ``ServerError`` (5xx) and carries a
     ``.code``, so catching just it and filtering in :func:`_is_retryable`
     covers every HTTP-shaped failure without needing the subclasses too.
+
+    ``httpx``'s own transport errors are listed separately because they are
+    **not** ``APIError`` and — checked, not assumed — ``httpx.ReadTimeout``
+    inherits from neither the builtin ``TimeoutError`` nor ``ConnectionError``
+    (its MRO is ``TimeoutException`` -> ``TransportError`` -> ``HTTPError`` ->
+    ``Exception``). Without this a stalled connection would fall through to
+    the bare ``except Exception`` below and be misread as a permanent,
+    non-retryable failure — leaving the chunk raw for the rest of the run.
     """
     errors: list[type[BaseException]] = [TimeoutError, ConnectionError]
+    try:
+        import httpx
+
+        errors.append(httpx.TransportError)
+    except ImportError:
+        pass
     try:
         from google.genai import errors as genai_errors
 
@@ -259,8 +358,7 @@ def _retry_delay_seconds(error: BaseException) -> float | None:
 
 class GeminiCleaner:
     """A loaded Gemini client. :meth:`restore` takes plain text and returns it
-    as cleaned prose, same shape as ``CapuModel.restore`` — but see the
-    module docstring: unlike capu's output, this is not word-for-word
+    as cleaned prose — see the module docstring: this is not word-for-word
     aligned to the input, so callers go through :func:`realign_words` rather
     than applying the result by word index.
 
@@ -271,7 +369,7 @@ class GeminiCleaner:
 
     def __init__(self, model_id: str = DEFAULT_MODEL, *, api_key: str | None = None,
                  cache_dir: Path | None = None, concurrency: int = CONCURRENCY,
-                 max_retries: int = MAX_RETRIES, timeout: float = 30.0,
+                 max_retries: int = MAX_RETRIES, timeout: float = REQUEST_TIMEOUT_SECONDS,
                  requests_per_minute: float | None = None):
         self.model_id = model_id
         self.api_key = api_key
@@ -290,7 +388,15 @@ class GeminiCleaner:
             raise RuntimeError(
                 "GEMINI_API_KEY is not set; see scripts/audio/gemini_clean.py"
             )
-        self._client = genai.Client(api_key=key)
+        # http_options.timeout is in **milliseconds** (checked against the SDK,
+        # not assumed). It has to be set here rather than per request:
+        # generate_content in this SDK version takes no timeout argument, and
+        # the client's own default is no timeout at all — see
+        # REQUEST_TIMEOUT_SECONDS.
+        self._client = genai.Client(
+            api_key=key,
+            http_options={"timeout": int(self.timeout * 1000)},
+        )
         return self
 
     def restore_or_none(self, text: str) -> str | None:
@@ -367,9 +473,23 @@ class GeminiCleaner:
         return [self.restore(t) for t in texts]
 
 
+def prompt_fingerprint() -> str:
+    """Short hash of the instruction, so a prompt change invalidates the cache.
+
+    Cache entries are keyed by content, and the prompt is as much a part of
+    that content as the transcript is: the same chunk answered under a
+    different instruction is a different response, and serving the old one
+    would quietly defeat the change. Folding this into :func:`_cache_key`
+    makes that automatic rather than something a future edit has to remember.
+    """
+    return hashlib.sha256(_PROMPT.encode("utf-8")).hexdigest()[:8]
+
+
 def _cache_key(model_id: str, text: str) -> str:
     digest = hashlib.sha256()
     digest.update(model_id.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(prompt_fingerprint().encode("utf-8"))
     digest.update(b"\0")
     digest.update(text.encode("utf-8"))
     return digest.hexdigest()[:16]
@@ -412,6 +532,63 @@ def _tokenize_cleaned_text(text: str) -> list[str]:
     return [token for token in text.split() if _align_key(token)]
 
 
+def _is_truncated(raw_word_count: int, cleaned_tokens: list[str]) -> bool:
+    """Whether a response came back too short to be a real restoration.
+
+    Both conditions must hold — see :data:`MIN_TRUNCATION_SHORTFALL_WORDS` for
+    why the ratio alone is not enough on small inputs.
+    """
+    shortfall = raw_word_count - len(cleaned_tokens)
+    if shortfall <= MIN_TRUNCATION_SHORTFALL_WORDS:
+        return False
+    return len(cleaned_tokens) < raw_word_count * MIN_LENGTH_RATIO
+
+
+def _deleted_per_1000(matcher: difflib.SequenceMatcher, raw_word_count: int) -> float:
+    """Words the response drops outright, per 1000 input words.
+
+    Counts only ``delete`` opcodes — a raw word with no counterpart anywhere in
+    the response. A corrected word shows up as ``replace`` (or as
+    delete+insert, if the surrounding alignment shifted), and an added word as
+    ``insert``; neither is a removal.
+    """
+    if not raw_word_count:
+        return 0.0
+    deleted = sum(
+        i2 - i1 for tag, i1, i2, _j1, _j2 in matcher.get_opcodes() if tag == "delete"
+    )
+    return deleted / raw_word_count * 1000.0
+
+
+def _rejection_reason(raw_words: list[Word], cleaned_text: str):
+    """Why this response must be discarded, or ``None`` when it is acceptable.
+
+    Returns ``(reason, cleaned_tokens, matcher)``; the matcher is handed back so
+    a caller that accepts the response does not have to diff it a second time.
+
+    Shared by :func:`realign_words` (which falls back to the raw words) and
+    :func:`restore_words_gemini` (which refuses to cache and re-asks later), so
+    the two can never disagree about which responses are usable.
+    """
+    cleaned_tokens = _tokenize_cleaned_text(cleaned_text)
+    if not cleaned_tokens:
+        return "response was empty", cleaned_tokens, None
+    matcher = difflib.SequenceMatcher(
+        None,
+        [_align_key(word.text) for word in raw_words],
+        [_align_key(token) for token in cleaned_tokens],
+        autojunk=False,
+    )
+    if _is_truncated(len(raw_words), cleaned_tokens):
+        return "response was cut off before the end of the chunk", cleaned_tokens, matcher
+    if matcher.ratio() < MIN_SIMILARITY_RATIO:
+        return "response is not recognisably a rewrite of the input", cleaned_tokens, matcher
+    rate = _deleted_per_1000(matcher, len(raw_words))
+    if rate > MAX_DELETED_PER_1000_WORDS:
+        return f"response drops {rate:.0f} words per 1000, over the {MAX_DELETED_PER_1000_WORDS:.0f} allowed", cleaned_tokens, matcher
+    return None, cleaned_tokens, matcher
+
+
 def realign_words(raw_words: list[Word], cleaned_text: str) -> list[Word]:
     """Rebuild timed words from Gemini's free-form rewrite of ``raw_words``.
 
@@ -422,28 +599,20 @@ def realign_words(raw_words: list[Word], cleaned_text: str) -> list[Word]:
     ``offset``/``nll`` straight across; anything Gemini changed gets an
     offset linearly interpolated between the nearest unchanged neighbours on
     either side (or pinned to whichever neighbour exists, at either end of
-    the chunk) and the worst ``nll`` of whatever raw span it replaced — the
-    same "worst confidence of the run it replaces" convention
-    :func:`scripts.audio.postprocess.normalize_numbers` already uses for
-    collapsing several raw words into one.
+    the chunk) and the worst ``nll`` of whatever raw span it replaced.
 
-    Falls back to ``raw_words`` unchanged — the same "discard rather than
-    trust it" bargain :func:`scripts.audio.postprocess.apply_capu_output`
-    strikes for capu — when the two streams share less than
-    ``MIN_SIMILARITY_RATIO`` of their tokens, since a response that
-    different from its input is far more likely broken than freely
-    corrected.
+    Discards the response — falling back to ``raw_words`` unchanged — whenever
+    :func:`_rejection_reason` objects: the response was empty, cut off before
+    the end of the chunk, is not recognisably a rewrite of the input, or drops
+    more words than cleaning is allowed to (``MAX_DELETED_PER_1000_WORDS``).
+    The last of those is checked **before** the diff is applied: otherwise the
+    dropped span becomes a ``delete`` opcode and those raw words disappear
+    outright, silently deleting real transcript content.
     """
     if not raw_words:
         return []
-    cleaned_tokens = _tokenize_cleaned_text(cleaned_text)
-    if not cleaned_tokens:
-        return list(raw_words)
-
-    raw_keys = [_align_key(word.text) for word in raw_words]
-    cleaned_keys = [_align_key(token) for token in cleaned_tokens]
-    matcher = difflib.SequenceMatcher(None, raw_keys, cleaned_keys, autojunk=False)
-    if matcher.ratio() < MIN_SIMILARITY_RATIO:
+    reason, cleaned_tokens, matcher = _rejection_reason(raw_words, cleaned_text)
+    if reason is not None:
         return list(raw_words)
 
     result: list[Word] = []
@@ -496,7 +665,12 @@ def restore_words_gemini(words: list[Word], cleaner: GeminiCleaner, *,
     Only a genuine restoration is cached — a chunk :meth:`GeminiCleaner.
     restore_or_none` gave up on (rate-limited, malformed output) is *not*
     written to cache, so it is retried on the next run instead of being
-    permanently frozen as an unrestored no-op.
+    permanently frozen as an unrestored no-op. A **truncated** response
+    counts as not genuine for this purpose (see ``MIN_LENGTH_RATIO``), for
+    the same reason and with a useful side effect: a cache entry written
+    before that guard existed is treated as a miss on the next run, so it is
+    re-requested and overwritten with a good response rather than rejected
+    again and again for the rest of the corpus's life.
 
     Every chunk goes through :func:`realign_words` regardless: caching
     Gemini's raw prose response (not the post-alignment word list) means a
@@ -517,20 +691,31 @@ def restore_words_gemini(words: list[Word], cleaner: GeminiCleaner, *,
     requests = [" ".join(w.text for w in chunk) for chunk in chunks]
     keys = [_cache_key(cleaner.model_id, text) for text in requests]
 
+    def usable(index: int, text: str | None) -> bool:
+        """A response worth trusting and worth keeping."""
+        if text is None:
+            return False
+        return _rejection_reason(chunks[index], text)[0] is None
+
     restored_texts: list[str | None] = [None] * len(chunks)
     pending = []
     for index, key in enumerate(keys):
         cached = _read_cache(cache_dir, key)
-        if cached is not None:
+        if usable(index, cached):
             restored_texts[index] = cached
         else:
             pending.append(index)
 
     def work(index: int) -> tuple[int, str | None, bool]:
         restored = cleaner.restore_or_none(requests[index])
-        if restored is not None:
+        reason, _tokens, _matcher = _rejection_reason(chunks[index], restored or "")
+        if restored is not None and reason is None:
             _write_cache(cache_dir, keys[index], restored)
-        return index, restored, restored is not None
+            return index, restored, True
+        if restored is not None:
+            print(f"[gemini-clean] rejected a response for chunk {index}: {reason}",
+                  flush=True)
+        return index, None, False
 
     if pending:
         gave_up = 0

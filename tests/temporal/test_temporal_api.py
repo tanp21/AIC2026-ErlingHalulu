@@ -10,6 +10,8 @@ from backend import app as server
 from backend.access_control import AccessConfig, LatestWinsCoordinator
 from backend.audio_search import AudioHit
 from backend.app import (
+    TemporalImageSearchReq,
+    TemporalImageEvent,
     TemporalSearchReq,
     TemporalSnapshotStore,
     finalize_temporal_response,
@@ -42,6 +44,43 @@ class TemporalRequestTests(unittest.TestCase):
             with self.subTest(payload=payload), self.assertRaises(ValidationError):
                 TemporalSearchReq(**payload)
 
+    def test_temporal_image_events_validate_event_count_and_kind(self):
+        request = TemporalImageSearchReq(events=[
+            {"kind": "text", "text": "first"},
+            {"kind": "reference", "reference": {"video_id": "A01_V001", "frame_idx": 2}},
+        ])
+        self.assertEqual(len(request.events), 2)
+        with self.assertRaises(ValidationError):
+            TemporalImageSearchReq(events=[{"kind": "text", "text": "only one"}])
+        with self.assertRaises(ValidationError):
+            TemporalImageEvent(kind="upload", image_index=6)
+
+    def test_temporal_events_accept_transcript_and_ocr_modalities(self):
+        request = TemporalImageSearchReq(events=[
+            {"kind": "audio", "text": "người dẫn chương trình"},
+            {"kind": "ocr", "text": "breaking news"},
+        ])
+        self.assertEqual([event.kind for event in request.events], ["audio", "ocr"])
+        for kind in ("audio", "ocr"):
+            with self.subTest(kind=kind), self.assertRaises(ValidationError):
+                TemporalImageEvent(kind=kind, text=" ")
+
+    def test_each_non_object_modality_accepts_a_position_filter(self):
+        query = {"clauses": [{"label": "person", "region": [0.1, 0.1, 0.9, 0.9]}]}
+        payloads = [
+            {"kind": "text", "text": "street"},
+            {"kind": "audio", "text": "đường phố"},
+            {"kind": "ocr", "text": "Street"},
+            {"kind": "upload", "image_index": 0},
+            {"kind": "reference", "reference": {"video_id": "A01_V001", "frame_idx": 1}},
+        ]
+        for payload in payloads:
+            with self.subTest(kind=payload["kind"]):
+                event = TemporalImageEvent(**payload, object_filter=query)
+                self.assertEqual(event.object_filter.clauses[0].label, "person")
+        with self.assertRaises(ValidationError):
+            TemporalImageEvent(kind="object", object_query=query, object_filter=query)
+
 
 class TemporalBatchEncodingTests(unittest.TestCase):
     def test_encode_texts_uses_one_model_batch(self):
@@ -61,6 +100,33 @@ class TemporalBatchEncodingTests(unittest.TestCase):
 
 
 class TemporalRuntimeTests(unittest.TestCase):
+    def test_object_filter_restricts_only_its_event_before_sequence_building(self):
+        query = server.object_search.ObjectQuery(clauses=[
+            {"label": "person", "region": [0.1, 0.1, 0.9, 0.9]},
+        ])
+        hits = [
+            {"vector_index": vector, "rank": rank, "distance": .9,
+             "video_id": "A01_V001", "frame_idx": frame, "time": float(frame), "pts": frame}
+            for vector, rank, frame in ((0, 1, 10), (0, 2, 20), (1, 1, 30))
+        ]
+        matches = [{"score": .8, "delta_ms": 0, "matched_objects": [{"label": "person"}]}, None]
+        with (
+            patch("backend.app.search_core.visual_search", return_value={"hits": hits, "faiss_latency_ms": 1}),
+            patch("backend.app.search_core.match_objects", return_value=matches) as match,
+            patch("backend.app.build_sequences", return_value=[]) as build,
+        ):
+            server.temporal_multimodal_paths(
+                TemporalSearchReq(events=["first", "second"]),
+                [{"kind": "visual", "visual_index": 0, "object_filter": query},
+                 {"kind": "visual", "visual_index": 1}],
+                3, "raw_mean", 1, None, 0, 0, np.zeros((2, 2)), "l2026", 0,
+            )
+        match.assert_called_once()
+        self.assertEqual([point["frame_idx"] for point in match.call_args.args[2]], [10, 20])
+        candidates = build.call_args.args[0]
+        self.assertEqual([[hit["frame_idx"] for hit in event] for event in candidates], [[10], [30]])
+        self.assertEqual(candidates[0][0]["matched_objects"], [{"label": "person"}])
+
     def test_flat_search_maps_event_candidates_and_groups_multiple_sequences(self):
         request = TemporalSearchReq(events=["one", "two"], max_gap_seconds=20)
         index = Mock()
@@ -226,6 +292,32 @@ class TemporalEndpointTests(unittest.IsolatedAsyncioTestCase):
             json={"cursor": cursor},
         )
         self.assertEqual(next_page.json()["videos"][0]["video_id"], "B")
+
+    async def test_image_endpoint_batches_text_and_image_vectors_in_event_order(self):
+        result = {"videos": [], "total_sequences": 0, "latency_ms": 1.0}
+
+        async def inline(function, *args):
+            return function(*args)
+
+        with (
+            patch("backend.app.load_temporal_config", return_value=(2000, "raw_min", 1.5)),
+            patch("backend.app.search_core.encode_texts", return_value=np.array([[1, 0]], dtype="float32")) as encode,
+            patch("backend.app.search_core.encode_image", return_value=np.array([[0, 1]], dtype="float32")),
+            patch("backend.app.temporal_search_response", return_value=result) as search,
+            patch("backend.app.run_in_threadpool", side_effect=inline),
+        ):
+            response = await self.client.post(
+                "/search/temporal/image",
+                headers={"X-AIC-User": "one@example.com"},
+                data={"payload": '{"events":[{"kind":"text","text":"first","object_filter":{"clauses":[{"label":"person","region":[0,0,1,1]}]}},{"kind":"upload","image_index":0}]}'},
+                files={"images": ("event.png", b"image bytes", "image/png")},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        encode.assert_called_once_with(["first"])
+        vectors = search.call_args.args[4]
+        np.testing.assert_array_equal(vectors, [[1, 0], [0, 1]])
+        self.assertEqual(search.call_args.args[5][0]["object_filter"].clauses[0].label, "person")
 
 
 if __name__ == "__main__":

@@ -74,6 +74,19 @@ describe("agent panel", () => {
     });
   });
 
+  it("sends the judge the user selected, so human review is not silently run as Gemini", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse(running, { status: 202 }));
+    render(<AgentPanel />);
+    fillForm();
+    fireEvent.change(screen.getByLabelText("Agent judge"), { target: { value: "human" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)).judge).toBe("human");
+  });
+
   it("sends the selected mode", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse(running, { status: 202 }));

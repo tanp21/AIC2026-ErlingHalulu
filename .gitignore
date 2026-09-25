@@ -6,12 +6,14 @@
 .env
 .env.*
 !.env.secure.example
+!.env.dres.example
 /haproxy-users.cfg
 /aic-initial-passwords.txt
 /wan-load-report*.json
 
 /.venv/
 /.venv-captioning/
+/.venv-ocr/
 /.direnv/
 /.cache/
 /.thumb_cache/

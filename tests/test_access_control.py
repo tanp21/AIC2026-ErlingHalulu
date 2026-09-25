@@ -199,6 +199,76 @@ class AccessMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(response.status_code == 200 for response in responses))
 
 
+class DelegatedIdentityTests(unittest.IsolatedAsyncioTestCase):
+    """A media host forwards each teammate's own login; only that host may name someone else.
+
+    Without this the compute host stamps one tailnet identity for the whole team, so every
+    teammate shares a coordinator slot and a single agent run.
+    """
+
+    MEDIA_HOST = "laptop@example.com"
+
+    def setUp(self):
+        app = FastAPI()
+        install_access_control(app, AccessConfig(
+            allowed_users=frozenset({self.MEDIA_HOST, "owner@example.com", "mate@example.com"}),
+            admin_user="owner@example.com",
+        ))
+        app.state.search_coordinator = Mock()
+
+        @app.get("/private")
+        async def private(request: Request):
+            return {"login": request.state.login, "admin": request.state.is_admin}
+
+        self.client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        )
+
+    async def asyncTearDown(self):
+        await self.client.aclose()
+
+    async def _whoami(self, forwarded_as, delegated=None):
+        headers = {"X-AIC-User": forwarded_as}
+        if delegated is not None:
+            headers["X-AIC-Delegated-User"] = delegated
+        response = await self.client.get("/private", headers=headers)
+        return response.status_code, response.json().get("login"), response.json().get("admin")
+
+    async def test_media_host_may_name_one_of_its_own_users(self):
+        with patch.dict(os.environ, {"AIC_MEDIA_HOST_LOGIN": self.MEDIA_HOST}):
+            self.assertEqual(
+                await self._whoami(self.MEDIA_HOST, "mate@example.com"),
+                (200, "mate@example.com", False),
+            )
+
+    async def test_delegated_admin_keeps_admin_rights(self):
+        with patch.dict(os.environ, {"AIC_MEDIA_HOST_LOGIN": self.MEDIA_HOST}):
+            self.assertEqual(
+                await self._whoami(self.MEDIA_HOST, "owner@example.com"),
+                (200, "owner@example.com", True),
+            )
+
+    async def test_the_delegated_login_still_has_to_be_allowed(self):
+        with patch.dict(os.environ, {"AIC_MEDIA_HOST_LOGIN": self.MEDIA_HOST}):
+            status, _, _ = await self._whoami(self.MEDIA_HOST, "stranger@example.com")
+            self.assertEqual(status, 403)
+
+    async def test_anyone_but_the_media_host_cannot_delegate(self):
+        with patch.dict(os.environ, {"AIC_MEDIA_HOST_LOGIN": self.MEDIA_HOST}):
+            self.assertEqual(
+                await self._whoami("mate@example.com", "owner@example.com"),
+                (200, "mate@example.com", False),
+            )
+
+    async def test_a_media_host_is_ignored_when_none_is_configured(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AIC_MEDIA_HOST_LOGIN", None)
+            self.assertEqual(
+                await self._whoami(self.MEDIA_HOST, "owner@example.com"),
+                (200, self.MEDIA_HOST, False),
+            )
+
+
 class LatestWinsCoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_recent_admin_activity_delays_teammate_admission(self):
         self.assertIn(

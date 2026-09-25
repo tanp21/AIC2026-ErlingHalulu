@@ -773,6 +773,24 @@ def build_vision(settings, *, usage=None, gemini=None):
     thing the team relies on on competition day.
     """
     choice = (getattr(settings, "vision", None) or "gemini").lower()
+    if choice == "openrouter":
+        # A remote API like Gemini, but one key across many models -- which is what makes
+        # it the fallback when a Gemini quota runs out mid-competition. The default model
+        # (`qwen/qwen3.7-flash`) reads images; a text-only slug would fail loudly on the
+        # first call rather than quietly scoring zero, because `judge` refuses an empty
+        # reply instead of returning it.
+        from .openrouter import OpenRouterClient
+
+        key = getattr(settings, "openrouter_api_key", "")
+        if not key:
+            raise ValueError("AIC_AGENT_VISION=openrouter needs OPENROUTER_API_KEY")
+        return OpenRouterClient(
+            key,
+            os.environ.get("AIC_VLM_MODEL") or getattr(settings, "openrouter_model", None)
+            or "qwen/qwen3.7-flash",
+            getattr(settings, "openrouter_base_url", None) or "https://openrouter.ai/api/v1",
+            usage=usage,
+        )
     if choice in ("gemini", "deepseek"):
         if choice == "deepseek":
             # `deepseek-flash` reads images; `deepseek-v4-pro` does not, and answers a
@@ -800,7 +818,8 @@ def build_vision(settings, *, usage=None, gemini=None):
         )
     if choice != "local":
         raise ValueError(
-            f"AIC_AGENT_VISION must be 'local', 'gemini' or 'deepseek', not {choice!r}")
+            f"AIC_AGENT_VISION must be 'local', 'gemini', 'deepseek' or 'openrouter', "
+            f"not {choice!r}")
     url = getattr(settings, "vlm_url", None)
     if url:
         return HttpVLM(url, model=getattr(settings, "vlm_model", None), usage=usage,

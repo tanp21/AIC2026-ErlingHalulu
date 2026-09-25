@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the Elasticsearch transcript index for 2026 L21-L30 videos."""
+"""Build the Elasticsearch transcript index for the 2026 corpus (L21-L30, S01, M01-M10)."""
 from __future__ import annotations
 
 import argparse
@@ -18,6 +18,7 @@ from backend.audio_search import (
     AUDIO_INDEX,
     MODEL_NAME,
     SemanticChunkConfig,
+    TopicChunkConfig,
     build_index_definition,
     get_client,
     make_passages,
@@ -30,10 +31,27 @@ AUDIO_DIR = audio_search._AUDIO_DIR
 STEP_DATA = AUDIO_DIR / "step_data.parquet"
 TRANSCRIPTIONS = AUDIO_DIR / "transcription.parquet"
 
+#: Cap on the token length of a single string handed to ``embed_cues``.
+#:
+#: The semantic chunker embeds one string per *sentence*, which is harmless for
+#: a punctuated transcript — sentences are short. But cleaning is decided per
+#: chunk, so a video can come out part cleaned and part raw, and a raw chunk
+#: has no punctuation for the sentence splitter to find: S01-V001's raw 12,000
+#: words arrive as a single "sentence", and encoding that inside a batch of 16
+#: OOMs a 12 GB card (measured: `torch.OutOfMemoryError` trying to allocate
+#: 5.99 GiB inside `scaled_dot_product_attention`).
+#:
+#: 2048 is orders of magnitude above a spoken sentence and above the largest
+#: passage the chunker emits, so this changes nothing for normal input and
+#: every batch-1 chunk boundary is reproduced exactly. It only bounds the
+#: pathological run, which carries no usable boundary signal anyway.
+CUE_MAX_TOKENS = 2048
+
 
 def iter_passages(rows, *, strategy: str = "sliding", window_seconds: int = 60,
                   stride_seconds: int = 15, embed_cues=None, similarity_threshold: float = 0.5,
-                  chunk_config: SemanticChunkConfig | None = None):
+                  chunk_config: SemanticChunkConfig | None = None,
+                  llm_segment_fn=None, topic_config: TopicChunkConfig | None = None):
     grouped = defaultdict(list)
     for row in rows:
         grouped[row["audio_key"]].append(
@@ -48,6 +66,11 @@ def iter_passages(rows, *, strategy: str = "sliding", window_seconds: int = 60,
         elif strategy == "semantic":
             passages = audio_search.make_semantic_passages(
                 video_id, timed_tokens, embed_cues, similarity_threshold=similarity_threshold
+            )
+        elif strategy == "topic":
+            passages = audio_search.make_topic_passages(
+                video_id, timed_tokens, llm_segment_fn,
+                embed_cues=embed_cues, config=topic_config
             )
         else:
             passages = make_passages(video_id, timed_tokens, window_seconds, stride_seconds)
@@ -78,7 +101,7 @@ def load_transcript_ids(path: Path = TRANSCRIPTIONS):
     return set(pq.read_table(path, columns=["audio_key"]).column("audio_key").to_pylist())
 
 
-def validate_coverage(source_ids, indexed_ids, expected_total=873):
+def validate_coverage(source_ids, indexed_ids, expected_total=1189):
     if len(source_ids) != expected_total:
         raise RuntimeError(
             f"expected {expected_total} source transcripts, got {len(source_ids)}"
@@ -92,7 +115,9 @@ def validate_coverage(source_ids, indexed_ids, expected_total=873):
 def build(index: str, batch_size: int, bulk_size: int, recreate: bool, device: str, *,
          strategy: str = "sliding", similarity_threshold: float = 0.5,
          window_seconds: int = 60, stride_seconds: int = 15,
-         chunk_config: SemanticChunkConfig | None = None):
+         chunk_config: SemanticChunkConfig | None = None,
+         topic_config: TopicChunkConfig | None = None,
+         deepseek_options: dict | None = None):
     import numpy as np
     from elasticsearch.helpers import bulk
     from sentence_transformers import SentenceTransformer
@@ -104,16 +129,25 @@ def build(index: str, batch_size: int, bulk_size: int, recreate: bool, device: s
         client.indices.delete(index=index)
     client.indices.create(index=index, body=build_index_definition())
 
-    # Qwen3-Embedding-4B is intentionally kept in FP16: this is the same
-    # serving dtype and avoids silently building a prohibitively large FP32 job.
+    # FP16 is the serving dtype, and avoids silently building a prohibitively
+    # large FP32 job.
     import torch
     model = SentenceTransformer(
         MODEL_NAME, device=device, model_kwargs={"torch_dtype": torch.float16},
     )
+    model.max_seq_length = CUE_MAX_TOKENS
 
     def embed_cues(texts):
         return model.encode(texts, batch_size=batch_size, normalize_embeddings=True,
                             convert_to_numpy=True, show_progress_bar=False)
+
+    llm_segment_fn = None
+    if strategy == "topic":
+        # Lazily imported: this strategy is the only one that needs an LLM
+        # client, so every other strategy (and every test) stays free of it.
+        from scripts.audio.deepseek_topic_segment import build_segmenter
+
+        llm_segment_fn = build_segmenter(**(deepseek_options or {}))
 
     # audio_search owns the choice of transcript: the raw ASR parquet unless
     # AIC_TRANSCRIPT_PATH names another file.
@@ -122,7 +156,8 @@ def build(index: str, batch_size: int, bulk_size: int, recreate: bool, device: s
     passages = iter_passages(load_rows(source), strategy=strategy,
                              window_seconds=window_seconds, stride_seconds=stride_seconds,
                              embed_cues=embed_cues, similarity_threshold=similarity_threshold,
-                             chunk_config=chunk_config)
+                             chunk_config=chunk_config, llm_segment_fn=llm_segment_fn,
+                             topic_config=topic_config)
     total = 0
     videos = set()
     batch = []
@@ -173,7 +208,13 @@ def validate_existing(index: str):
     response = client.search(
         index=index,
         size=0,
-        aggs={"videos": {"terms": {"field": "video_id", "size": 1000}}},
+        # A terms aggregation returns at most `size` buckets, and the default
+        # is 10. Anything below the corpus's video count silently truncates the
+        # set, and every video past the cut is then reported as "without usable
+        # speech" -- which is how a 1,189-video corpus came back as "1,000
+        # searchable, 189 without usable speech". Ask for more buckets than the
+        # corpus can hold rather than a number tied to today's size.
+        aggs={"videos": {"terms": {"field": "video_id", "size": 10_000}}},
     )
     videos = {bucket["key"] for bucket in response["aggregations"]["videos"]["buckets"]}
     skipped = validate_coverage(load_transcript_ids(), videos)
@@ -242,7 +283,8 @@ def main():
     # fewest passages of any config tried, and a follow-up TRAKE benchmark against
     # temporal_search.py's real per-event DP found no meaningful regression. See
     # docs/audio-search.md for the full comparison.
-    parser.add_argument("--strategy", choices=["sliding", "semantic", "semantic_duration"],
+    parser.add_argument("--strategy",
+                        choices=["sliding", "semantic", "semantic_duration", "topic"],
                         default="semantic_duration")
     parser.add_argument("--similarity-threshold", type=float, default=0.5,
                         help="cue-merge threshold for --strategy semantic")
@@ -255,7 +297,10 @@ def main():
     parser.add_argument("--min-duration-seconds", type=float, default=10.0)
     parser.add_argument("--target-duration-seconds", type=float, default=40.0)
     parser.add_argument("--max-duration-seconds", type=float, default=75.0)
-    parser.add_argument("--overlap-sentences", type=int, default=1)
+    # None, not a literal default: semantic_duration's default (1) and
+    # topic's (0, see TopicChunkConfig) genuinely differ, so the shared flag
+    # is resolved per --strategy below rather than picking one number here.
+    parser.add_argument("--overlap-sentences", type=int, default=None)
     # Phase 2, off by default -- not exercised by the benchmark that chose
     # the duration bounds above. An earlier ungated design (pause alone made
     # a boundary eligible) let pause dominate ~86%/70% of all boundaries at
@@ -269,6 +314,23 @@ def main():
     pause.add_argument("--no-pause-boost", dest="pause_boost", action="store_false")
     parser.add_argument("--pause-relative-percentile", type=float, default=75.0)
     parser.add_argument("--pause-borderline-semantic-percentile", type=float, default=30.0)
+    # --strategy topic only. --min/--max-duration-seconds and
+    # --overlap-sentences above are reused for this strategy too (its
+    # TopicChunkConfig shares those field names with SemanticChunkConfig);
+    # --target-duration-seconds above is reused as well, but only shapes the
+    # embedding-based max-duration fallback splitter, not the LLM's decision.
+    parser.add_argument("--sentences-per-batch", type=int, default=60,
+                        help="topic strategy: sentences per DeepSeek call")
+    parser.add_argument("--batch-overlap-sentences", type=int, default=10,
+                        help="topic strategy: context overlap between adjacent batches")
+    parser.add_argument("--fallback-context-window-sentences", type=int, default=3)
+    parser.add_argument("--fallback-breakpoint-percentile", type=float, default=15.0)
+    parser.add_argument("--deepseek-model", default=None)
+    parser.add_argument("--deepseek-base-url", default=None)
+    parser.add_argument("--deepseek-api-key", default=None,
+                        help="falls back to the DEEPSEEK_API_KEY env var")
+    parser.add_argument("--deepseek-rpm", type=float, default=None)
+    parser.add_argument("--deepseek-cache-dir", type=Path, default=None)
     args = parser.parse_args()
     if args.export_flat:
         export_flat(args.index, args.export_flat)
@@ -282,15 +344,33 @@ def main():
             min_duration_seconds=args.min_duration_seconds,
             target_duration_seconds=args.target_duration_seconds,
             max_duration_seconds=args.max_duration_seconds,
-            overlap_sentences=args.overlap_sentences,
+            overlap_sentences=(args.overlap_sentences if args.overlap_sentences is not None
+                               else SemanticChunkConfig().overlap_sentences),
             pause_boost_enabled=args.pause_boost,
             pause_relative_percentile=args.pause_relative_percentile,
             pause_borderline_semantic_percentile=args.pause_borderline_semantic_percentile,
         )
+        topic_config = TopicChunkConfig(
+            sentences_per_batch=args.sentences_per_batch,
+            batch_overlap_sentences=args.batch_overlap_sentences,
+            min_duration_seconds=args.min_duration_seconds,
+            target_duration_seconds=args.target_duration_seconds,
+            max_duration_seconds=args.max_duration_seconds,
+            overlap_sentences=(args.overlap_sentences if args.overlap_sentences is not None
+                               else TopicChunkConfig().overlap_sentences),
+            fallback_context_window_sentences=args.fallback_context_window_sentences,
+            fallback_breakpoint_percentile=args.fallback_breakpoint_percentile,
+        )
+        deepseek_options = dict(
+            model=args.deepseek_model, api_key=args.deepseek_api_key,
+            base_url=args.deepseek_base_url, cache_dir=args.deepseek_cache_dir,
+            requests_per_minute=args.deepseek_rpm,
+        )
         build(args.index, args.batch_size, args.bulk_size, args.recreate, args.device,
               strategy=args.strategy, similarity_threshold=args.similarity_threshold,
               window_seconds=args.window_seconds, stride_seconds=args.stride_seconds,
-              chunk_config=chunk_config)
+              chunk_config=chunk_config, topic_config=topic_config,
+              deepseek_options=deepseek_options)
 
 
 if __name__ == "__main__":

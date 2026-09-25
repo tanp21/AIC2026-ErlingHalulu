@@ -1,6 +1,6 @@
 import unittest
 
-from backend.audio_search import SemanticChunkConfig
+from backend.audio_search import SemanticChunkConfig, TopicChunkConfig
 from scripts.indexing.build_audio_index import iter_passages, validate_coverage
 
 
@@ -62,6 +62,29 @@ class AudioIndexBuildTests(unittest.TestCase):
             self.assertEqual(passage["video_id"], "L21_V001")
             self.assertEqual(passage["group"], "L21")
             self.assertEqual(passage["year"], "2026")
+
+    def test_iter_passages_topic_strategy_delegates_to_make_topic_passages(self):
+        rows = [
+            {"audio_key": "L21_V001", "offset": 0.0, "token": " một."},
+            {"audio_key": "L21_V001", "offset": 10.0, "token": " hai."},
+        ]
+
+        def llm_segment_fn(texts):
+            self.assertEqual(texts, ["một.", "hai."])
+            return [0]
+
+        passages = list(iter_passages(
+            rows, strategy="topic", llm_segment_fn=llm_segment_fn,
+            topic_config=TopicChunkConfig(min_duration_seconds=1),
+        ))
+
+        self.assertEqual(len(passages), 2)
+        for passage in passages:
+            self.assertEqual(passage["video_id"], "L21_V001")
+            self.assertEqual(passage["group"], "L21")
+            self.assertEqual(passage["year"], "2026")
+        self.assertEqual(passages[0]["text"], "một.")
+        self.assertEqual(passages[1]["text"], "hai.")
 
     def test_coverage_reports_transcript_with_only_placeholders_as_unsearchable(self):
         source = {"L21_V001", "L24_V022"}

@@ -15,6 +15,19 @@ with only one of the batch2 parts attached still works. Pass --strict to fail in
 Frame index means decode order, matching how the original keyframes were cut and how
 indexes/frame_maps maps frames to time. Output is <out>/<group>/<video_id>/%06d.png,
 which is the layout scripts/embedding/embed_keyframes.py expects.
+
+A .mov in this corpus is very likely torn: a corpus-wide survey of the N-series videos found
+260 of 298 (87%) losing at least one frame internally (`ffprobe -count_packets` overstating
+`-count_frames`, one video by 1223 of 13473), and all 298 emit decoder warnings. Worse, a
+lost frame is not merely a gap -- extracting exact ids by seeking into the file (`-ss
+<id>/fps` per chunk) can silently return the *wrong* frame once a chunk's seek point lands
+past a loss, because re-seeking loses synchronization with the file's true decode-order
+numbering and no local signal (a matching frame count, no ffmpeg error) catches it. Measured
+directly: a video with *zero* detected internal loss still had chunked, seek-based
+extraction return the wrong frame at 4 of 5 sampled positions. Extraction therefore never
+seeks past the very start of the file (see `run_ffmpeg_select`): frames the file's real
+decodable length falls short of are listed in <out>/undecodable.json; only a video that
+fails to decode at all makes this exit non-zero.
 """
 import argparse
 import json
@@ -43,53 +56,157 @@ def is_valid_png(p):
         return False
 
 
+def uniform_step(frames):
+    """The constant gap between consecutive stride ids, or None if it varies.
+
+    Most fps values give a perfectly uniform stride (25, 30, 12.5 fps: 2*fps is exact);
+    only a non-integer rate like 29.97 rounds unevenly frame to frame (alternating 59/60
+    gaps). A uniform step is what lets extraction run as a single unseeked pass instead of
+    several explicit-id batches.
+    """
+    if len(frames) < 2:
+        return None
+    gaps = {b - a for a, b in zip(frames, frames[1:])}
+    return gaps.pop() if len(gaps) == 1 else None
+
+
+def run_ffmpeg_select(video, select_expr, want, tmp_dir, compression, threads):
+    """One ffmpeg pass, decoding from the true start of the file -- never `-ss`.
+
+    This is the fix. Chunked, seeked extraction (`-ss <id>/fps` per window) can silently
+    return the wrong frame even when nothing about the video looks damaged: measured on a
+    video with *zero* detected packet loss, seek-based chunked extraction was still wrong
+    at 4 of 5 sampled positions, because re-seeking loses synchronization with the file's
+    true decode-order numbering and no local check (a matching frame count, no ffmpeg
+    error) catches it. Decoding straight through and letting `select` count every frame the
+    decoder actually emits, from frame 0, is the only approach that matched an independent
+    ground truth in that investigation -- including on the most damaged file tested (9% of
+    its frames internally lost): every frame such a pass produced was correct, and the only
+    gap was the real, honestly-reported tail past the file's true decodable length. `want`
+    caps the output count so the pass stops once satisfied rather than reading to EOF.
+
+    Returns the PNGs written, in order, or None if ffmpeg refused outright (a badly torn
+    region can still push the decoder's error rate past its limit and abort).
+    """
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        result = subprocess.run([
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-threads", str(threads),
+            "-i", str(video), "-vf", f"select='{select_expr}'", "-vsync", "0",
+            "-frames:v", str(want),
+            "-c:v", "png", "-pix_fmt", "rgb24",
+            "-compression_level", str(compression),
+            "-start_number", "0", str(tmp_dir / "f%06d.png"),
+        ], capture_output=True, timeout=3600)
+    except subprocess.TimeoutExpired:
+        return None
+    if result.returncode != 0:
+        return None
+    return sorted(tmp_dir.glob("f*.png"))
+
+
+def extract_ids(video, ids, tmp_dir, out_dir, compression, threads):
+    """A batch of (possibly non-uniformly spaced) ids, still always read from true 0.
+
+    Used only when the stride is not perfectly uniform (rare non-integer fps, e.g. 29.97 --
+    `uniform_step` returns None), where `select` needs an explicit OR of exact ids rather
+    than one `mod` term, or as the fallback if a single-pass `mod` extraction is ever
+    refused outright. Every batch still decodes from frame 0, never a fresh `-ss`, so a
+    short result is unambiguously the tail of *this batch* -- there is no seek point for a
+    torn region to desynchronize, so only an outright ffmpeg failure (not a short count)
+    needs splitting, and the split is on the id list, never on where to seek.
+
+    A success is moved into `out_dir` immediately, before returning: `tmp_dir` is one shared
+    scratch directory across every sibling call in the recursion, and `run_ffmpeg_select`
+    wipes it at the start of each call, so leaving a result for the caller to move only
+    after the whole tree of calls finishes would let a later sibling delete it first.
+    """
+    if not ids:
+        return []
+    select = "+".join(f"eq(n\\,{i})" for i in ids)
+    outs = run_ffmpeg_select(video, select, len(ids), tmp_dir, compression, threads)
+    if outs is not None:
+        for frame_id, out in zip(ids, outs):
+            out.replace(out_dir / f"{frame_id:06d}.png")
+        return list(ids)
+    if len(ids) == 1:
+        return []
+    middle = len(ids) // 2
+    return (extract_ids(video, ids[:middle], tmp_dir, out_dir, compression, threads)
+            + extract_ids(video, ids[middle:], tmp_dir, out_dir, compression, threads))
+
+
 def extract_video_batch(video, frame_indices, out_dir, compression, fps, threads):
     """Extract all missing keyframes of one video, exact frame index.
 
-    Uses `select='eq(n,rel)+...'` over ~100-frame chunks seeked with `-ss` so each
-    chunk decodes only its slice (total ~= one pass). Frame index == decode order
-    == the index TransNetV2 saw via cv2 (validated pixel-exact, including B-frames).
-    Returns None on success, else the exception (for a retry pass).
+    Never seeks into the middle of the file (see `run_ffmpeg_select`): the common case (a
+    uniform stride, which covers every fps in this corpus except a handful at 29.97) is one
+    unseeked pass with `select='not(mod(n,step))'`; everything else -- a non-uniform stride,
+    or that one pass being refused outright -- falls back to explicit-id batches, still each
+    read from true 0. Frame index == decode order == the index TransNetV2 saw via cv2, and
+    the same one the PE-Core notebooks embed -- this is the extractor that has to agree with
+    them, so both use the same never-seek approach.
+
+    Returns `(error, undecodable)`: `error` is an exception for a retry pass or None, and
+    `undecodable` lists the ids the file's real decodable length falls short of -- reported
+    rather than raised on, because one torn .mov must not fail a corpus-wide run, and the
+    caller has to know which moments are missing.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    missing = sorted({i for i in frame_indices
-                      if not is_valid_png(out_dir / f"{i:06d}.png")})
+    frames = sorted({int(i) for i in frame_indices})
+    missing = sorted({i for i in frames if not is_valid_png(out_dir / f"{i:06d}.png")})
     if not missing:
-        return None
-    CHUNK = 100  # ffmpeg select expression hits "Cannot allocate memory" beyond ~110 terms
+        return None, []
     tmp_dir = out_dir / ".batch"
+    written = []
     try:
-        for start in range(0, len(missing), CHUNK):
-            chunk = missing[start:start + CHUNK]
-            rel = [i - chunk[0] for i in chunk]
-            sel = "+".join(f"eq(n\\,{i})" for i in rel)
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            tmp_dir.mkdir(parents=True, exist_ok=True)
-            subprocess.run([
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-threads", str(threads),
-                "-ss", f"{chunk[0] / fps:.6f}",
-                "-t", f"{(chunk[-1] - chunk[0] + 2) / fps:.6f}",
-                "-i", str(video),
-                "-vf", f"select='{sel}'", "-vsync", "0",
-                "-c:v", "png", "-pix_fmt", "rgb24",
-                "-compression_level", str(compression),
-                "-start_number", "0", str(tmp_dir / "f%06d.png"),
-            ], check=True, capture_output=True, timeout=1800)
-            outs = sorted(tmp_dir.glob("f*.png"))
-            if len(outs) != len(chunk):
-                raise RuntimeError(
-                    f"select produced {len(outs)} frames, expected {len(chunk)}")
-            for idx, o in zip(chunk, outs):
-                o.replace(out_dir / f"{idx:06d}.png")
-        return None
+        # The step must come from the full stride, not from `missing`: a resumed run (some
+        # ids already on disk from an earlier pass) can leave `missing` a non-contiguous
+        # subset whose own internal gaps are not the file's real stride spacing.
+        step = uniform_step(frames)
+        fast_path_ran = False
+        if step is not None:
+            # Through the full stride's last id, not just missing's -- the pass has to walk
+            # past every already-present id on the way regardless, so this costs nothing
+            # extra; outputs for ids we already have are simply not moved anywhere.
+            total_positions = frames[-1] // step + 1
+            outs = run_ffmpeg_select(video, f"not(mod(n\\,{step}))", total_positions,
+                                     tmp_dir, compression, threads)
+            if outs is not None:
+                fast_path_ran = True
+                missing_set = set(missing)
+                for i, out in enumerate(outs):
+                    frame_id = i * step
+                    if frame_id in missing_set:
+                        out.replace(out_dir / f"{frame_id:06d}.png")
+                        written.append(frame_id)
+        if not fast_path_ran:
+            CHUNK = 100  # ffmpeg select hits "Cannot allocate memory" past ~110 terms
+            still = [i for i in missing if i not in set(written)]
+            for start in range(0, len(still), CHUNK):
+                written.extend(extract_ids(video, still[start:start + CHUNK], tmp_dir,
+                                           out_dir, compression, threads))
+        return None, [i for i in missing if i not in set(written)]
     except Exception as e:
+        return e, []
+    finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        return e
 
 
 def group_of(video_id):
-    return video_id.split("_", 1)[0]
+    """Group label for a video id, for manifests that do not carry one.
+
+    Both id shapes in this corpus put the group before the first separator: L21_V001 -> L21,
+    N031-V001 -> N031. Only a fallback -- a manifest with its own "group" wins, because the
+    repo's label there (Video_N031-N040) cannot be derived from the id alone.
+    """
+    return video_id.split("_", 1)[0].split("-", 1)[0]
+
+
+def video_group(video_id, entry):
+    return entry.get("group") or group_of(video_id)
 
 
 def video_path(root, video_id, entry, layout):
@@ -182,31 +299,46 @@ def main():
 
     def work(item):
         video_id, (path, entry) = item
-        target = out_dir / group_of(video_id) / video_id
+        target = out_dir / video_group(video_id, entry) / video_id
         return video_id, extract_video_batch(
             path, entry["frames"], target, args.compression, entry["fps"], args.threads)
 
-    failures = {}
+    failures, undecodable = {}, {}
+
+    def collect(video_id, result):
+        err, absent = result
+        if err is not None:
+            failures[video_id] = err
+        elif absent:
+            undecodable[video_id] = absent
+
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = [pool.submit(work, item) for item in found.items()]
         for fut in tqdm(as_completed(futures), total=len(futures), unit="video"):
-            video_id, err = fut.result()
-            if err is not None:
-                failures[video_id] = err
+            video_id, result = fut.result()
+            collect(video_id, result)
 
     if failures:
         log(f"retrying {len(failures)} failed videos")
         retry = dict(failures)
         failures = {}
         for video_id in retry:
-            _, err = work((video_id, found[video_id]))
-            if err is not None:
-                failures[video_id] = err
+            _, result = work((video_id, found[video_id]))
+            collect(video_id, result)
+
+    if undecodable:
+        total = sum(len(v) for v in undecodable.values())
+        log(f"{total} keyframe(s) across {len(undecodable)} video(s) have no decodable "
+            f"frame in the file itself; recorded in undecodable.json")
+        for video_id, ids in sorted(undecodable.items()):
+            log(f"  {video_id}: {len(ids)} frame(s), first {ids[0]}")
+        (out_dir / "undecodable.json").write_text(
+            json.dumps(undecodable, indent=2, sort_keys=True) + "\n")
 
     if args.zip_per_group:
         dest_dir = Path(args.zip_per_group)
         dest_dir.mkdir(parents=True, exist_ok=True)
-        for group in sorted({group_of(v) for v in found}):
+        for group in sorted({video_group(v, e) for v, (_, e) in found.items()}):
             log(f"zipped {zip_group(out_dir, group, dest_dir)}")
 
     if failures:

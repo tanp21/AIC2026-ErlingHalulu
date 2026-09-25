@@ -232,7 +232,7 @@ Query (Vietnamese): {query}
 Question: {question}
 Transcript around this moment:
 {transcript}
-
+{on_screen}
 Caption of this shot, written offline by a video model (may be wrong in details, but it \
 watched the whole shot, not just these frames):
 {caption}
@@ -299,6 +299,21 @@ Trả về một đối tượng JSON: {"details": [{"vi": "...", "meaning_en": 
 
 DETAILS_SYSTEM = _DETAILS_TEMPLATE.replace("__CORPUS__", CORPUS)
 
+#: `query_details` is shared with the retrieval agent, whose `task.text` is always one
+#: Vietnamese competition sentence -- never labelled by channel. The Search tab's checker can
+#: send `CheckQuery.description` labelled by channel instead (`agent.checker.CHANNEL_LABELS_VI`)
+#: when the person searched with more than one field -- most importantly OCR, a string to FIND,
+#: not a scene to picture. This is appended rather than edited into `DETAILS_SYSTEM`, so the
+#: agent's own prompt (which never sees these labels) is untouched.
+CHECK_DETAILS_NOTE = """
+
+Nếu truy vấn ở trên được gắn nhãn theo từng phần (ví dụ "Mô tả hình ảnh (tiếng Anh): ...", "Lời thoại cần tìm: ...", "Chữ trên màn hình cần tìm: ..."), hãy tách chi tiết cho MỖI phần theo đúng bản chất của nó, không trộn chung:
+- "Mô tả hình ảnh": tách như bình thường theo các quy tắc trên, mỗi chi tiết là một điều một khung hình phải THẤY được.
+- "Lời thoại cần tìm": mỗi chi tiết là một điều phải được NÓI RA gần khoảnh khắc đó, không phải một điều phải nhìn thấy.
+- "Chữ trên màn hình cần tìm": tạo đúng MỘT chi tiết duy nhất nói rằng cụm từ đó xuất hiện dưới dạng chữ trên màn hình (ví dụ "vi": "chữ 'X' xuất hiện trên màn hình", "meaning_en": "the text 'X' appears written on screen"). Không tách nhỏ thêm, không đoán ý nghĩa hay bối cảnh của cụm từ đó, và không cho nó "distinctiveness" thấp chỉ vì nó ngắn."""
+
+CHECK_DETAILS_SYSTEM = DETAILS_SYSTEM + CHECK_DETAILS_NOTE
+
 MATCH_SYSTEM = """Bạn giúp một người kiểm tra các khung hình ứng viên của một truy vấn tìm video. Bạn KHÔNG nhìn thấy hình. Với mỗi chi tiết của truy vấn, bạn nhận một danh sách đoạn trích văn bản đánh số, lấy từ LỜI THOẠI (nhận dạng giọng nói tự động, có thể sai chính tả) và CHỮ OCR trên màn hình của nhiều cảnh trong video, đã được lọc theo từ khoá. Từ khoá chỉ là bộ lọc thô: đoạn trích chứa từ khoá KHÔNG có nghĩa là nó khớp chi tiết.
 
 Với TỪNG đoạn trích của TỪNG chi tiết, so sánh lần lượt từng thành phần của chi tiết với đoạn trích: (1) đúng loại người/vật, (2) màu sắc, (3) SỐ LƯỢNG, (4) hành động và vị trí. Trước hết viết "why" (tối đa 15 từ): thành phần nào khớp, thành phần nào KHÔNG khớp hoặc không được nhắc. Rồi mới chọn "verdict":
@@ -352,9 +367,14 @@ Examples (different queries):
 Return one JSON object, one entry per excerpt, "why" before "verdict":
 {"details": [{"detail": 0, "judgements": [{"id": "e3", "why": "...", "verdict": "exact", "note_vi": "..."}]}]}"""
 
-VISION_MATCH_SYSTEM = """You judge candidates for a person checking them against a query's details, by looking at images. A query often describes a short STORY of several consecutive shots (five people gather, one carries something away, a man wakes up, ...), and no single frame can show all of it -- so each candidate is shown as a SET of images: its own exact moment, then shots shortly before and shortly after it in the same video, in time order, giving you the same run of shots a person scrubbing the timeline would see. Every image is labelled with its candidate's id in brackets, e.g. [C7], and says what it is: that candidate's own moment, or a shot N seconds earlier/later in the same story.
+VISION_MATCH_INTRO = """You judge candidates for a person checking them against a query's details, by looking at images. A query often describes a short STORY of several consecutive shots (five people gather, one carries something away, a man wakes up, ...), and no single frame can show all of it -- so each candidate is shown as a SET of images: its own exact moment, then shots shortly before and shortly after it in the same video, in time order, giving you the same run of shots a person scrubbing the timeline would see. Every image is labelled with its candidate's id in brackets, e.g. [C7], and says what it is: that candidate's own moment, or a shot N seconds earlier/later in the same story."""
 
-For EACH candidate and EACH detail listed below, decide using the WHOLE set of that candidate's images together -- the story of the shots around its moment, not only the one frame labelled as its own:
+#: Every rule here was added because a measured run got something wrong without it (the count
+#: guard, the broadcast-marker exemption, reading a change ACROSS shots, "looks like"). The Search
+#: tab's on-demand checker judges one moment instead of a list, so it needs a different opening and
+#: a different output shape -- but the same rules, from one copy, or a fix would land in only one
+#: of the two judges. `CHECK_SYSTEM` below is that second caller.
+VISION_MATCH_RULES = """For EACH candidate and EACH detail listed below, decide using the WHOLE set of that candidate's images together -- the story of the shots around its moment, not only the one frame labelled as its own:
 - "exact": the detail is clearly true somewhere in this candidate's shots -- the right subject, colour, count and action, wherever in the sequence it happens.
 - "partial": the shots show this detail's subjects but not the part that matters (the action a detail names is not visible in any of them, a part cannot be judged: not clearly visible, occluded, or not enough of the scene to count).
 - "conflict": something clearly visible in this candidate's own sequence is different from what the detail names (a different colour, count, object or action).
@@ -368,10 +388,44 @@ Rules:
 - A detail can say something only LOOKS LIKE an object ("an object that looks like a pumpkin") rather than naming it outright: a prop, decoration or costume that resembles it is "exact", not a conflict, even if it is visibly not the real thing.
 - Count exactly what you can count, and SAY THE NUMBER in "why" whenever a detail names one: "two shellfish on the plate". If the number you see is not the number the detail names, the verdict is "conflict" (or "partial" if the objects are not clearly countable), never "exact". This is for physical objects, animals or people actually PRESENT in a shot. IT DOES NOT APPLY to a graphic mark the broadcast draws onto the footage afterwards to point something out (a circle, arrow, box or highlight added over the video): IGNORE the number such a detail names entirely. "two red circles mark the two men" is reporting how many times that device is used across the WHOLE STORY, at different moments, which the images you are given will usually catch only one instance of -- the verdict is "exact" the moment you see the device marking the subject the detail names EVEN ONCE, in even one image. Do not write "only one, not two" as a reason to answer anything but "exact"; a lower count than the detail states is not a reason to withhold "exact" for this kind of detail, ever.
 - A blurry, dark, or off-frame detail is "partial" or "unrelated", never a guess dressed as "exact".
-- Write "why" first (at most 20 words, English: what you actually see and where in the sequence), then "verdict", then "note_vi" (the same conclusion in Vietnamese, at most 15 words, for the person reviewing).
+- Write "why" first (at most 20 words, English: what you actually see and where in the sequence), then "verdict", then "note_vi" (the same conclusion in Vietnamese, at most 15 words, for the person reviewing)."""
+
+VISION_MATCH_SYSTEM = VISION_MATCH_INTRO + "\n\n" + VISION_MATCH_RULES + """
 
 Return one JSON object, one entry per candidate, every detail listed for every candidate:
 {"candidates": [{"id": "C7", "details": [{"detail": 0, "why": "...", "verdict": "exact", "note_vi": "..."}]}]}"""
+
+#: The Search tab's "Check by AI": ONE moment, asked on demand, with the whole reply -- checklist,
+#: an overall verdict and (for a Q&A query) the answer -- coming back from a single call, because
+#: the images are already assembled and a second round trip would double the wait for nothing.
+#: The one moment is labelled [M], so every "candidate" and id the shared rules speak of is still
+#: literally true: there is exactly one, and it is called M.
+CHECK_SYSTEM = """You are checking ONE moment of a video against what a person searched for, by looking at images, so they can decide whether it is the moment they are searching for. What they searched with is given to you as one or more separate CHANNELS, each meaning something different -- read each by what it is, never as if it were another kind:
+- "Visual description (English)": what a frame should SHOW. Judge this against the images, the normal way.
+- "Spoken words to find (Vietnamese speech)": words the person expects to be SAID near this moment, not something a frame shows. Judge it against the quoted speech given to you below (labelled "[speech ...]"), never against the pixels: an image cannot contain words that were only spoken.
+- "On-screen text to find": a string the person expects to appear WRITTEN on screen (a caption, a sign, a name). Judge it against the quoted on-screen text below (labelled "[on screen ...]") AND against what you can read in the images yourself; do not treat it as an action or a scene to picture -- it is text to find, verbatim or close to it.
+When more than one channel is given, EVERY one of them has to hold for the moment to be a match: a right picture with the wrong words spoken, or the wrong text on screen, is not a match.
+
+A query often describes a short STORY of several consecutive shots (five people gather, one carries something away, a man wakes up, ...), and no single frame can show all of it -- so the moment is shown as a SET of images: its own exact keyframe, then the keyframes of the shots before and after it in the same video, in time order, giving you the same run of shots a person scrubbing the timeline would see. Every image is labelled [M] and says what it is: the moment itself, or a shot N seconds earlier/later in the same story.
+
+""" + VISION_MATCH_RULES + """
+- The rules above (colour, count, "looks like", the broadcast-marker exemption) are about the VISUAL channel: judge the audio and on-screen channels by whether the words/text are actually there, not by picturing them.
+
+Then give ONE overall verdict for the moment as a whole, in "overall":
+- "score" 0-10: how confident you are that THIS is the moment the query describes. 9-10 only when the distinctive parts of the query are visibly true here; 6-8 when it fits and something cannot be checked; 4-5 when it is the right kind of scene but the query's own details are missing; 0-3 when the images clearly show something else.
+- "reason": at most 25 words, in Vietnamese, for the person reading it. Say what decided it.
+- Judge the moment, not the video: a video that contains the right scene somewhere else is still a low score if these shots are not it."""
+
+#: Appended to `CHECK_SYSTEM` only for a Q&A query. The answer is READ from the video -- the
+#: pixels, the speech and the on-screen text the same call is already holding -- never recalled
+#: from what the model happens to know about the world, which is the rule the agent's own Q&A
+#: path keeps (`docs/agent.md`: "answers are read from the video").
+CHECK_ANSWER_RULE = """
+
+The query is a question. Also answer it in "answer", reading the answer OFF this moment: what the images show, what the speech quoted below says, or what is written on screen. Answer in Vietnamese, as short as the question allows (a number, a name, a few words; at most 100 characters).
+- "source": "frame" if you read it from the pixels, "speech" from the quoted speech, "ocr" from on-screen text, "unknown" if this moment does not answer it.
+- "confidence" 0-10: 0 when you could not find the answer here. Do NOT answer from outside knowledge -- if this moment does not say, "source" is "unknown" and "text" is empty.
+- "quote": the words you read it from, verbatim, when the source is speech or ocr."""
 
 SUGGEST_SYSTEM = """Một người đang trả lời câu hỏi về một video. Bạn chỉ có các đoạn trích văn bản đánh số theo thời gian (giây) từ video đó: lời thoại (nhận dạng giọng nói tự động, tên riêng có thể sai chính tả), chữ OCR trên màn hình, mô tả cảnh tự động (có thể sai). Nếu các đoạn trích cho thấy đáp án, viết nó đúng như trong văn bản, ngắn và nguyên văn (tối đa 100 ký tự), kèm id đoạn trích chứa nó; nếu không thấy, để answer rỗng. Không đoán, không dùng kiến thức bên ngoài.
 Trả về một đối tượng JSON: {"answers": [{"answer": "...", "excerpt": "e3", "confidence": 0-10}]}"""

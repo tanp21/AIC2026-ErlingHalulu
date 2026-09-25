@@ -229,6 +229,7 @@ function AgentLiveView({ run, onReview, onOpen }: {
       <div className="agent-live-head">
         <span aria-live="polite">
           <b>{stage}</b> · {Math.round(progress?.elapsed ?? run.elapsed)}s
+          {" · "}<span className="agent-judge">judged by Gemini (automatic)</span>
           {judging > 0 && <> · {judging} with Gemini</>}
           {review.decided && <> · <em>your decision is being applied</em></>}
         </span>

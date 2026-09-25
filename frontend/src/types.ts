@@ -1,6 +1,7 @@
-export type SearchMode = "visual" | "audio" | "hybrid" | "temporal" | "ocr";
+export type SearchMode = "visual" | "audio" | "hybrid" | "temporal" | "ocr" | "object";
 export type ClassicSearchMode = Exclude<SearchMode, "temporal">;
-export type SearchSource = "visual" | "transcript" | "both" | "ocr";
+export type SearchSource = "visual" | "transcript" | "both" | "ocr" | "object" | "mixed";
+export type EventMode = "text" | "image" | "audio" | "ocr" | "object";
 export type IndexName = "flat" | "ivf" | "hnsw";
 export type AudioMethod = "semantic" | "keyword";
 
@@ -27,7 +28,33 @@ export interface ScoreDetails {
   sequence_visual_score?: number;
   ocr_score?: number;
   ocr_rank?: number;
+  object_score?: number;
+  object_rank?: number;
 }
+
+export interface ObjectClause {
+  label: string;
+  region: [number, number, number, number];
+  min_count: number;
+}
+
+export interface ObjectQuery {
+  clauses: ObjectClause[];
+  min_confidence: number;
+}
+
+export interface MatchedObject {
+  label: string;
+  confidence: number;
+  box: [number, number, number, number];
+}
+
+export interface ObjectDetectionFrame {
+  frame_idx: number;
+  time: number;
+  detections: MatchedObject[];
+}
+export interface ObjectDetectionsResponse { video_id: string; frames: ObjectDetectionFrame[] }
 
 export interface SearchResult {
   rank: number;
@@ -52,6 +79,8 @@ export interface SearchResult {
   ocr_shot_index?: number;
   ocr_start?: number;
   ocr_end?: number;
+  matched_objects?: MatchedObject[];
+  object_delta_ms?: number;
 }
 
 export interface SearchRequest {
@@ -59,6 +88,7 @@ export interface SearchRequest {
   visual_text?: string;
   audio_text?: string;
   ocr_text?: string;
+  object_query?: ObjectQuery;
   mode: ClassicSearchMode;
   index: IndexName;
   nprobe: number;
@@ -66,6 +96,26 @@ export interface SearchRequest {
   profile?: string;
   audio_method?: AudioMethod;
   pe_weight?: number;
+}
+
+export interface RefineRequest {
+  text: string;
+  kind: "kis" | "qa" | "trake";
+}
+
+export interface RefineCandidate {
+  text: string;
+  tokens: number | null;
+  primary: boolean;
+}
+
+export interface RefineResponse {
+  summary_vi: string;
+  visual: RefineCandidate[];
+  transcript: string[];
+  ocr: string[];
+  events: RefineCandidate[];
+  lookups: string[];
 }
 
 export interface ImageReference {
@@ -89,7 +139,7 @@ export interface SearchResponse {
   audio_method?: AudioMethod;
   pe_weight?: number;
   warning?: string;
-  latencies?: { visual_ms?: number; audio_ms?: number; ocr_ms?: number };
+  latencies?: { visual_ms?: number; audio_ms?: number; ocr_ms?: number; object_ms?: number };
   next_cursor: string | null;
   has_more: boolean;
   total_results: number;
@@ -113,7 +163,7 @@ export interface TemporalSequence {
   video_id: string;
   score: number;
   visual_score: number;
-  source: "visual" | "both";
+  source: "visual" | "both" | "transcript" | "ocr" | "object" | "mixed";
   start_time: number;
   end_time: number;
   events: TemporalEventHit[];
@@ -157,10 +207,22 @@ export interface CompareResult {
 export interface Session {
   login: string;
   is_admin: boolean;
+  /**
+   * Whether this deployment has an OpenRouter key, so the Search tab can hide "Check by AI"
+   * instead of letting it fail when pressed. Never the key itself.
+   */
+  check?: CheckConfig;
 }
+
+export interface CheckConfig { available: boolean; model: string; window_seconds: number }
 
 export interface TranscriptCue { start: number; end: number; text: string }
 export interface TranscriptResponse { videoId: string; cues: TranscriptCue[] }
+/** One DeepSeek topic/story segment (`GET /audio/topic-segments/{video_id}`) --
+ * a Clip Studio visualization of the `topic` chunking pilot, not a production
+ * search channel. */
+export interface TopicSegment { start: number; end: number; text: string }
+export interface TopicSegmentsResponse { videoId: string; segments: TopicSegment[] }
 /** On-screen text of one OCR'd shot (`GET /ocr/{video_id}`). */
 export interface OcrShot { shot_idx: number; frame_idx: number; start: number; end: number; time: number; text: string }
 export interface OcrResponse { videoId: string; shots: OcrShot[] }
@@ -238,6 +300,63 @@ export interface VideoGroup {
 }
 
 export type QueryKind = "kis" | "qa" | "trake";
+export interface DresContext {
+  kind: QueryKind;
+  label: string;
+  event_count: number | null;
+  revision: number;
+  updated_by: string;
+  updated_at: string;
+}
+export interface DresStatus {
+  configured: boolean;
+  credentials_configured: boolean;
+  host: string;
+  connected: boolean;
+  evaluations: Array<{ id: string; name: string }>;
+  evaluation_id: string | null;
+  evaluation_manual?: boolean;
+  context: DresContext | null;
+  context_valid: boolean;
+}
+export interface DresCandidate {
+  video_id: string;
+  frame_idx?: number;
+  frame_source?: "indexed_keyframe" | "original_frame";
+  frame_ids?: number[];
+  answer?: string;
+}
+export interface DresPrepared {
+  evaluation_id: string;
+  context_revision: number;
+  context_label: string;
+  kind: QueryKind;
+  video_id: string;
+  frame_idx: number | null;
+  frame_ids: number[] | null;
+  timestamp_ms: number | null;
+  payload: { answerSets: Array<{ answers: Array<Record<string, string>> }> };
+  preview: string;
+  fingerprint: string;
+}
+export interface DresAttempt {
+  id: number;
+  evaluation_id: string;
+  context_revision: number;
+  context_label: string;
+  task_type: QueryKind;
+  payload: DresPrepared["payload"];
+  fingerprint: string;
+  video_id: string;
+  frame_idx: number | null;
+  frame_ids: number[] | null;
+  actor: string;
+  submitted_at: string;
+  status: "pending" | "accepted" | "rejected" | "uncertain" | "not_sent";
+  http_status: number | null;
+  latency_ms: number | null;
+  server_message: string | null;
+}
 export type QueryStatus = "todo" | "in_progress" | "ready" | "reviewed";
 
 export interface KisAnswer { video_id: string; frame_id: number | null; auto_filled?: boolean }
@@ -471,3 +590,110 @@ export interface AgentRunResponse {
   progress?: AgentProgress | null;
   review?: AgentReviewState;
 }
+
+// -- "Check by AI": one moment, checked on demand against the query (POST /api/check) ----------
+
+/** One checkable part of the query, with how much knowing it is true would narrow things down. */
+export interface CheckDetail {
+  text: string;
+  meaning_en: string;
+  /** 0-1 from the model: is this true of nearly every candidate of this kind, or of one moment? */
+  distinctiveness: number;
+  /** `0.2 + 0.8 × distinctiveness` -- what it is worth in `support.share`. */
+  weight: number;
+}
+
+/**
+ * One detail checked against this moment. `source` is what answered: `vision` looked at the
+ * pixels of this shot and the ones around it, `speech`/`ocr` read the words, and `at` is the
+ * second that evidence starts at so the person can go and look.
+ */
+export interface CheckItem {
+  detail: number;
+  status: AgentCheckStatus;
+  source: "vision" | "speech" | "ocr" | null;
+  at?: number | null;
+  quote: string;
+  note?: string;
+}
+
+/** A Q&A answer read off this moment -- never recalled from what the model knows. */
+export interface CheckAnswer {
+  text: string;
+  confidence: number;
+  source: "frame" | "speech" | "ocr" | "unknown";
+  quote?: string;
+}
+
+/** How much of the query the evidence around this moment says. A contradiction lowers nothing. */
+export interface CheckSupport {
+  share: number;
+  supported: number;
+  partial: number;
+  contradicted: number;
+  total: number;
+}
+
+/**
+ * The frames one answer speaks for: its whole shot. Every keyframe in this range shares the
+ * result, which is what makes stepping along the filmstrip free after the first press.
+ */
+export interface CheckCoverage {
+  start_frame: number | null;
+  end_frame: number | null;
+  start: number;
+  end: number;
+}
+
+export interface CheckResult {
+  key: string;
+  video_id: string;
+  frame_idx: number;
+  time: number;
+  window_seconds: number;
+  shot_index: number | null;
+  covers: CheckCoverage | null;
+  /** The model's own 0-10 for the moment as a whole, with its reason in Vietnamese. */
+  verdict: { score: number; reason: string };
+  details: CheckDetail[];
+  checks: CheckItem[];
+  support: CheckSupport;
+  answer: CheckAnswer | null;
+  frames_seen: number;
+  model: string;
+  by: string;
+  checked_at: number;
+  cached: boolean;
+  latency_ms: number;
+}
+
+/**
+ * The same three channels a real search request carries (`SearchRequest`), not one flattened
+ * sentence -- a check has to know whether it is reading a scene description, words to find
+ * spoken, or a string to find written on screen, and the server judges each differently. At
+ * least one must be non-empty.
+ */
+export interface CheckRequest {
+  visual_text?: string;
+  audio_text?: string;
+  ocr_text?: string;
+  kind: QueryKind;
+  question?: string;
+  video_id: string;
+  frame_idx?: number;
+  time?: number;
+  window_seconds?: number;
+  profile?: string;
+  force?: boolean;
+}
+
+/** What the two surfaces render: the same result, loading or failed. */
+export interface CheckState {
+  status: "idle" | "loading" | "done" | "error";
+  result: CheckResult | null;
+  error: string | null;
+  /** The moment the person asked about, which may differ from `result.frame_idx` on a cache hit. */
+  asked: { video_id: string; frame_idx?: number; time?: number } | null;
+}
+
+export interface CheckLookup { status: "hit" | "miss" | "running" | "unavailable"; result: CheckResult | null }

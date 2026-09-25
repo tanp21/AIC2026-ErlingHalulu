@@ -44,7 +44,10 @@ _text_batcher_lock = threading.Lock()
 
 
 def mounted_video_path(row, data_dir=DATA):
-    return Path(data_dir) / str(row["year"]) / "videos" / row["group"] / f"{row['video_id']}.mp4"
+    directory = Path(data_dir) / str(row["year"]) / "videos" / row["group"]
+    mp4 = directory / f"{row['video_id']}.mp4"
+    mov = directory / f"{row['video_id']}.mov"
+    return mov if not mp4.exists() and mov.exists() else mp4
 
 
 def load_model():

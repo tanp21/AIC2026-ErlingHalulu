@@ -24,7 +24,19 @@ class SecureRouteTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get(
             "/session", headers={"X-AIC-User": "mate@example.com"}
         )
-        self.assertEqual(response.json(), {"login": "mate@example.com", "is_admin": False})
+        body = response.json()
+        self.assertEqual(body["login"], "mate@example.com")
+        self.assertFalse(body["is_admin"])
+
+    async def test_session_never_carries_the_checker_key_itself(self):
+        # The Search tab hides "Check by AI" when the deployment has no OpenRouter key, so it
+        # has to be told whether there is one -- and only that. The key stays on the server.
+        response = await self.client.get(
+            "/session", headers={"X-AIC-User": "mate@example.com"}
+        )
+        check = response.json()["check"]
+        self.assertEqual(sorted(check), ["available", "model", "window_seconds"])
+        self.assertIsInstance(check["available"], bool)
 
     async def test_compare_is_owner_only(self):
         response = await self.client.post(

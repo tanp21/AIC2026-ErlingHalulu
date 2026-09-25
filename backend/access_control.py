@@ -73,6 +73,25 @@ def install_access_control(app: FastAPI, config: AccessConfig | None = None) -> 
     app.add_middleware(TrustedIngressAccessMiddleware)
 
 
+def delegated_login(login: str, headers: dict[bytes, bytes]) -> str:
+    """The login a media host names on behalf of one of its own users, or "".
+
+    A media host serves the SPA and the media to the team and forwards everything else to
+    the compute host, which then cannot tell the five teammates apart: its HAProxy stamps
+    `X-AIC-User` from the tailnet identity of the *forwarding* node. Without this, everyone
+    shares one coordinator slot -- one teammate's search supersedes another's, and the whole
+    team shares a single agent run.
+
+    Trusted only when `X-AIC-User` already names the media host itself, which HAProxy derives
+    from `Tailscale-User-Login` and never from the client, so only the host's own node can
+    delegate. The result still has to clear the allowlist.
+    """
+    media_host = os.environ.get("AIC_MEDIA_HOST_LOGIN", "").strip().lower()
+    if not media_host or login != media_host:
+        return ""
+    return headers.get(b"x-aic-delegated-user", b"").decode("utf-8", "replace").strip().lower()
+
+
 class TrustedIngressAccessMiddleware:
     def __init__(self, app):
         self.app = app
@@ -106,6 +125,7 @@ class TrustedIngressAccessMiddleware:
                 login = headers.get(b"x-aic-user", b"").decode("utf-8", "replace").strip().lower()
                 if not login:
                     return await reject(401, "trusted proxy identity required")
+                login = delegated_login(login, headers) or login
                 if login not in active.allowed_users:
                     return await reject(403, "user is not allowed")
                 scope.setdefault("state", {})["login"] = login
@@ -117,6 +137,8 @@ class TrustedIngressAccessMiddleware:
 
             if path == "/search/image" and scope.get("method") == "POST":
                 body_limit = MAX_IMAGE_SEARCH_BYTES
+            elif path == "/search/temporal/image" and scope.get("method") == "POST":
+                body_limit = 38 * 1024 * 1024
             elif path == "/core/encode/image" and scope.get("method") == "POST":
                 body_limit = MAX_IMAGE_SEARCH_BYTES
             elif path.startswith("/core/") and scope.get("method") == "POST":

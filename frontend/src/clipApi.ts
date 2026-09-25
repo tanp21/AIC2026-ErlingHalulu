@@ -1,4 +1,4 @@
-import type { ShotLabelReason, ShotLabelsResponse, ShotsResponse, VideoSummary } from "./types";
+import type { ObjectDetectionsResponse, ShotLabelReason, ShotLabelsResponse, ShotsResponse, VideoSummary } from "./types";
 
 async function readJson<T>(response: Response): Promise<T> {
   const data = await response.json();
@@ -10,6 +10,10 @@ async function readJson<T>(response: Response): Promise<T> {
 
 export async function fetchVideoList(): Promise<VideoSummary[]> {
   return readJson<VideoSummary[]>(await fetch("/videos"));
+}
+
+export async function fetchObjectDetections(videoId: string): Promise<ObjectDetectionsResponse> {
+  return readJson<ObjectDetectionsResponse>(await fetch(`/objects/${encodeURIComponent(videoId)}/detections`));
 }
 
 export async function fetchShots(videoId: string, keyframeSource?: string): Promise<ShotsResponse> {

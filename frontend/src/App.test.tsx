@@ -2,7 +2,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App, { VideoDialog } from "./App";
-import type { CollabQuery, SearchResponse, SearchResult, TemporalSearchResponse } from "./types";
+import { forgetChecks } from "./checkApi";
+import type { CollabQuery, DresStatus, SearchResponse, SearchResult, TemporalSearchResponse } from "./types";
 
 function hit(overrides: Partial<SearchResult>): SearchResult {
   return {
@@ -55,6 +56,14 @@ function mockAuthenticatedFetch(...responses: Array<Response | Promise<Response>
       { name: "l2026", label: "L · embeddings 2026", is_default: false, count: 289875, video_count: 873, indexes: ["flat"] },
     ]));
     if (String(input) === "/api/collab/rounds") return Promise.resolve(jsonResponse([]));
+    // Background polls must not eat the queue: whether one lands before the test's own first
+    // request is a timing race, and a test that queues [search, context, ...] would then hand
+    // the search response to whichever poll got there first.
+    if (String(input) === "/api/dres/history") return Promise.resolve(jsonResponse({ attempts: [] }));
+    if (String(input) === "/api/dres/status") return Promise.resolve(jsonResponse({
+      configured: false, credentials_configured: false, host: "", connected: false,
+      evaluations: [], evaluation_id: null, context: null, context_valid: false,
+    }));
     const response = responses[requestIndex++];
     return response instanceof Promise ? response : Promise.resolve(response);
   });
@@ -71,6 +80,57 @@ beforeEach(() => {
 });
 
 describe("competition search workspace", () => {
+  it("shows DRES status at the end of the navigation and opens the settings popup", async () => {
+    render(<App />);
+    const navButton = await screen.findByRole("button", { name: "DRES · Setup required" });
+    const taskPicker = screen.getByRole("combobox", { name: "DRES task type" });
+    expect(taskPicker).toHaveValue("kis");
+    fireEvent.change(taskPicker, { target: { value: "trake" } });
+    await waitFor(() => expect(taskPicker).toHaveValue("trake"));
+    fireEvent.click(navButton);
+    expect(await screen.findByRole("dialog", { name: "DRES settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^DRES$/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Select current query")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Assignee:|Reviewed by/)).not.toBeInTheDocument();
+  });
+
+  it("keeps DRES submission out of the right panel", async () => {
+    const dresStatus: DresStatus = {
+      configured: true, credentials_configured: true, host: "localhost", connected: true,
+      evaluations: [{ id: "eval-1", name: "Final" }], evaluation_id: "eval-1",
+      context_valid: true,
+      context: { kind: "kis", label: "Hall task", event_count: null, revision: 1,
+        updated_by: "owner", updated_at: "2026-09-24T00:00:00Z" },
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const path = String(input);
+      if (path === "/session") return Promise.resolve(jsonResponse({ login: "owner@example.com", is_admin: true }));
+      if (path === "/api/collab/rounds") return Promise.resolve(jsonResponse([]));
+      if (path === "/search") return Promise.resolve(jsonResponse(response([hit({
+        video_id: "L01_V001", frame_idx: 2, time: 123.456, thumb: "/thumb/L01_V001/2",
+        frame: "/frame/L01_V001/2", video: "/video/L01_V001",
+      })])));
+      if (path.startsWith("/context/")) return Promise.resolve(jsonResponse({ video_id: "L01_V001", frame_idx: 2, frames: [] }));
+      if (path === "/api/dres/status") return Promise.resolve(jsonResponse(dresStatus));
+      if (path === "/api/dres/history") return Promise.resolve(jsonResponse({ attempts: [] }));
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    });
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Visual query (English)"), { target: { value: "scene" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Select frame L01_V001 at 2:03" }));
+    expect(fetchMock.mock.calls.some(([input]) => ["/api/dres/prepare", "/api/dres/submit"].includes(String(input)))).toBe(false);
+    expect(screen.queryByRole("button", { name: /^DRES$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "DRES submission" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Team results" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Right panel mode" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit L01_V001 frame 2 to DRES" })).toBeInTheDocument();
+    const rankingPanel = screen.getByRole("complementary", { name: "Transcript evidence" });
+    expect(within(rankingPanel).queryByText("Current query")).not.toBeInTheDocument();
+    expect(within(rankingPanel).queryByRole("button", { name: /Open video at/ })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => ["/api/dres/prepare", "/api/dres/submit"].includes(String(input)))).toBe(false);
+  });
+
   it("sends the fixed competition profile with searches", async () => {
     const fetchMock = mockAuthenticatedFetch(jsonResponse(response([])));
     render(<App />);
@@ -241,7 +301,7 @@ describe("competition search workspace", () => {
       version: 0, reviewed_by: null, reviewed_at: null, updated_by: null,
       updated_at: null, status: "todo",
     }] };
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url === "/session") return Promise.resolve(jsonResponse({ login: "owner@example.com", is_admin: true }));
       if (url === "/api/collab/rounds") return Promise.resolve(jsonResponse([summary]));
@@ -252,7 +312,7 @@ describe("competition search workspace", () => {
     render(<App />);
 
     expect(await within(screen.getByLabelText("Search controls")).findByText("Tìm chiếc xe màu đỏ")).toBeInTheDocument();
-    expect(screen.getByLabelText("Select current query")).toHaveValue("2");
+    expect(screen.queryByLabelText("Select current query")).not.toBeInTheDocument();
     expect(screen.queryByRole("complementary", { name: "Query list" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Query management" }));
     expect(screen.getByRole("complementary", { name: "Query list" })).toBeInTheDocument();
@@ -291,14 +351,14 @@ describe("competition search workspace", () => {
     });
 
     render(<App />);
-    await screen.findByLabelText("Select current query");
+    fireEvent.click(await screen.findByRole("button", { name: "Query management" }));
     fireEvent.change(screen.getByLabelText("Visual query (English)"), { target: { value: "red car" } });
     fireEvent.change(screen.getByLabelText("Transcript query (Vietnamese)"), { target: { value: "xe màu đỏ" } });
     fireEvent.change(screen.getByLabelText("On-screen text query"), { target: { value: "VTV" } });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(await screen.findByRole("button", { name: /Select frame kept/ })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Select current query"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: /query-3-kis/ }));
 
     expect(screen.getByLabelText("Visual query (English)")).toHaveValue("red car");
     expect(screen.getByLabelText("Transcript query (Vietnamese)")).toHaveValue("xe màu đỏ");
@@ -466,6 +526,275 @@ describe("competition search workspace", () => {
     callback?.(0, { mediaTime: 0.04 });
 
     expect(await screen.findByText(/frame 1/)).toBeInTheDocument();
+  });
+
+  it("submits the exact paused frame from the video player", async () => {
+    let callback: ((now: number, metadata: { mediaTime: number }) => void) | undefined;
+    Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+      configurable: true, value(fn: typeof callback) { callback = fn; return 1; },
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", { configurable: true, value: vi.fn() });
+    mockAuthenticatedFetch(jsonResponse({
+      videoId: "K01_V001", timeBaseNumerator: 1, timeBaseDenominator: 1000,
+      firstPts: 100, ptsDeltas: [40, 60], frameCount: 3,
+    }));
+    const onSubmit = vi.fn(async (_videoId: string, frameId: number, time: number) => ({ message: `Accepted frame ${frameId} at ${time}` }));
+    const { container } = render(<VideoDialog result={hit({ time: 0.04 })} onClose={() => {}} originalVideo picker={{ actions: [], submit: {
+      label: "Submit selected frame", kind: "kis", onSubmit,
+    } }} />);
+    expect(container.querySelectorAll(".dres-player-submit button")).toHaveLength(1);
+    expect(screen.queryByLabelText("DRES task type in player")).not.toBeInTheDocument();
+    await waitFor(() => expect(callback).toBeDefined());
+    callback?.(0, { mediaTime: 0.04 });
+    fireEvent.pause(screen.getByLabelText("Video player"));
+    fireEvent.click(await screen.findByRole("button", { name: "Submit 0:00 (40 ms)" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("K01_V001", 1, 0.04, "", "kis"));
+    expect(await screen.findByText("Accepted frame 1 at 0.04")).toBeInTheDocument();
+  });
+
+  it("loads all indexed keyframes below the player and seeks by original frame PTS", async () => {
+    Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+      configurable: true, value() { return 1; },
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", { configurable: true, value: vi.fn() });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const path = String(input);
+      if (path.startsWith("/frame-map/")) return Promise.resolve(jsonResponse({
+        videoId: "K01_V001", timeBaseNumerator: 1, timeBaseDenominator: 1000,
+        firstPts: 100, ptsDeltas: [40, 60], frameCount: 3,
+      }));
+      if (path.startsWith("/context/")) return Promise.resolve(jsonResponse({
+        video_id: "K01_V001", frame_idx: 1, frames: [
+          { video_id: "K01_V001", frame_idx: 1, time: 0.04, thumb: "/thumb/K01_V001/1" },
+          { video_id: "K01_V001", frame_idx: 2, time: 0.1, thumb: "/thumb/K01_V001/2" },
+        ],
+      }));
+      return Promise.resolve(jsonResponse({ videoId: "K01_V001", cues: [] }));
+    });
+    render(<VideoDialog result={hit({ frame_idx: 1, time: 0.04 })} onClose={() => {}} originalVideo profile="l2026-v2"
+      picker={{ actions: [], submit: { label: "Submit selected frame", kind: "kis", onSubmit: vi.fn() } }} />);
+
+    const strip = await screen.findByRole("region", { name: "Keyframes in this video" });
+    expect((await within(strip).findByRole("button", { name: "Show keyframe 1 at 0:00" })).querySelector("img"))
+      .toHaveAttribute("src", "/thumb/K01_V001/1?w=160");
+    fireEvent.click(await within(strip).findByRole("button", { name: "Show keyframe 2 at 0:00" }));
+    expect((screen.getByLabelText("Video player") as HTMLVideoElement).currentTime).toBe(0.1);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/context/K01_V001/1?radius=10&profile=l2026-v2&all_frames=true")).toBe(true);
+  });
+
+  it("adds the frame on screen as the TRAKE event, not the nearest official keyframe", async () => {
+    // No frame callback arrives, so the frame comes from the playhead -- and the button has to name
+    // that frame, which is 12.4 s and frame 2, not the organizer keyframe 250 at 12.5 s.
+    Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+      configurable: true, value() { return 1; },
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", { configurable: true, value: vi.fn() });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const path = String(input);
+      if (path.startsWith("/api/dres/keyframes/")) return Promise.resolve(jsonResponse({ frames: [
+        { frame_id: 100, source_frame_idx: 1, timestamp_ms: 10000 },
+        { frame_id: 250, source_frame_idx: 2, timestamp_ms: 35000 },
+      ] }));
+      if (path.startsWith("/frame-map/")) return Promise.resolve(jsonResponse({
+        videoId: "K01_V001", timeBaseNumerator: 1, timeBaseDenominator: 1000,
+        firstPts: 0, ptsDeltas: [10000, 2500], frameCount: 3,
+      }));
+      return Promise.resolve(jsonResponse({ videoId: "K01_V001", cues: [] }));
+    });
+    const onSubmit = vi.fn().mockResolvedValue({ message: "Added E1 · FRAME_ID 2", completed: false });
+    render(<VideoDialog result={hit({ time: 10 })} onClose={() => {}} originalVideo
+      picker={{ actions: [], submit: { label: "Add event", kind: "trake", onSubmit },
+        trakeSequence: { videoId: null, frameIds: [], onRemove: vi.fn(), onMove: vi.fn(), onOpen: vi.fn(), onSubmit: vi.fn() } }} />);
+    const video = screen.getByLabelText("Video player") as HTMLVideoElement;
+    fireEvent.play(video);
+    video.currentTime = 12.4;
+    fireEvent.timeUpdate(video);
+
+    expect(await screen.findByText("Source frame 2")).toBeInTheDocument();
+    const add = await screen.findByRole("button", { name: "Add E1 · #2 · 0:12" });
+    expect(add).toBeEnabled();
+    fireEvent.click(add);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("K01_V001", 2, 12.5, "", "trake"));
+    // The strip is navigation onto the organizer's keyframes, but it names the source frame each one
+    // resolves to, so the number in the strip is the number that would be submitted from there.
+    const strip = await screen.findByRole("region", { name: "Official TRAKE keyframes" });
+    expect(within(strip).getByRole("button", { name: "Show keyframe 2 at 0:35" }).querySelector("img"))
+      .toHaveAttribute("src", "/thumb/K01_V001/2?w=160");
+  });
+
+  it("names the next TRAKE event and lists the ones already staged", async () => {
+    Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+      configurable: true, value() { return 1; },
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", { configurable: true, value: vi.fn() });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const path = String(input);
+      if (path.startsWith("/api/dres/keyframes/")) return Promise.resolve(jsonResponse({ frames: [] }));
+      if (path.startsWith("/frame-map/")) return Promise.resolve(jsonResponse({
+        videoId: "K01_V001", timeBaseNumerator: 1, timeBaseDenominator: 1000,
+        firstPts: 0, ptsDeltas: [10000, 2500], frameCount: 3,
+      }));
+      return Promise.resolve(jsonResponse({ videoId: "K01_V001", cues: [] }));
+    });
+    const onRemove = vi.fn();
+    render(<VideoDialog result={hit({ time: 10 })} onClose={() => {}} originalVideo
+      picker={{ actions: [], submit: { label: "Add event", kind: "trake", onSubmit: vi.fn() },
+        trakeSequence: { videoId: "K01_V001", frameIds: [100, 250], onRemove, onMove: vi.fn(), onOpen: vi.fn(), onSubmit: vi.fn() } }} />);
+    const video = screen.getByLabelText("Video player") as HTMLVideoElement;
+    fireEvent.play(video);
+    video.currentTime = 12.4;
+    fireEvent.timeUpdate(video);
+
+    // Two events are already staged, so the button must offer the third -- not E1 every time.
+    expect(await screen.findByRole("button", { name: /^Add E3 · #/ })).toBeInTheDocument();
+    expect(screen.getByText("2 TRAKE events selected")).toBeInTheDocument();
+
+    // The staged events are manageable from the player itself, which is the point of the panel.
+    fireEvent.click(screen.getByRole("button", { name: "Remove TRAKE event E1" }));
+    expect(onRemove).toHaveBeenCalledWith(0);
+  });
+
+  it("numbers the next TRAKE event and lists the ones the sequence already holds", async () => {
+    // A picker in TRAKE mode without its sequence counts zero events: the button reads "Add E1"
+    // forever and no event is ever listed, however many were added.
+    Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+      configurable: true, value() { return 1; },
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", { configurable: true, value: vi.fn() });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const path = String(input);
+      if (path.startsWith("/api/dres/keyframes/")) return Promise.resolve(jsonResponse({ frames: [
+        { frame_id: 100, source_frame_idx: 1, timestamp_ms: 10000 },
+      ] }));
+      if (path.startsWith("/frame-map/")) return Promise.resolve(jsonResponse({
+        videoId: "K01_V001", timeBaseNumerator: 1, timeBaseDenominator: 1000,
+        firstPts: 0, ptsDeltas: [10000, 2500], frameCount: 3,
+      }));
+      return Promise.resolve(jsonResponse({ videoId: "K01_V001", cues: [] }));
+    });
+    render(<VideoDialog result={hit({ time: 10 })} onClose={() => {}} originalVideo startPaused
+      picker={{ actions: [], submit: { label: "Add event", kind: "trake", onSubmit: vi.fn() },
+        trakeSequence: { videoId: "K01_V001", frameIds: [3072], onRemove: vi.fn(), onMove: vi.fn(), onOpen: vi.fn(), onSubmit: vi.fn() } }} />);
+
+    expect(await screen.findByText("Source frame 1")).toBeInTheDocument();
+    expect(screen.getByText("1 TRAKE events selected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "E1 · #3072" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add E2 · #1 · 0:10" })).toBeEnabled();
+  });
+
+  it("submits a paused video even when the decoder never names the frame", async () => {
+    // A video opened from a keyframe is paused on a frame the decoder may never name exactly (the
+    // seek lands between two PTS ticks). The button used to stay dead until a play/pause cycle
+    // flushed a callback; the frame the playhead resolves to is enough.
+    Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+      configurable: true, value() { return 1; },
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", { configurable: true, value: vi.fn() });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => Promise.resolve(String(input).startsWith("/frame-map/")
+      ? jsonResponse({
+        videoId: "K01_V001", timeBaseNumerator: 1, timeBaseDenominator: 1000,
+        firstPts: 0, ptsDeltas: [10000, 2500], frameCount: 3,
+      })
+      : jsonResponse({ videoId: "K01_V001", cues: [] })));
+    const onSubmit = vi.fn().mockResolvedValue({ message: "accepted", completed: true });
+    render(<VideoDialog result={hit({ time: 10 })} onClose={() => {}} originalVideo startPaused
+      picker={{ actions: [], submit: { label: "Submit Q&A frame", kind: "qa", needsAnswer: true, onSubmit } }} />);
+    fireEvent.change(await screen.findByLabelText("DRES answer in player"), { target: { value: "5" } });
+
+    const submit = await screen.findByRole("button", { name: "Submit 0:10 (10000 ms)" });
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("K01_V001", 1, 10, "5", "qa"));
+  });
+
+  it("retries a dropped frame-map request instead of opening a dead player", async () => {
+    // A venue link drops connections: one failed map request used to leave the dialog unable to
+    // name any frame, with every control dead until it was reopened.
+    Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+      configurable: true, value() { return 1; },
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", { configurable: true, value: vi.fn() });
+    let mapCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const path = String(input);
+      if (path.startsWith("/frame-map/")) {
+        mapCalls += 1;
+        if (mapCalls === 1) return Promise.reject(new Error("dropped"));
+        return Promise.resolve(jsonResponse({
+          videoId: "K01_V001", timeBaseNumerator: 1, timeBaseDenominator: 1000,
+          firstPts: 0, ptsDeltas: [10000, 2500], frameCount: 3,
+        }));
+      }
+      return Promise.resolve(jsonResponse({ videoId: "K01_V001", cues: [] }));
+    });
+    render(<VideoDialog result={hit({ time: 10 })} onClose={() => {}} originalVideo startPaused
+      picker={{ actions: [], submit: { label: "Submit Q&A frame", kind: "qa", needsAnswer: true, onSubmit: vi.fn() } }} />);
+
+    expect(await screen.findByRole("button", { name: "Submit 0:10 (10000 ms)" }, { timeout: 3000 })).toBeInTheDocument();
+    expect(mapCalls).toBe(2);
+  });
+
+  it("says why a Q&A submission is held back until the answer is typed", async () => {
+    let callback: ((now: number, metadata: { mediaTime: number }) => void) | undefined;
+    Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+      configurable: true, value(fn: typeof callback) { callback = fn; return 1; },
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", { configurable: true, value: vi.fn() });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => Promise.resolve(String(input).startsWith("/frame-map/")
+      ? jsonResponse({
+        videoId: "K01_V001", timeBaseNumerator: 1, timeBaseDenominator: 1000,
+        firstPts: 0, ptsDeltas: [10000, 2500], frameCount: 3,
+      })
+      : jsonResponse({ videoId: "K01_V001", cues: [] })));
+    render(<VideoDialog result={hit({ time: 10 })} onClose={() => {}} originalVideo startPaused
+      picker={{ actions: [], submit: { label: "Submit Q&A frame", kind: "qa", needsAnswer: true, onSubmit: vi.fn() } }} />);
+    await waitFor(() => expect(callback).toBeDefined());
+    await act(async () => callback?.(0, { mediaTime: 10 }));
+
+    expect(await screen.findByText("Type the answer to submit it.")).toBeInTheDocument();
+    const submit = screen.getByRole("button", { name: "Submit 0:10 (10000 ms)" });
+    expect(submit).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("DRES answer in player"), { target: { value: "5 người" } });
+
+    expect(screen.queryByText("Type the answer to submit it.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit 0:10 (10000 ms)" })).toBeEnabled();
+  });
+
+  it("steps by source frames and sends the frame the stepper names", async () => {
+    let callback: ((now: number, metadata: { mediaTime: number }) => void) | undefined;
+    Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+      configurable: true, value(fn: typeof callback) { callback = fn; return 1; },
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", { configurable: true, value: vi.fn() });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => Promise.resolve(String(input).startsWith("/frame-map/")
+      ? jsonResponse({
+        videoId: "K01_V001", timeBaseNumerator: 1, timeBaseDenominator: 1000,
+        firstPts: 100, ptsDeltas: [40, 60], frameCount: 3,
+      })
+      : jsonResponse({ videoId: "K01_V001", cues: [] })));
+    const onSubmit = vi.fn().mockResolvedValue({ message: "Added E1 · FRAME_ID 2", completed: false });
+    render(<VideoDialog result={hit({ time: 0.04 })} onClose={() => {}} originalVideo startPaused
+      picker={{ actions: [], submit: { label: "Add event", kind: "trake", onSubmit },
+        trakeSequence: { videoId: null, frameIds: [], onRemove: vi.fn(), onMove: vi.fn(), onOpen: vi.fn(), onSubmit: vi.fn() } }} />);
+    const video = screen.getByLabelText("Video player") as HTMLVideoElement;
+    await waitFor(() => expect(callback).toBeDefined());
+    await act(async () => callback?.(0, { mediaTime: 0.04 }));
+
+    expect(await screen.findByText("Source frame 1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Forward 1 frame" }));
+    expect(video.currentTime).toBeCloseTo(0.1, 6);
+    fireEvent.seeked(video);
+    await act(async () => callback?.(0, { mediaTime: 0.1 }));
+
+    expect(await screen.findByText("Source frame 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add E1 · #2 · 0:00" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("K01_V001", 2, 0.1, "", "trake"));
+  });
+
+  it("uses the original video source for DRES exact-frame picking", () => {
+    render(<VideoDialog result={hit({})} onClose={() => {}} originalVideo
+      picker={{ actions: [{ label: "Use frame for DRES", onPick: vi.fn() }] }} />);
+    expect(screen.getByLabelText("Video player")).toHaveAttribute("src", "/video/K01_V001?original=1");
   });
 
   it("highlights the transcript cue at the video's current time", async () => {
@@ -843,5 +1172,274 @@ describe("competition search workspace", () => {
     expect(await screen.findByText("frame 10 · 0:10")).toBeInTheDocument();
     fireEvent.keyDown(workspace, { key: "ArrowRight" });
     expect(screen.getByText("frame 20 · 0:20")).toBeInTheDocument();
+  });
+});
+
+describe("DeepSeek query refinement", () => {
+  const refinement = {
+    summary_vi: "tìm cảnh người đàn ông đội mũ vàng",
+    visual: [
+      { text: "a man wearing a yellow helmet", tokens: 6, primary: true },
+      { text: "a man standing near a construction site", tokens: 7, primary: false },
+    ],
+    transcript: ["người đàn ông đội mũ vàng"],
+    ocr: ["CÔNG TRƯỜNG"],
+    events: [],
+    lookups: [],
+  };
+
+  it("shows suggestions from /search/refine and only fills the box a chip is applied to", async () => {
+    const fetchMock = mockAuthenticatedFetch(jsonResponse(refinement));
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Visual query (English)"), {
+      target: { value: "một người đàn ông đội mũ vàng" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "✨ Refine with AI" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/search/refine")).toBe(true));
+    const call = fetchMock.mock.calls.find(([input]) => String(input) === "/search/refine");
+    expect(JSON.parse(call?.[1]?.body as string)).toEqual({ text: "một người đàn ông đội mũ vàng", kind: "kis" });
+
+    expect(await screen.findByText("tìm cảnh người đàn ông đội mũ vàng")).toBeInTheDocument();
+    const transcriptChip = screen.getByRole("button", { name: "người đàn ông đội mũ vàng" });
+
+    // Applying a suggestion only fills the box; it never searches on its own.
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/search")).toBe(false);
+
+    fireEvent.click(transcriptChip);
+
+    expect(screen.getByLabelText("Transcript query (Vietnamese)")).toHaveValue("người đàn ông đội mũ vàng");
+    expect(screen.getByRole("button", { name: "Transcript for event E1" })).toHaveAttribute("aria-pressed", "true");
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/search")).toBe(false);
+
+    // Switching back to the visual tab must show the original visual text, not the
+    // transcript suggestion that was just applied -- each channel keeps its own text.
+    fireEvent.click(screen.getByRole("button", { name: "Visual text for event E1" }));
+    expect(screen.getByLabelText("Visual query (English)")).toHaveValue("một người đàn ông đội mũ vàng");
+
+    // And applying the visual suggestion afterwards must not touch the transcript text.
+    fireEvent.click(screen.getByRole("button", { name: "a man wearing a yellow helmet" }));
+    expect(screen.getByLabelText("Visual query (English)")).toHaveValue("a man wearing a yellow helmet");
+    fireEvent.click(screen.getByRole("button", { name: "Transcript for event E1" }));
+    expect(screen.getByLabelText("Transcript query (Vietnamese)")).toHaveValue("người đàn ông đội mũ vàng");
+  });
+
+  it("separates a scene's best-match captions from its less distinctive ones", async () => {
+    // A secondary caption describes a real but generic moment of the same clip: it
+    // still applies fine, it just must never look as trustworthy as the best match.
+    mockAuthenticatedFetch(jsonResponse(refinement));
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Visual query (English)"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "✨ Refine with AI" }));
+
+    const bestMatch = await screen.findByRole("button", { name: "a man wearing a yellow helmet" });
+    const secondary = screen.getByRole("button", { name: "a man standing near a construction site" });
+    expect(bestMatch.className).not.toContain("refine-chip-muted");
+    expect(secondary.className).toContain("refine-chip-muted");
+    expect(screen.getByText("Other moments in this clip")).toBeInTheDocument();
+  });
+
+  it("warns on a visual suggestion over PE-Core's 72-token limit and reports a failed refine", async () => {
+    const longRefinement = {
+      ...refinement,
+      visual: [{ text: "an extremely long caption", tokens: 90, primary: true }],
+    };
+    mockAuthenticatedFetch(jsonResponse(longRefinement));
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Visual query (English)"), { target: { value: "cảnh dài" } });
+    fireEvent.click(screen.getByRole("button", { name: "✨ Refine with AI" }));
+
+    const chip = await screen.findByRole("button", { name: "an extremely long caption" });
+    expect(chip).toHaveAttribute("title", expect.stringContaining("72-token limit"));
+  });
+
+  it("reports a failed refine without touching the query boxes", async () => {
+    mockAuthenticatedFetch(jsonResponse({ detail: "query refinement unavailable: down" }, false));
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Visual query (English)"), { target: { value: "cảnh lỗi" } });
+    fireEvent.click(screen.getByRole("button", { name: "✨ Refine with AI" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("query refinement unavailable: down");
+    expect(screen.getByLabelText("Visual query (English)")).toHaveValue("cảnh lỗi");
+  });
+});
+
+describe("checking a moment with AI", () => {
+  // The browser-side cache is module-level on purpose -- it lives as long as the page does --
+  // so each test starts from an empty one.
+  beforeEach(() => forgetChecks());
+
+  const CHECK = {
+    key: "k1", video_id: "L01_V001", frame_idx: 2, time: 123.456, window_seconds: 300,
+    shot_index: 7, covers: { start_frame: 0, end_frame: 40, start: 120, end: 128 },
+    verdict: { score: 9, reason: "đúng cảnh" },
+    details: [{ text: "hai người cầm điện thoại", meaning_en: "two people holding a phone", distinctiveness: 0.9, weight: 0.92 }],
+    checks: [{ detail: 0, status: "supported" as const, source: "vision" as const, at: 123.456, quote: "", note: "thấy rõ" }],
+    support: { share: 1, supported: 1, partial: 0, contradicted: 0, total: 1 },
+    answer: null, frames_seen: 21, model: "qwen/qwen3.7-flash", by: "owner@example.com",
+    checked_at: 0, cached: false, latency_ms: 6000,
+  };
+  const searchHit = hit({
+    video_id: "L01_V001", frame_idx: 2, time: 123.456, thumb: "/thumb/L01_V001/2",
+    frame: "/frame/L01_V001/2", video: "/video/L01_V001",
+  });
+
+  function mockCheckFetch(available: boolean, onCheck?: () => Response) {
+    return vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const path = String(input);
+      if (path === "/session") return Promise.resolve(jsonResponse({
+        login: "owner@example.com", is_admin: true,
+        check: { available, model: "qwen/qwen3.7-flash", window_seconds: 300 },
+      }));
+      if (path === "/api/collab/rounds") return Promise.resolve(jsonResponse([]));
+      if (path === "/search") return Promise.resolve(jsonResponse(response([searchHit])));
+      if (path.startsWith("/context/")) return Promise.resolve(jsonResponse({
+        video_id: "L01_V001", frame_idx: 2,
+        frames: [
+          { video_id: "L01_V001", frame_idx: 2, pts: 0, time: 123.456, thumb: "/thumb/L01_V001/2", frame: "/frame/L01_V001/2", video: "/video/L01_V001" },
+          { video_id: "L01_V001", frame_idx: 30, pts: 0, time: 125.0, thumb: "/thumb/L01_V001/30", frame: "/frame/L01_V001/30", video: "/video/L01_V001" },
+        ],
+      }));
+      if (path.startsWith("/api/check/lookup")) return Promise.resolve(jsonResponse({ status: "miss", result: null }));
+      if (path === "/api/check") return Promise.resolve(onCheck ? onCheck() : jsonResponse(CHECK));
+      if (path === "/api/dres/status") return Promise.resolve(jsonResponse({
+        configured: false, credentials_configured: false, host: "", connected: false,
+        evaluations: [], evaluation_id: null, context: null, context_valid: false,
+      }));
+      if (path === "/api/dres/history") return Promise.resolve(jsonResponse({ attempts: [] }));
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    });
+  }
+
+  async function searchAndSelect() {
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Visual query (English)"), { target: { value: "two people with a phone" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Select frame L01_V001 at 2:03" }));
+  }
+
+  it("offers the check beside Play video and shows the verdict in the right panel", async () => {
+    const fetchMock = mockCheckFetch(true);
+    await searchAndSelect();
+
+    fireEvent.click(await screen.findByRole("button", { name: "✓ Check by AI" }));
+
+    const panel = screen.getByRole("complementary", { name: "Transcript evidence" });
+    expect(await within(panel).findByText("9/10")).toBeInTheDocument();
+    expect(within(panel).getByText("đúng cảnh")).toBeInTheDocument();
+    expect(within(panel).getByText("hai người cầm điện thoại", { exact: false })).toBeInTheDocument();
+    const posted = fetchMock.mock.calls.find(([input]) => String(input) === "/api/check");
+    expect(JSON.parse(String(posted?.[1]?.body))).toMatchObject({
+      visual_text: "two people with a phone", kind: "kis", video_id: "L01_V001", frame_idx: 2,
+    });
+  });
+
+  it("hides the button when the deployment has no OpenRouter key", async () => {
+    mockCheckFetch(false);
+    await searchAndSelect();
+
+    expect(screen.queryByRole("button", { name: "✓ Check by AI" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "▶ Play video" })).toBeInTheDocument();
+  });
+
+  it("reads another frame of the same shot from the cache instead of asking again", async () => {
+    // The server keys a check by its shot, so the second frame is already answered.
+    const fetchMock = mockCheckFetch(true);
+    await searchAndSelect();
+    fireEvent.click(await screen.findByRole("button", { name: "✓ Check by AI" }));
+    await screen.findByText("9/10");
+
+    fireEvent.click(screen.getByRole("button", { name: /^Select frame 30/ }));
+
+    expect(await screen.findByText("9/10")).toBeInTheDocument();
+    expect(screen.getByText("from the cache")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/check")).toHaveLength(1);
+  });
+
+  it("badges the filmstrip frames one answer already speaks for", async () => {
+    mockCheckFetch(true);
+    await searchAndSelect();
+    fireEvent.click(await screen.findByRole("button", { name: "✓ Check by AI" }));
+    await screen.findByText("9/10");
+
+    expect(await screen.findByRole("button", { name: /^Select frame 30 · checked$/ })).toBeInTheDocument();
+  });
+
+  it("keeps checking the query that found these results after switching the box to an empty field", async () => {
+    // Reported bug: typed a visual query, searched, then tapped the "Transcript" tab for
+    // event E1 (nothing typed there yet) -- the shared textbox goes empty, but the results
+    // grid still shows the VISUAL query's matches, so the check must keep asking about that,
+    // not about the now-empty box.
+    const fetchMock = mockCheckFetch(true);
+    await searchAndSelect();
+
+    fireEvent.click(screen.getByRole("button", { name: "Transcript for event E1" }));
+    expect(screen.getByLabelText("Transcript query (Vietnamese)")).toHaveValue("");
+
+    fireEvent.click(screen.getByRole("button", { name: "✓ Check by AI" }));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const posted = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input]) => String(input) === "/api/check");
+      expect(call).toBeDefined();
+      return call!;
+    });
+    expect(JSON.parse(String(posted[1]?.body))).toMatchObject({
+      visual_text: "two people with a phone", kind: "kis",
+    });
+  });
+
+  it("reports a failed check without clearing the selection", async () => {
+    mockCheckFetch(true, () => jsonResponse({ detail: "the AI check failed: upstream is down" }, false));
+    await searchAndSelect();
+
+    fireEvent.click(await screen.findByRole("button", { name: "✓ Check by AI" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("upstream is down");
+    expect(screen.getByText("Selected frame 2")).toBeInTheDocument();
+  });
+
+  it("checks against the transcript, not a scene description, when the search was audio", async () => {
+    // A spoken-word query is words to find near the moment, not something a frame shows --
+    // sending it as "visual_text" would have the checker judge it as a scene description.
+    const fetchMock = mockCheckFetch(true);
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Transcript for event E1" }));
+    fireEvent.change(screen.getByLabelText("Transcript query (Vietnamese)"), { target: { value: "cá nhám" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Select frame L01_V001 at 2:03" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "✓ Check by AI" }));
+
+    const posted = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input]) => String(input) === "/api/check");
+      expect(call).toBeDefined();
+      return call!;
+    });
+    expect(JSON.parse(String(posted[1]?.body))).toMatchObject({ audio_text: "cá nhám" });
+    expect(JSON.parse(String(posted[1]?.body)).visual_text).toBeUndefined();
+  });
+
+  it("checks against the on-screen text, not a scene description, when the search was OCR", async () => {
+    const fetchMock = mockCheckFetch(true);
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "OCR for event E1" }));
+    fireEvent.change(screen.getByLabelText("OCR query"), { target: { value: "Nà Ní" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Select frame L01_V001 at 2:03" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "✓ Check by AI" }));
+
+    const posted = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input]) => String(input) === "/api/check");
+      expect(call).toBeDefined();
+      return call!;
+    });
+    expect(JSON.parse(String(posted[1]?.body))).toMatchObject({ ocr_text: "Nà Ní" });
+    expect(JSON.parse(String(posted[1]?.body)).visual_text).toBeUndefined();
   });
 });

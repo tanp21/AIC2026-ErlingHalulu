@@ -85,15 +85,18 @@ class ShotIndexTests(unittest.TestCase):
                                       ("2026", "L21", "L21_V002")):
                 (root / year / "videos" / group).mkdir(parents=True, exist_ok=True)
                 (root / year / "videos" / group / f"{name}.mp4").touch()
+            (root / "2026" / "videos" / "N023").mkdir(parents=True)
+            (root / "2026" / "videos" / "N023" / "N023_V002.mov").touch()
             (root / "2026" / "keyframes" / "L21").mkdir(parents=True)
             (root / "2026" / "keyframes" / "L21" / "decoy.mp4").touch()
 
             catalogue = shots.scan_media(root)
 
-        self.assertEqual(sorted(catalogue), ["K01_V001", "L21_V001", "L21_V002"])
+        self.assertEqual(sorted(catalogue), ["K01_V001", "L21_V001", "L21_V002", "N023_V002"])
         self.assertEqual(catalogue["K01_V001"]["group"], "K01")
         self.assertEqual(catalogue["K01_V001"]["year"], "2025")
         self.assertTrue(catalogue["K01_V001"]["path"].endswith("2025/videos/K01/K01_V001.mp4"))
+        self.assertTrue(catalogue["N023_V002"]["path"].endswith("2026/videos/N023/N023_V002.mov"))
 
     def test_rejects_unordered_bounds(self):
         with self.assertRaises(ValueError):

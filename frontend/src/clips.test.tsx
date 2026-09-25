@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ClipStudio, captionAt, shotAt } from "./clips";
+import { ClipStudio, captionAt, containedVideoRect, detectionsAt, shotAt } from "./clips";
 import type { CaptionWindow, Shot } from "./types";
 
 const TIME_BASE_DEN = 90000;
@@ -81,6 +81,11 @@ beforeEach(() => {
           indexed: true, has_shots: false },
       ]);
     }
+    if (url === "/objects/L21_V001/detections") return json({ video_id: "L21_V001", frames: [
+      { frame_idx: 15, time: shotSeconds(15), detections: [
+        { label: "person", confidence: .91, box: [.1, .15, .3, .8] },
+      ] },
+    ] });
     if (url === "/shots/L21_V001/labels") {
       return json({ videoId: "L21_V001", labelRevision: 2, labels: {
         "1": { state: "excluded", reason: "presenter", reviewed_by: "owner@example.com" },
@@ -169,6 +174,27 @@ describe("captionAt", () => {
   });
 });
 
+describe("detectionsAt", () => {
+  const samples = [
+    { frame_idx: 10, time: 1, detections: [] },
+    { frame_idx: 20, time: 2, detections: [] },
+  ];
+
+  it("chooses the closest detector sample and hides stale boxes", () => {
+    expect(detectionsAt(samples, 1.4)?.frame_idx).toBe(10);
+    expect(detectionsAt(samples, 1.6)?.frame_idx).toBe(20);
+    expect(detectionsAt(samples, 4)).toBeNull();
+  });
+});
+
+describe("containedVideoRect", () => {
+  it("fits the overlay to portrait video inside a landscape stage", () => {
+    expect(containedVideoRect(1200, 600, 900, 1600)).toEqual({
+      left: 431.25, top: 0, width: 337.5, height: 600,
+    });
+  });
+});
+
 describe("clip studio", () => {
   async function openVideo() {
     render(<ClipStudio />);
@@ -234,6 +260,31 @@ describe("clip studio", () => {
 
     expect(screen.getByRole("button", { name: /Export shot #1/ })).toBeDisabled();
     expect(screen.getByText("Pause the video to export the shot you're viewing.")).toBeInTheDocument();
+  });
+
+  it("draws detections over the matching playback frame and can hide them", async () => {
+    await openVideo();
+    presentFrame(15);
+
+    expect(await screen.findByRole("img", { name: "Object detections near frame 15" })).toBeInTheDocument();
+    expect(screen.getByText("person 91%")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Object detection"));
+    expect(screen.queryByRole("img", { name: "Object detections near frame 15" })).not.toBeInTheDocument();
+  });
+
+  it("requests fullscreen on the overlay stage from the external player action", async () => {
+    const previous = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "requestFullscreen");
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(HTMLElement.prototype, "requestFullscreen", { configurable: true, value: requestFullscreen });
+    try {
+      await openVideo();
+      fireEvent.click(screen.getByRole("button", { name: "Fullscreen video" }));
+      expect(requestFullscreen).toHaveBeenCalledOnce();
+      expect(requestFullscreen.mock.contexts[0]).toHaveClass("clip-video-stage");
+    } finally {
+      if (previous) Object.defineProperty(HTMLElement.prototype, "requestFullscreen", previous);
+      else Reflect.deleteProperty(HTMLElement.prototype, "requestFullscreen");
+    }
   });
 
   it("downloads the shot under the playhead, not the one that was clicked", async () => {

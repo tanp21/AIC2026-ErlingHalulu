@@ -61,6 +61,15 @@ describe("collaboration panels", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Saved frame 42");
   });
 
+  it("keeps the local answer limit separate from DRES player submission", async () => {
+    const fullQuery = { ...query, answers: Array.from({ length: 100 }, (_, index) => ({
+      video_id: `L00_V${String(index).padStart(3, "0")}`, frame_id: index,
+    })) };
+    render(<QuickAddResult query={fullQuery} result={result} onChange={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Add frame 42" })).toBeDisabled();
+    expect(screen.queryByText(/Submit .*DRES/)).not.toBeInTheDocument();
+  });
+
   it("requires QA text and targets a TRAKE event", async () => {
     const qa = { ...query, kind: "qa" as const };
     const qaUpdated = { ...qa, answers: [{ video_id: "L00_V001", frame_id: 42, answer: "Hà Nội" }], version: 1 };
@@ -224,7 +233,7 @@ describe("collaboration panels", () => {
       "L00_V009", 315, 4, 0)).toThrow("Answer row no longer exists");
   });
 
-  it("puts the paused player frame into the local answer draft", async () => {
+  it("shows only DRES submission controls when the player supports official submission", async () => {
     let callback: ((now: number, metadata: { mediaTime: number }) => void) | undefined;
     Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
       configurable: true, value(fn: typeof callback) { callback = fn; return 1; },
@@ -238,14 +247,14 @@ describe("collaboration panels", () => {
     }));
     render(<CollaborationPanels round={round} login="mate@example.com" selectedId={1}
       selectedResult={result} openResult={result} onCloseVideo={vi.fn()}
+      onDresSubmit={vi.fn(async () => ({ message: "DRES not ready", completed: false }))}
       onSelect={vi.fn()} onQueryChange={vi.fn()} />);
     await waitFor(() => expect(callback).toBeDefined());
     callback?.(0, { mediaTime: 0 });
     fireEvent.pause(screen.getByLabelText("Video player"));
-    fireEvent.click(await screen.findByRole("button", { name: "Use frame 0" }));
-    expect(screen.getByDisplayValue("L00_V001")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("0")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save answer" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Submit 0:00 (0 ms)" })).toBeEnabled();
+    expect(screen.queryByLabelText("Answer row")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use frame 0" })).not.toBeInTheDocument();
   });
 
   it("shows query ownership and filters to my work", () => {

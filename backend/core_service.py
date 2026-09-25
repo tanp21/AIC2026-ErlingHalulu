@@ -1,9 +1,16 @@
 """Compute-plane endpoints and the data-route proxy for split development.
 
-On the owner's host (`AIC_CORE_URL` unset) the endpoints below expose the heavy
-primitives under `/core/*`. On a teammate's machine (`AIC_CORE_URL` set) the same
-app instead forwards the media/data routes to the owner's app, so thumbnails,
-videos, transcripts and frame maps work without a local `data/` or `indexes/`.
+On the compute host (`AIC_CORE_URL` unset) the endpoints below expose the heavy
+primitives under `/core/*`. A host with `AIC_CORE_URL` set registers the same
+endpoints but proxies instead, in one of two directions:
+
+- `mode="media"` (a teammate's machine, no local `data/` or `indexes/`) forwards the
+  media/data routes to the compute host, so thumbnails, videos, transcripts and frame
+  maps work without them.
+- `mode="api"` (a media host at a congested venue, which has the corpus on local disk
+  but no GPU or Elasticsearch) forwards everything *except* the SPA and the media, so
+  search, agent runs and collaboration execute on the compute host while the heavy
+  bytes never leave the local network. See `docs/venue-deployment.md`.
 
 Routes are registered with `add_api_route` to match `collaboration.py` and
 `agent_runner.py`: a router object would hide them from `app.routes` iteration.
@@ -18,10 +25,11 @@ from contextlib import contextmanager
 
 import httpx
 import numpy as np
-from fastapi import Body, HTTPException
+import polars as pl
+from fastapi import Body, HTTPException, Path
 from pydantic import BaseModel, Field
 
-from . import audio_search, core, frame_maps, ocr_search, shots, thumb
+from . import audio_search, core, frame_maps, object_search, ocr_search, shots, thumb
 from . import search_core
 
 logger = logging.getLogger("uvicorn.error")
@@ -33,6 +41,20 @@ PROXY_PREFIXES = (
     "/frame-map/", "/transcript/", "/context/", "/captions/", "/ocr/",
 )
 PROXY_PATHS = ("/videos", "/indexes", "/profiles")
+
+# What a media host answers itself. Everything else -- the SPA is served on the same
+# origin, so a teammate's browser never sees a second host -- goes to the compute host.
+#
+# `/api/dres/` is here because the competition submission system is the media host's business,
+# not the rented instance's: it talks to an external DRES server, needs credentials the
+# instance has no reason to hold, and answers from evidence the media host already has.
+#
+# `/frame-map/` is here for the same reason those two share: the per-video PTS map is a file in
+# `indexes/frame_maps/`, which the media host mounts. Forwarding it made the player wait on the
+# tunnel for a map it already had -- measured at 15 s for 0.11 MB, with the connection dropped
+# often enough that a dialog could open without its map and never name a frame.
+LOCAL_PATHS = ("/healthz", "/", "/favicon.ico")
+LOCAL_PREFIXES = ("/static/", "/thumb/", "/frame/", "/video/", "/clip/", "/frame-map/", "/api/dres/")
 
 _slots = threading.BoundedSemaphore(max(1, int(os.environ.get("AIC_CORE_SLOTS", "6"))))
 
@@ -89,6 +111,23 @@ class AudioFlatRequest(BaseModel):
 class EsSearchRequest(BaseModel):
     index: str
     body: dict
+
+
+class ObjectSearchRequest(BaseModel):
+    profile: str
+    query: object_search.ObjectQuery
+    k: int = Field(ge=1, le=10000)
+
+
+class ObjectMatchPoint(BaseModel):
+    video_id: str = Field(pattern=r"^[A-Z]\d{2,3}_V\d{3}$")
+    frame_idx: int = Field(ge=0)
+
+
+class ObjectMatchRequest(BaseModel):
+    profile: str
+    query: object_search.ObjectQuery
+    points: list[ObjectMatchPoint] = Field(max_length=500)
 
 
 class VisionImage(BaseModel):
@@ -266,6 +305,40 @@ def annotate_endpoint(req: AnnotateRequest):
     return {"marks": marks}
 
 
+def object_catalog_endpoint():
+    try:
+        return object_search.catalog()
+    except (FileNotFoundError, OSError, RuntimeError, pl.exceptions.PolarsError) as exc:
+        raise HTTPException(503, f"object search unavailable: {exc}") from exc
+
+
+def object_video_detections_endpoint(video_id: str = Path(pattern=r"^[A-Z]\d{2,3}_V\d{3}$")):
+    try:
+        return object_search.video_detections(video_id)
+    except (FileNotFoundError, OSError, RuntimeError, pl.exceptions.PolarsError) as exc:
+        raise HTTPException(503, f"object search unavailable: {exc}") from exc
+
+
+def object_search_endpoint(req: ObjectSearchRequest):
+    try:
+        return object_search.search(req.profile, req.query, req.k)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except (FileNotFoundError, OSError, RuntimeError, pl.exceptions.PolarsError) as exc:
+        raise HTTPException(503, f"object search unavailable: {exc}") from exc
+
+
+def object_match_endpoint(req: ObjectMatchRequest):
+    try:
+        return {"matches": object_search.match_frames(
+            req.profile, req.query, [point.model_dump() for point in req.points]
+        )}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except (FileNotFoundError, OSError, RuntimeError, pl.exceptions.PolarsError) as exc:
+        raise HTTPException(503, f"object search unavailable: {exc}") from exc
+
+
 def audio_flat_endpoint(req: AudioFlatRequest):
     with _compute_slot():
         hits = audio_search.search_audio_flat_local(
@@ -325,6 +398,10 @@ CORE_ROUTES = (
     ("/core/visual/search", visual_search_endpoint, ["POST"]),
     ("/core/visual/frame-embedding", frame_embedding_endpoint, ["POST"]),
     ("/core/frame/annotate", annotate_endpoint, ["POST"]),
+    ("/core/object/catalog", object_catalog_endpoint, ["GET"]),
+    ("/core/object/{video_id}/detections", object_video_detections_endpoint, ["GET"]),
+    ("/core/object/search", object_search_endpoint, ["POST"]),
+    ("/core/object/match", object_match_endpoint, ["POST"]),
     ("/core/audio/flat-search", audio_flat_endpoint, ["POST"]),
     ("/core/es/search", es_search_endpoint, ["POST"]),
     ("/core/vision/judge", vision_judge_endpoint, ["POST"]),
@@ -332,12 +409,13 @@ CORE_ROUTES = (
 
 
 class CoreProxyMiddleware:
-    """Forward data-plane routes to the owner's app when `AIC_CORE_URL` is set."""
+    """Forward routes to the compute host when `AIC_CORE_URL` is set."""
 
-    def __init__(self, app, core_url, core_user=None):
+    def __init__(self, app, core_url, core_user=None, mode="media"):
         self.app = app
         self.core_url = core_url.rstrip("/")
         self.core_user = core_user
+        self.mode = mode
         self._client: httpx.AsyncClient | None = None
 
     def _proxy_client(self) -> httpx.AsyncClient:
@@ -349,6 +427,8 @@ class CoreProxyMiddleware:
         return self._client
 
     def _proxied(self, path: str) -> bool:
+        if self.mode == "api":
+            return not (path in LOCAL_PATHS or path.startswith(LOCAL_PREFIXES))
         return path in PROXY_PATHS or path.startswith(PROXY_PREFIXES)
 
     async def __call__(self, scope, receive, send):
@@ -372,10 +452,19 @@ class CoreProxyMiddleware:
         headers = {
             key.decode("latin-1").lower(): value.decode("latin-1")
             for key, value in scope.get("headers", [])
-            if key.lower() not in {b"host", b"content-length", b"x-aic-user", b"connection"}
+            if key.lower() not in {
+                b"host", b"content-length", b"x-aic-user", b"x-aic-delegated-user",
+                b"connection",
+            }
         }
         if self.core_user:
             headers["x-aic-user"] = self.core_user
+        if self.mode == "api":
+            # The compute host sees one tailnet identity for the whole team; this is what
+            # lets it tell the five apart. It trusts the header only from this host.
+            login = (scope.get("state") or {}).get("login")
+            if login:
+                headers["x-aic-delegated-user"] = login
 
         started = False
         try:
@@ -410,7 +499,7 @@ class CoreProxyMiddleware:
                 )(scope, receive, send)
 
 
-def install_core_service(app) -> None:
+def install_core_service(app, mode: str = "media") -> None:
     for path, endpoint, methods in CORE_ROUTES:
         app.add_api_route(path, endpoint, methods=methods)
     url = os.environ.get("AIC_CORE_URL", "").strip()
@@ -419,4 +508,5 @@ def install_core_service(app) -> None:
             CoreProxyMiddleware,
             core_url=url,
             core_user=os.environ.get("AIC_CORE_USER", "").strip() or None,
+            mode=mode,
         )

@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef } from "react";
 import { formatTimestamp, getRelativeScoreTier } from "./results";
 import { LoadingOverlay } from "./loadingOverlay";
 import { QueryBox } from "./queryBox";
-import type { AudioMethod, SearchResult, TemporalEventHit, TemporalSearchResponse, TemporalSequence } from "./types";
+import { ObjectCanvas } from "./objectCanvas";
+import type { AudioMethod, EventMode, ObjectQuery, SearchResult, TemporalEventHit, TemporalSearchResponse, TemporalSequence } from "./types";
 
 interface TemporalPrimaryFieldsProps {
   events: string[];
@@ -51,8 +52,17 @@ export function TemporalPrimaryFields(props: TemporalPrimaryFieldsProps) {
 interface TemporalSidebarFieldsProps {
   events: string[];
   maxGap: number;
+  modes: EventMode[];
+  objectQueries: ObjectQuery[];
+  images?: Array<{ preview: string } | null>;
   onEvents(events: string[]): void;
+  onMode(index: number, mode: EventMode): void;
+  onObjectQuery(index: number, query: ObjectQuery): void;
   onMaxGap(value: number): void;
+  onImage?(index: number, file: File): void;
+  onClearImage?(index: number): void;
+  onRemoveEvent?(index: number): void;
+  onMoveEvent?(from: number, to: number): void;
 }
 
 export function TemporalSidebarFields(props: TemporalSidebarFieldsProps) {
@@ -60,34 +70,64 @@ export function TemporalSidebarFields(props: TemporalSidebarFieldsProps) {
     props.onEvents(props.events.map((event, current) => current === index ? value : event));
   }
   function move(index: number, direction: -1 | 1) {
-    const target = index + direction;
-    if (target < 0 || target >= props.events.length) return;
-    const events = [...props.events];
-    [events[index], events[target]] = [events[target], events[index]];
-    props.onEvents(events);
+    const eventIndex = index + 1;
+    const target = eventIndex + direction;
+    if (target < 0 || target >= props.events.length + 1) return;
+    props.onMoveEvent?.(eventIndex, target);
   }
   return <section className="temporal-sidebar" aria-label="Temporal event sequence">
-    <header><div><span className="eyebrow">Next event</span><strong>E2–E{props.events.length}</strong></div>
-      <span>{props.events.length} events</span></header>
     <div className="temporal-sidebar-list">
-      {props.events.slice(1).map((event, offset) => {
+      {props.events.map((event, offset) => {
         const index = offset + 1;
+        const mode = props.modes[index] ?? "text";
+        const imageMode = mode === "image";
+        const label = mode === "audio" ? "Transcript query (Vietnamese)" : mode === "ocr" ? "OCR query" : "Visual query (English)";
         return <div className="temporal-event-field" key={index}>
-        <label className="field query-field">
-          <span><b>E{index + 1}</b> Visual query (English)</span>
-          <textarea aria-label={`Visual event E${index + 1}`} value={event}
-            onChange={(change) => update(index, change.target.value)} maxLength={2000} rows={2} />
-        </label>
+        <div className="event-modality-tabs" role="group" aria-label={`Event E${index + 1} modality`}>
+          <button type="button" aria-label={`Visual text for event E${index + 1}`} aria-pressed={mode === "text"}
+            className={mode === "text" ? "active" : ""} onClick={() => props.onMode(index, "text")}>T</button>
+          <button type="button" aria-label={`Transcript for event E${index + 1}`} aria-pressed={mode === "audio"}
+            className={mode === "audio" ? "active" : ""} onClick={() => props.onMode(index, "audio")}>♪</button>
+          <button type="button" aria-label={`OCR for event E${index + 1}`} aria-pressed={mode === "ocr"}
+            className={mode === "ocr" ? "active" : ""} onClick={() => props.onMode(index, "ocr")}>OCR</button>
+          <button type="button" aria-label={`Image for event E${index + 1}`} aria-pressed={imageMode}
+            className={imageMode ? "active" : ""} onClick={() => props.onMode(index, "image")}>▧</button>
+          <button type="button" aria-label={`Object for event E${index + 1}`} aria-pressed={mode === "object"}
+            className={mode === "object" ? "active" : ""} onClick={() => props.onMode(index, "object")}>Obj</button>
+        </div>
+        {mode === "object" ? <ObjectCanvas title={`Object event E${index + 1}`}
+          query={props.objectQueries[index]}
+          onChange={(query) => props.onObjectQuery(index, query)} /> : !imageMode ? <label className="field query-field">
+          <textarea aria-label={`${label} E${index + 1}`} value={event}
+            placeholder={mode === "audio" ? "Words or speech to find…" : mode === "ocr" ? "Text shown on screen…" : "Describe the visual scene…"}
+            onChange={(change) => update(offset, change.target.value)} maxLength={2000} rows={2} />
+        </label> : <div className="temporal-event-image">
+          {props.images?.[index] && <img src={props.images[index]!.preview} alt={`Visual event E${index + 1} image`} />}
+          <label>{props.images?.[index] ? "Change image" : "Choose image"}<input aria-label={`Visual event E${index + 1} image`} type="file"
+            accept="image/jpeg,image/png,image/webp" onChange={(change) => {
+              const file = change.target.files?.[0]; if (file) props.onImage?.(index, file);
+              change.currentTarget.value = "";
+            }} /></label>
+          {props.images?.[index] && <button type="button" onClick={() => props.onClearImage?.(index)}
+            aria-label={`Clear visual event E${index + 1} image`}>×</button>}
+        </div>}
+        {mode !== "object" && <ObjectCanvas title={`Object position filter · E${index + 1}`}
+          buttonLabel={`Add object filter to E${index + 1}`}
+          query={props.objectQueries[index]}
+          onChange={(query) => props.onObjectQuery(index, query)} />}
         <div className="event-actions">
-          <button type="button" aria-label={`Move event E${index + 1} up`} disabled={index === 1}
-            onClick={() => move(index, -1)}>↑</button>
-          <button type="button" aria-label={`Move event E${index + 1} down`} disabled={index === props.events.length - 1}
-            onClick={() => move(index, 1)}>↓</button>
-          <button type="button" aria-label={`Remove event E${index + 1}`} disabled={props.events.length <= 2}
-            onClick={() => props.onEvents(props.events.filter((_, current) => current !== index))}>×</button>
+          <button type="button" aria-label={`Move event E${index + 1} up`}
+            onClick={() => move(offset, -1)}>↑</button>
+          <button type="button" aria-label={`Move event E${index + 1} down`} disabled={offset === props.events.length - 1}
+            onClick={() => move(offset, 1)}>↓</button>
+          <button type="button" aria-label={`Remove event E${index + 1}`}
+            onClick={() => {
+              if (props.onRemoveEvent) props.onRemoveEvent(index);
+              else props.onEvents(props.events.filter((_, current) => current !== offset));
+            }}>×</button>
         </div>
       </div>})}
-      <button className="add-event" type="button" aria-label="Add event" disabled={props.events.length >= 6}
+      <button className="add-event" type="button" aria-label="Add event" disabled={props.events.length >= 5}
         onClick={() => props.onEvents([...props.events, ""])}>＋ Add event</button>
     </div>
     <label className="field temporal-sidebar-gap">
@@ -103,14 +143,14 @@ export function temporalSelection(event: TemporalEventHit, sequence: TemporalSeq
   return {
     ...event,
     rank: sequence.rank,
-    source: sequence.source,
+    source: event.source === "object" ? "object" : sequence.source,
     score: sequence.score,
     transcript_snippet: evidence?.transcript_snippet,
     transcript_start: evidence?.transcript_start,
     transcript_end: evidence?.transcript_end,
     scores: {
       ...event.scores,
-      visual_score: event.score,
+      ...(event.source === "visual" ? { visual_score: event.score } : {}),
       sequence_visual_score: sequence.visual_score,
       audio_score: evidence?.score,
       audio_rank: evidence?.audio_rank,
@@ -131,6 +171,7 @@ interface TemporalWorkspaceProps {
   viewMode: ResultsViewMode;
   onViewMode(mode: ResultsViewMode): void;
   onOpen(event: TemporalEventHit, sequence: TemporalSequence): void;
+  onDresSequence?(sequence: TemporalSequence): void;
   onLoadMore(): void;
 }
 
@@ -151,6 +192,7 @@ export function TemporalWorkspace(props: TemporalWorkspaceProps) {
           {showVideoId ? sequence.video_id : `${formatTimestamp(sequence.start_time)}–${formatTimestamp(sequence.end_time)}`}</strong>
         <span>{showVideoId && <>{formatTimestamp(sequence.start_time)}–{formatTimestamp(sequence.end_time)} · </>}
           <b>{sequence.score.toFixed(4)}</b>{sequence.source === "both" && <> · visual {sequence.visual_score.toFixed(4)}</>}</span>
+        {props.onDresSequence && <button type="button" onClick={() => props.onDresSequence?.(sequence)}>Use sequence for DRES TRAKE</button>}
       </header>
       <div className="temporal-timeline">{sequence.events.map((event, index) => <div className="temporal-event" key={`${event.frame_idx}-${index}`}>
         {index > 0 && <span className="temporal-arrow" aria-hidden="true">→</span>}

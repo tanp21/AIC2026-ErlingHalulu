@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A multimodal video retrieval system for VBS-style competitions (AIC HCMC). A FastAPI backend serves a React/Vite SPA and answers visual, audio (Vietnamese transcripts), hybrid, OCR (on-screen text), and temporal queries against pre-built FAISS and Elasticsearch indexes. Deployed to a five-person team through direct IPv4 port forwarding and HAProxy Basic Auth.
+A multimodal video retrieval system for VBS-style competitions (AIC HCMC). A FastAPI backend serves a React/Vite SPA and answers visual, audio (Vietnamese transcripts), hybrid, OCR (on-screen text), and temporal queries against pre-built FAISS and Elasticsearch indexes. Served to a five-person team over Tailscale, with identity stamped by `tailscale serve` and HAProxy.
 
 Detailed setup, deployment, and ops procedures live in `docs/`; this file covers what you need to work in the code.
 
@@ -100,13 +100,13 @@ Hybrid degrades gracefully: if the audio branch raises, the visual results are r
   sentences written on a slide — and is optional at runtime: with no index, the agent's
   caption sub-queries fail alone and the channel is dropped for that run.
 - `backend/ocr_search.py` — the OCR half of Elasticsearch: BM25-only (no dense vector — on-screen text is short overlays meant for literal keyword match), ASCII-folded analyzer, one document per shot built from its representative keyframe. Mirrors `backend/audio_search.py`'s query-building style. See `docs/reports/ocr-shot-audit.md` for why one keyframe per shot and what accuracy bar was accepted.
-- `scripts/audio/` — offline transcript cleaning (not in the image). `postprocess.py` holds pure transforms over a timed word stream, `pipeline.py` fixes their order, `capu.py` is the only part that loads a model. Every transform is off unless a benchmark justified it; most did not — see `docs/reports/audio-transcript-cleaning.md`.
+- `scripts/audio/` — offline transcript cleaning (not in the image). `postprocess.py` holds the pure BPE-to-word merge, `pipeline.py` drives the one cleaning step (`CleanConfig`/`clean_corpus`), `gemini_clean.py` is the only part that talks to a model — capitalisation/punctuation restoration via the Gemini API, the sole restoration path after an earlier local-model restorer and a set of deterministic transforms (boilerplate removal, confidence filtering, number normalisation) were retired for not moving recall — see `docs/reports/audio-transcript-cleaning.md` (historical).
 - `scripts/ocr/` — offline OCR extraction (not in the image): `engines.py`/`alt_engines.py` wrap the candidate OCR backends, `run_corpus.py`/`run_corpus_remote.py` drive the full-corpus pass, `postprocess.py` suppresses burned-in furniture (logos, tickers) before `scripts/indexing/build_ocr_index.py` consumes the output.
 - `backend/temporal_search.py` — pure functions: candidate dedup, sequence DP, scoring methods, audio fusion, NMS. No I/O; easy to test directly.
 - `backend/collaboration.py` — SQLite-backed competition workspace (`/api/collab/*`): round import from ZIP, per-query assignment/answers with optimistic-concurrency `version` fields, and CSV/ZIP submission export.
 - `backend/agent_runner.py` — server-hosted retrieval-agent runs for the UI (`/api/agent/*`): an in-memory owner-scoped run registry (one active run per user, 1 h TTL), a bounded executor, and per-run DeepSeek/Gemini keys that are never persisted. Each run drives the `agent/` orchestrator (`--mode fast` by default, selectable per run) over loopback (`AIC_AGENT_INTERNAL_URL`, identity `<login>` → the server's `<login>#agent` coordinator slot) and writes its JSON, `report.html` and `submission.zip` under `AIC_AGENT_OUT_DIR`. While a run is live, each poll carries a `progress` snapshot of what Gemini is judging (with the same context snippets), and `POST /api/agent/runs/{id}/review` lets the owner accept/reject a candidate, type a Q&A answer or stop; the orchestrator applies these as verdicts no model can overwrite and stops waiting on Gemini (`agent/review.py`).
 - `backend/search_core.py` — compute-plane access. With `AIC_CORE_URL` unset every primitive calls `core`/`frame_maps` in-process; with it set (a teammate's machine) encode/FAISS/annotate work is forwarded to the owner's `/core/*` endpoints. Local branches go through module attributes so existing `backend.app.core.*` test patches keep applying. See `docs/split-development.md`.
-- `backend/core_service.py` — the other half of the split: `/core/*` endpoints (owner side) and `CoreProxyMiddleware`, which forwards media/data routes (`/thumb`, `/frame`, `/video`, `/clip`, `/shots`, `/frame-map`, `/transcript`, `/context`, `/videos`, `/indexes`, `/profiles`) to `AIC_CORE_URL` (teammate side). Installed before `install_access_control` so the proxy sits inside the identity/limits middleware; registered with `add_api_route` so `app.routes` stays iterable.
+- `backend/core_service.py` — the other half of the split: `/core/*` endpoints (compute side) and `CoreProxyMiddleware`, which runs in one of two modes. `mode="media"` forwards the media/data routes (`/thumb`, `/frame`, `/video`, `/clip`, `/shots`, `/frame-map`, `/transcript`, `/context`, `/videos`, `/indexes`, `/profiles`) to `AIC_CORE_URL` — the teammate side, which has no local `data/`. `mode="api"` (`AIC_ROLE=media`, a venue media host with the corpus but no GPU or Elasticsearch) does the reverse: it answers the SPA, `/thumb|/frame|/video|/clip` and `/api/dres/*` locally and forwards everything else, stamping `X-AIC-Delegated-User` so the compute host can still tell the five teammates apart. DRES is local because it talks to an external competition server with the team's own credentials, and builds its payload from media only the media host has. See `docs/venue-deployment.md`. Installed before `install_access_control` so the proxy sits inside the identity/limits middleware; registered with `add_api_route` so `app.routes` stays iterable.
 - `backend/shots.py` — TransNetV2 shot boundaries (`data/<year>/shots/<group>/<id>.json`) plus exact-PTS
   clip extraction for `/videos`, `/shots/{id}`, `/clip/{id}/{shot}`. Boundaries are generated
   offline by `scripts.extraction.detect_shots`; the 2026 dataset has none until that runs. Also
@@ -122,12 +122,15 @@ Hybrid degrades gracefully: if the audio branch raises, the visual results are r
 - `agent/` — the LLM retrieval agent (`python -m agent` and the UI's server-hosted runs). DeepSeek plans and drives tools, Gemini verifies keyframes and does Google-Search lookups; it talks to the server only through `POST /agent/search` (a parallel multi-channel batch in `backend/app.py`, run under the coordinator identity `<login>#agent` so it never supersedes the human's own searches) plus the `/thumb`, `/frame`, `/context`, `/captions` and `/transcript` routes. `agent/pool.py` (moment fusion) and `agent/plan.py` (plan → round-1 batch) are pure and carry most of the logic. See `docs/agent.md`.
 - `agent/review.py` + `agent/evidence.py` — a person in the loop. `HumanReview` carries their decisions, 0-10 scores, TRAKE path and search commands (`more`/`scope`/`neighbours`/`add_frame`) to the orchestrator thread; with `judge="human"` (`AgentOptions`, `_Run._human()`) no model sees a frame and an acceptance no longer ends the run. `evidence.py` checklists each candidate against the query's details: DeepSeek reads the pixels of the candidate's own keyframe **plus the shots around it** (nearest first, up to 16 frames a side within 180 s, `vision_summarize`), and speech/OCR text (`MATCH_SYSTEM`); the caption channel is suspended while vision is available (`checklist_vision`). Each detail carries a `distinctiveness` weight that drives the ordering. UI: `frontend/src/agentReview.tsx`, `highlight.ts`, `agentEvidence.ts`. See `docs/agent.md`.
 - `agent/vlm.py` — the vision backends: `GeminiClient`'s judgement role, or a VLM on this machine (`AIC_AGENT_VISION=local`), in-process or over HTTP (`AIC_VLM_URL`, the same local/remote split as `backend/search_core.py`). All five jobs in `agent/vision.py` reach a model through one `judge()` call, so the backend is swappable without touching them. It renders the response schema back into words (the prompts leave the output shape to Gemini's `response_json_schema`), fans the per-image jobs out one frame per call with a short Vietnamese prompt, and stamps ids from the label rather than trusting the reply. `agent/vlm_models.py` loads the three candidates. Weights are materialised by `scripts/vlm/fetch_models.py` and mounted read-only — the container cannot download them.
+- `agent/openrouter.py` — `OpenRouterClient`, a fourth `judge()`/`chat_json()` backend (`AIC_AGENT_VISION=openrouter`) against OpenRouter's OpenAI-compatible API, defaulting to `qwen/qwen3.7-flash`. One shared team key rather than a personal quota — what the whole agent and the Search tab's checker fall back to now that the Gemini quota is gone.
+- `agent/checker.py` — the orchestration behind `backend/checker.py`'s "Check by AI": one moment checked against a query, reusing `agent/evidence.py`'s checklist/shot-walk/scoring machinery but cut to a single candidate, one vision call, and (for Q&A) the answer read from the same call. See `docs/checker.md`.
 - `scripts/benchmarks/bench_agent_vision.py` — measures candidate local VLMs on the agent's own verification job: one shared candidate pool built from real searches, scored by how well each model's 0-10 verdicts separate gold from non-gold. End-to-end R@1 is deliberately not the metric; the agent's own docs record it varying 40-56% across runs of identical code.
+- `backend/checker.py` — `POST /api/check`, the Search tab's on-demand "Check by AI": one keyframe, checked against the current query by `agent/checker.py` (a cut-down version of the agent's own checklist, judged by OpenRouter `qwen/qwen3.7-flash` rather than a whole agent run). Cached by shot (not frame) so stepping through the filmstrip after the first press is free, and shared across teammates rather than owner-scoped. See `docs/checker.md`.
 - `backend/thumb.py` — exact-PTS ffmpeg thumbnail extraction with a bounded semaphore and a size-capped LRU disk cache.
 
 ### Snapshot pagination (not offset pagination)
 
-`/search` and `/search/temporal` compute the full ranked pool once, store it in a `SearchSnapshotStore`, and return the first page plus an opaque `next_cursor`. `/search/next` and `/search/temporal/next` walk that snapshot.
+`/search`, `/search/temporal`, and `/search/temporal/image` compute the full ranked pool once, store it in a `SearchSnapshotStore`, and return the first page plus an opaque `next_cursor`. `/search/next` and `/search/temporal/next` walk that snapshot. Temporal image events use multipart upload; OCR is unavailable for temporal queries.
 
 - One live snapshot per user; issuing a new search drops the previous one.
 - 600 s TTL, refreshed on each page fetch; an expired or foreign cursor returns **410**.
@@ -138,7 +141,9 @@ Hybrid degrades gracefully: if the audio branch raises, the visual results are r
 
 `TrustedIngressAccessMiddleware` wraps every request. `/healthz` is the only anonymous route; everything else requires the internal `X-AIC-User` header set by HAProxy, whose value must be in `AIC_ALLOWED_USERS`. `AccessConfig.from_env()` rejects anything other than **exactly five unique logins** with `AIC_ADMIN_USER` among them.
 
-For the Tailscale-only deployment (no public port forwarding, no Basic Auth), `tailscale serve` on the host terminates the tailnet HTTPS connection and proxies to `127.0.0.1:8000`, adding a `Tailscale-User-Login` header naming the connecting tailnet member. HAProxy copies that header into `X-AIC-User` — but only when the request arrived over loopback/the Docker bridge (`acl local_proxy` in `haproxy.cfg`); anything else is rejected with 403, and `compose.yaml` publishes the ingress port as `127.0.0.1:8000` so nothing external can reach it directly anyway. Each `AIC_ALLOWED_USERS` entry must be a teammate's real Tailscale account login. See `docs/team-deployment.md`.
+For the Tailscale-only deployment (no public port forwarding, no Basic Auth), `tailscale serve` on the host terminates the tailnet HTTPS connection and proxies to `127.0.0.1:8000`, adding a `Tailscale-User-Login` header naming the connecting tailnet member. HAProxy copies that header into `X-AIC-User` — but only when the request arrived over loopback/the Docker bridge (`acl local_proxy` in `haproxy.cfg`); anything else is rejected with 403, and `compose.yaml` publishes the ingress port as `127.0.0.1:8000` so nothing external can reach it directly anyway. Each `AIC_ALLOWED_USERS` entry must be a teammate's real Tailscale account login. See `docs/venue-deployment.md`.
+
+`AIC_MEDIA_HOST_LOGIN` names the one node whose `X-AIC-Delegated-User` the middleware will believe — the venue media host, whose own tailnet login is all the compute host would otherwise see for the whole team. It is inert when unset, which is every single-host deployment. See `docs/venue-deployment.md`.
 
 The middleware also enforces per-route body limits before the handler runs (16 KiB default, 8 MiB for `POST /search/image`, 256 KiB for `POST /agent/search`, 1 MiB for an owner's `POST /api/collab/rounds`), buffers the body with a 10 s timeout, holds global + per-user semaphores for `/video/*` and `/thumb|/frame/*`, and emits an `audit user=… path=… status=…` log line per request.
 
@@ -170,8 +175,38 @@ Frame ↔ time conversion goes through `backend.frame_maps.FrameMap` (PTS + time
 - `data/` (a symlink) and `indexes/` are gitignored local mounts. Never commit them, `.env.secure`, or generated artifacts.
 - Startup calls `warmup_search()`, which loads metadata, PE-Core, the flat FAISS index, and Qwen — expect 45–60 s before `Application startup complete`.
 
+## The venue deployment is live, and the instance is not this repo
+
+The team runs the two-host split described in `docs/venue-deployment.md`: a WSL2 desktop serves
+the SPA and all media from its own disk (`AIC_ROLE=media`), and a rented vast.ai RTX 3090
+instance runs the models, FAISS, Elasticsearch, the retrieval agent and collaboration. An SSH
+tunnel between them (`compose.yaml`'s `core-tunnel` sidecar) carries the JSON the compute host
+returns — never a frame.
+
+**Changing this repository does not change the instance.** It runs from `/workspace/aic`, an
+`rsync` copy of this tree, plus files that exist only there:
+
+| On the instance | What it is |
+| --- | --- |
+| `/workspace/aic/.env.instance` | host paths, `HF_HOME`, `AIC_MEDIA_HOST_LOGIN`; sourced by `run-app.sh` |
+| `/workspace/aic/run-app.sh` | the launch command supervisor runs |
+| `/etc/supervisor/conf.d/aic.conf` | the `aic-app` and `aic-es` units, both `autorestart` |
+| `/workspace/aic/artifacts/venue/` | `fetch-corpus.sh`, `corpus-urls.txt`, `build-es.sh`, `export-index.py` |
+| `/workspace/elasticsearch/` | Elasticsearch 9.4.3 from its tarball, bound to `127.0.0.1` |
+
+The instance is an **unprivileged container**, and that shapes everything: no Docker-in-Docker
+(so the app runs bare under supervisor), no `/dev/net/tun` (so no Tailscale, hence the SSH
+tunnel), and no sysctl changes (so Elasticsearch must bind `127.0.0.1` — that is what puts it in
+development mode and skips the `vm.max_map_count` bootstrap check). Its NVIDIA driver reports
+CUDA 12.7, so `torch` has to be a `cu12x` build: `uv sync` installs `cu130` and leaves
+`torch.cuda.is_available()` quietly false. `docs/venue-deployment.md` has the rest, including how
+the corpus and both Elasticsearch indexes were put there.
+
+The instance has **no volume** (`workspace_is_volume: false`): stop/start preserves it, recycle
+or destroy wipes ~390 GB of corpus, indexes and Elasticsearch. It is billed hourly.
+
 ## Further reading
 
-`docs/getting-started.md` (setup, indexing, local dev) · `docs/audio-search.md` · `docs/temporal-search.md` · `docs/clip-export.md` (per-shot clips for captioning) · `docs/shot-exclusions.md` (reviewer shot labelling) · `docs/caprl-shot-captioning.md` · `docs/agent.md` (retrieval agent) · `docs/team-deployment.md` (direct-IP deployment) · `docs/operations.md` (failure playbook). Methodology write-ups for offline decisions (audio cleaning, OCR engine choice, hybrid fusion tuning, **which vision backend the agent should judge with**, and the agent's own
+`docs/getting-started.md` (setup, indexing, local dev) · `docs/audio-search.md` · `docs/temporal-search.md` · `docs/clip-export.md` (per-shot clips for captioning) · `docs/shot-exclusions.md` (reviewer shot labelling) · `docs/caprl-shot-captioning.md` · `docs/agent.md` (retrieval agent) · `docs/checker.md` (Search tab's on-demand "Check by AI") · `docs/venue-deployment.md` (compute on a rented vast.ai instance, media on the WSL desktop, linked by an SSH tunnel) · `docs/operations.md` (failure playbook). Methodology write-ups for offline decisions (audio cleaning, OCR engine choice, hybrid fusion tuning, **which vision backend the agent should judge with**, and the agent's own
 end-to-end baseline on the official 2026 set) live under `docs/reports/` — the last is
 `docs/reports/agent-benchmark-2026-09.md`.

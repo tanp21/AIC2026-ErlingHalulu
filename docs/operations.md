@@ -11,7 +11,7 @@ Use this guide to monitor the competition server, diagnose common failures, and 
 - Each user may submit ten new searches per ten seconds; cached result-page requests do not count toward this limit.
 - Normal request bodies are limited to 16 KiB and queries to 2,000 characters. Image-search multipart bodies are limited to 8 MiB, with at most 6 MiB of image data.
 - A successful search caches up to 1,000 ranked results for the user and returns them in pages of 100 as the result view scrolls. Each user keeps only their newest snapshot, and an idle snapshot expires after ten minutes.
-- Thumbnail and frame extraction allows four global FFmpeg tasks and two per user.
+- Thumbnail and frame extraction is bounded by `AIC_THUMB_FFMPEG_SLOTS` (12 by default); the media-host split moves that whole cost onto the machine serving the media.
 - IVF, HNSW, and index comparison are owner-only and execute exclusively.
 - Audit logs contain identity, method, path, status, and latency—not query text.
 
@@ -73,15 +73,15 @@ Set `AIC_HF_HUB_DIR` to the host Hugging Face `hub` directory containing both re
 
 ### Port 8000 is already in use
 
-Stop the old Uvicorn or container process. Compose publishes HAProxy on `0.0.0.0:8000`.
+Stop the old Uvicorn or container process. Compose publishes HAProxy on `127.0.0.1:8000` — loopback only, because `tailscale serve` is the only thing that should reach it.
 
-### Direct-IP URL returns `401`
+### The tailnet URL returns `401`
 
-Confirm the username exists in `haproxy-users.cfg`, then validate both HAProxy configuration files and recreate the ingress container. A stale or incorrect password also returns `401`.
+No `X-AIC-User` reached the app. Check that `tailscale serve` is forwarding to `127.0.0.1:8000` (`tailscale serve status`) and that the request did not bypass it: HAProxy rejects anything not arriving over loopback or the Docker bridge (`acl local_proxy`).
 
-### Direct-IP URL returns `403`
+### The tailnet URL returns `403`
 
-Compare the lowercase username in `haproxy-users.cfg` with `AIC_ALLOWED_USERS` in `.env.secure`, then recreate the app and ingress containers after any change.
+The connecting account's login is not in `AIC_ALLOWED_USERS`. Compare it with the header `tailscale serve` reports (`tailscale status` on the host) — the entry must be the teammate's Tailscale account login, not their email elsewhere. There are exactly five, and the admin must be one.
 
 ### Audio mode returns `503`
 

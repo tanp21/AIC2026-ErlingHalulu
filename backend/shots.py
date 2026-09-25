@@ -89,7 +89,8 @@ def scan_media(data_dir=DATA):
     a catalogue that does not depend on `video_meta.parquet`.
     """
     catalogue = {}
-    for path in sorted(Path(data_dir).glob("*/videos/*/*.mp4")):
+    paths = sorted(Path(data_dir).glob("*/videos/*/*.mov")) + sorted(Path(data_dir).glob("*/videos/*/*.mp4"))
+    for path in paths:
         catalogue[path.stem] = {
             "video_id": path.stem,
             "group": path.parent.name,

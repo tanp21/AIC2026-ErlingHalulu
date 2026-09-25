@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import numpy as np
 
@@ -71,6 +72,32 @@ class FrameMapTests(unittest.TestCase):
         )
 
         np.testing.assert_allclose(times, [0, 0.1, 0.03])
+
+    def test_packet_pts_must_match_entire_decoded_map_before_reuse(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "V.npz"
+            np.savez_compressed(path, pts=np.array([0, 512, 1024], dtype=np.int64),
+                                time_base_num=np.int64(1), time_base_den=np.int64(12800))
+            packets = build_frame_maps.parse_packet_probe({
+                "streams": [{"time_base": "1/12800"}],
+                "packets": [{"pts": 1024}, {"pts": 0}, {"pts": 512}],
+            })
+            with patch.object(build_frame_maps, "probe_packets", return_value=packets), patch.object(build_frame_maps, "probe") as decode:
+                mapping, verified = build_frame_maps.verify_or_probe("video.mp4", path)
+                self.assertTrue(verified)
+                np.testing.assert_array_equal(mapping.pts, [0, 512, 1024])
+                decode.assert_not_called()
+
+            changed = frame_maps.FrameMap(np.array([0, 513, 1024]), 1, 12800)
+            with patch.object(build_frame_maps, "probe_packets", return_value=changed), patch.object(build_frame_maps, "probe", return_value=changed) as decode:
+                mapping, verified = build_frame_maps.verify_or_probe("video.mp4", path)
+                self.assertFalse(verified)
+                self.assertIs(mapping, changed)
+                decode.assert_called_once()
+
+    def test_packet_pts_without_frame_equivalent_falls_back_to_decode(self):
+        with self.assertRaisesRegex(ValueError, "packet PTS unavailable"):
+            build_frame_maps.parse_packet_probe({"streams": [{"time_base": "1/1000"}], "packets": [{"pts": 0}, {}]})
 
 
 if __name__ == "__main__":

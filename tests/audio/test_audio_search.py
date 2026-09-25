@@ -8,12 +8,14 @@ from backend import audio_search
 from backend.audio_search import (
     AudioHit,
     SemanticChunkConfig,
+    TopicChunkConfig,
     build_bm25_request,
     build_index_definition,
     build_knn_request,
     make_bounded_semantic_passages,
     make_passages,
     make_semantic_passages,
+    make_topic_passages,
     merge_temporal_hits,
     parse_search_response,
     reciprocal_rank_fusion,
@@ -122,6 +124,57 @@ class SemanticPassageTests(unittest.TestCase):
         passages = make_semantic_passages("L21_V001", rows, embed_cues, similarity_threshold=1.0)
 
         self.assertEqual(len(passages), 1)
+
+
+class MergeCueFragmentsSafetyValveTests(unittest.TestCase):
+    def test_unterminated_fragments_force_a_break_past_the_duration_cap(self):
+        cues = [
+            {"start": 0.0, "end": 10.0, "text": "một"},
+            {"start": 10.0, "end": 20.0, "text": "hai"},
+            {"start": 20.0, "end": 31.0, "text": "ba"},  # crosses the 30s cap here
+            {"start": 31.0, "end": 40.0, "text": "bốn"},
+        ]
+
+        sentences = audio_search._merge_cue_fragments_into_sentences(
+            cues, max_fragment_seconds=30.0
+        )
+
+        self.assertEqual(len(sentences), 2)
+        self.assertEqual(sentences[0]["text"], "một hai ba")
+        self.assertEqual(sentences[0]["end"], 31.0)
+        self.assertEqual(sentences[1]["text"], "bốn")
+
+    def test_default_cap_does_not_split_short_unterminated_runs(self):
+        cues = [
+            {"start": 0.0, "end": 5.0, "text": "một"},
+            {"start": 5.0, "end": 10.0, "text": "hai."},
+        ]
+
+        sentences = audio_search._merge_cue_fragments_into_sentences(cues)
+
+        self.assertEqual(len(sentences), 1)
+        self.assertEqual(sentences[0]["text"], "một hai.")
+
+    def test_a_video_wide_punctuation_gap_no_longer_becomes_one_sentence(self):
+        # The exact shape of L25_V049/L25_V061/L25_V034: no cue anywhere
+        # ends in terminal punctuation, so without the safety valve this
+        # collapses into a single multi-minute "sentence".
+        cues = [
+            {"start": float(i * 20), "end": float(i * 20 + 5), "text": f"từ{i}"}
+            for i in range(100)  # spans 2000s, zero terminal punctuation
+        ]
+
+        sentences = audio_search._merge_cue_fragments_into_sentences(
+            cues, max_fragment_seconds=30.0
+        )
+
+        self.assertGreater(len(sentences), 1)
+        for sentence in sentences:
+            # The cap is checked after appending the cue that crosses it, so
+            # a flushed span can run a bit past max_fragment_seconds -- by at
+            # most one cue's own length -- but never anywhere near the
+            # original 2000s span.
+            self.assertLessEqual(sentence["end"] - sentence["start"], 50.0)
 
 
 class ChangeScoreTests(unittest.TestCase):
@@ -656,6 +709,330 @@ class BoundedSemanticPassageTests(unittest.TestCase):
         _, kwargs = spy.call_args
         self.assertIsNotNone(kwargs.get("pause_boosted"))
         self.assertIsNotNone(kwargs.get("borderline_candidates"))
+
+
+class ValidateTopicBoundariesTests(unittest.TestCase):
+    def test_valid_indices_are_returned_as_a_list(self):
+        self.assertEqual(audio_search._validate_topic_boundaries([0, 2], 5), [0, 2])
+
+    def test_empty_list_is_valid(self):
+        self.assertEqual(audio_search._validate_topic_boundaries([], 5), [])
+
+    def test_non_list_input_is_rejected(self):
+        self.assertIsNone(audio_search._validate_topic_boundaries({"boundaries": [0]}, 5))
+
+    def test_out_of_range_index_is_rejected(self):
+        # window_len=5 -> max valid index is window_len - 2 = 3. 4 (=
+        # window_len - 1) is a different, tolerated case -- see below.
+        self.assertIsNone(audio_search._validate_topic_boundaries([10], 5))
+
+    def test_trailing_last_sentence_index_is_dropped_not_rejected(self):
+        # DeepSeek systematically appends the window's own last sentence
+        # index as if it were itself a valid boundary -- common enough
+        # (~12% of windows on a real corpus run) that the whole response
+        # must not be discarded over just that one value.
+        self.assertEqual(audio_search._validate_topic_boundaries([1, 3, 4], 5), [1, 3])
+
+    def test_only_the_last_sentence_index_returns_an_empty_list(self):
+        self.assertEqual(audio_search._validate_topic_boundaries([4], 5), [])
+
+    def test_last_sentence_index_dropped_still_enforces_the_rest(self):
+        # Even after dropping window_len - 1, whatever remains is still
+        # validated normally -- this is not a blanket amnesty.
+        self.assertIsNone(audio_search._validate_topic_boundaries([4, 10], 5))
+        self.assertIsNone(audio_search._validate_topic_boundaries([3, 3, 4], 5))
+
+    def test_non_increasing_indices_are_rejected(self):
+        self.assertIsNone(audio_search._validate_topic_boundaries([2, 1], 5))
+
+    def test_duplicate_indices_are_rejected(self):
+        self.assertIsNone(audio_search._validate_topic_boundaries([1, 1], 5))
+
+    def test_non_integer_values_are_rejected(self):
+        self.assertIsNone(audio_search._validate_topic_boundaries([1.5], 5))
+        self.assertIsNone(audio_search._validate_topic_boundaries([True], 5))
+
+
+class TopicStitchBoundaryTests(unittest.TestCase):
+    def test_single_window_video_calls_llm_once_and_trusts_everything(self):
+        sentences = [{"text": f"s{i}"} for i in range(5)]
+        calls = []
+
+        def llm_segment_fn(texts):
+            calls.append(texts)
+            return [1, 3]
+
+        boundaries = audio_search._stitch_topic_boundaries(
+            sentences, llm_segment_fn, sentences_per_batch=10, batch_overlap_sentences=2,
+        )
+
+        self.assertEqual(boundaries, {1, 3})
+        self.assertEqual(len(calls), 1)
+
+    def test_multi_window_only_trusts_core_region_boundaries(self):
+        # 10 sentences, batch=6, overlap=2 -> windows [0:6] and [4:10],
+        # half_edge=1. Window [0:6] is trusted for global 0-4 (is_first, so
+        # core_lo=0; core_hi=6-1=5); window [4:10] is trusted for global
+        # 5-9 (is_last, so core_hi=10; core_lo=4+1=5) -- together an exact
+        # partition with no gap or double-count.
+        sentences = [{"text": f"s{i}"} for i in range(10)]
+        responses = {
+            tuple(f"s{i}" for i in range(0, 6)): [4],
+            tuple(f"s{i}" for i in range(4, 10)): [0, 1],
+        }
+        calls = []
+
+        def llm_segment_fn(texts):
+            calls.append(tuple(texts))
+            return responses[tuple(texts)]
+
+        boundaries = audio_search._stitch_topic_boundaries(
+            sentences, llm_segment_fn, sentences_per_batch=6, batch_overlap_sentences=2,
+        )
+
+        # global 4 comes from window0 (in its core); window1's local index 0
+        # (global 4) falls in window1's *edge*, not its core, and is dropped
+        # there -- but it is still recovered because window0's core covers
+        # it. window1's local index 1 (global 5) is in window1's core.
+        self.assertEqual(boundaries, {4, 5})
+        self.assertEqual(len(calls), 2)
+
+    def test_malformed_batch_output_is_dropped_not_raised(self):
+        sentences = [{"text": f"s{i}"} for i in range(5)]
+
+        def llm_segment_fn(texts):
+            return [3, 1]  # not strictly increasing
+
+        boundaries = audio_search._stitch_topic_boundaries(
+            sentences, llm_segment_fn, sentences_per_batch=10, batch_overlap_sentences=2,
+        )
+
+        self.assertEqual(boundaries, set())
+
+    def test_a_failing_batch_call_does_not_stop_the_video(self):
+        sentences = [{"text": f"s{i}"} for i in range(5)]
+
+        def llm_segment_fn(texts):
+            raise RuntimeError("boom")
+
+        boundaries = audio_search._stitch_topic_boundaries(
+            sentences, llm_segment_fn, sentences_per_batch=10, batch_overlap_sentences=2,
+        )
+
+        self.assertEqual(boundaries, set())
+
+    def test_fewer_than_two_sentences_never_calls_llm(self):
+        def llm_segment_fn(texts):
+            raise AssertionError("must not be called")
+
+        self.assertEqual(
+            audio_search._stitch_topic_boundaries(
+                [{"text": "only"}], llm_segment_fn,
+                sentences_per_batch=10, batch_overlap_sentences=2,
+            ),
+            set(),
+        )
+
+
+class SplitOversizedTopicSegmentTests(unittest.TestCase):
+    def test_single_sentence_segment_is_returned_unsplit(self):
+        sentences = [{"start": 0.0, "end": 100.0, "text": "only"}]
+
+        pieces = audio_search._split_oversized_topic_segment(
+            sentences, TopicChunkConfig(max_duration_seconds=40), embed_cues=None,
+        )
+
+        self.assertEqual(pieces, [sentences])
+
+    def test_even_split_fallback_without_embed_cues_respects_max_duration(self):
+        sentences = [
+            {"start": float(i * 10), "end": float(i * 10 + 10), "text": f"s{i}"}
+            for i in range(8)  # 80s total
+        ]
+        config = TopicChunkConfig(max_duration_seconds=30)
+
+        pieces = audio_search._split_oversized_topic_segment(sentences, config, embed_cues=None)
+
+        for piece in pieces:
+            self.assertLessEqual(piece[-1]["end"] - piece[0]["start"], 30)
+        # order and coverage preserved -- nothing dropped or duplicated.
+        self.assertEqual([s for piece in pieces for s in piece], sentences)
+
+    def test_embedding_fallback_delegates_to_the_existing_bounded_assembler(self):
+        sentences = [{"start": float(i), "end": float(i + 1), "text": f"s{i}"} for i in range(6)]
+        config = TopicChunkConfig(max_duration_seconds=40)
+
+        def embed_cues(texts):
+            return [[1.0, 0.0]] * len(texts)
+
+        with patch.object(
+            audio_search, "_assemble_bounded_chunks", wraps=audio_search._assemble_bounded_chunks,
+        ) as spy:
+            audio_search._split_oversized_topic_segment(sentences, config, embed_cues)
+
+        spy.assert_called_once()
+        args, _kwargs = spy.call_args
+        self.assertEqual(args[0], sentences)
+        self.assertEqual(args[3].max_duration_seconds, 40)
+
+
+class MergeUndersizedTopicSegmentsTests(unittest.TestCase):
+    def test_middle_undersized_segment_merges_into_shorter_neighbor(self):
+        groups = [
+            [{"start": 0.0, "end": 20.0, "text": "a"}],   # 20s
+            [{"start": 20.0, "end": 22.0, "text": "b"}],  # 2s, undersized
+            [{"start": 22.0, "end": 37.0, "text": "c"}],  # 15s -- shorter than "a" but not undersized itself
+        ]
+
+        merged = audio_search._merge_undersized_topic_segments(groups, min_duration_seconds=10)
+
+        self.assertEqual(len(merged), 2)
+        self.assertEqual([s["text"] for s in merged[1]], ["b", "c"])
+
+    def test_first_segment_merges_into_its_only_neighbor(self):
+        groups = [
+            [{"start": 0.0, "end": 2.0, "text": "a"}],
+            [{"start": 2.0, "end": 20.0, "text": "b"}],
+        ]
+
+        merged = audio_search._merge_undersized_topic_segments(groups, min_duration_seconds=10)
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual([s["text"] for s in merged[0]], ["a", "b"])
+
+    def test_last_segment_merges_into_its_only_neighbor(self):
+        groups = [
+            [{"start": 0.0, "end": 20.0, "text": "a"}],
+            [{"start": 20.0, "end": 22.0, "text": "b"}],
+        ]
+
+        merged = audio_search._merge_undersized_topic_segments(groups, min_duration_seconds=10)
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual([s["text"] for s in merged[0]], ["a", "b"])
+
+    def test_no_undersized_segments_leaves_groups_unchanged(self):
+        groups = [
+            [{"start": 0.0, "end": 20.0, "text": "a"}],
+            [{"start": 20.0, "end": 40.0, "text": "b"}],
+        ]
+
+        merged = audio_search._merge_undersized_topic_segments(groups, min_duration_seconds=10)
+
+        self.assertEqual(merged, groups)
+
+    def test_single_group_is_returned_unchanged_even_if_undersized(self):
+        groups = [[{"start": 0.0, "end": 1.0, "text": "a"}]]
+
+        merged = audio_search._merge_undersized_topic_segments(groups, min_duration_seconds=10)
+
+        self.assertEqual(merged, groups)
+
+
+class TopicPassagesEndToEndTests(unittest.TestCase):
+    def test_empty_rows_produce_no_passages(self):
+        self.assertEqual(make_topic_passages("L21_V001", [], lambda texts: []), [])
+
+    def test_single_sentence_transcript_never_calls_llm_segment_fn(self):
+        rows = [{"offset": 0.0, "token": " một câu duy nhất."}]
+
+        def llm_segment_fn(texts):
+            raise AssertionError("llm_segment_fn should not be called for a single sentence")
+
+        passages = make_topic_passages("L21_V001", rows, llm_segment_fn)
+
+        self.assertEqual(len(passages), 1)
+        self.assertEqual(passages[0].text, "một câu duy nhất.")
+
+    def test_llm_boundaries_become_separate_passages_with_no_overlap_by_default(self):
+        rows = [
+            {"offset": 0.0, "token": " một."},
+            {"offset": 10.0, "token": " hai."},
+            {"offset": 20.0, "token": " ba."},
+        ]
+
+        def llm_segment_fn(texts):
+            self.assertEqual(texts, ["một.", "hai.", "ba."])
+            return [0]  # topics: [một.] | [hai. ba.]
+
+        # min_duration_seconds=1 keeps the undersized-merge machinery (its
+        # own dedicated tests live in MergeUndersizedTopicSegmentsTests) out
+        # of this test -- these sentences are only ~2s apart.
+        passages = make_topic_passages(
+            "L21_V001", rows, llm_segment_fn, config=TopicChunkConfig(min_duration_seconds=1)
+        )
+
+        self.assertEqual(len(passages), 2)
+        self.assertEqual(passages[0].text, "một.")
+        self.assertEqual(passages[1].text, "hai. ba.")
+
+    def test_overlap_sentences_duplicates_the_boundary_sentence(self):
+        rows = [
+            {"offset": 0.0, "token": " một."},
+            {"offset": 10.0, "token": " hai."},
+            {"offset": 20.0, "token": " ba."},
+        ]
+
+        def llm_segment_fn(texts):
+            return [0]
+
+        passages = make_topic_passages(
+            "L21_V001", rows, llm_segment_fn,
+            config=TopicChunkConfig(overlap_sentences=1, min_duration_seconds=1),
+        )
+
+        self.assertEqual(len(passages), 2)
+        self.assertEqual(passages[0].text, "một.")
+        self.assertEqual(passages[1].text, "một. hai. ba.")
+
+    def test_malformed_llm_output_degrades_to_a_single_passage(self):
+        rows = [
+            {"offset": 0.0, "token": " một."},
+            {"offset": 10.0, "token": " hai."},
+            {"offset": 20.0, "token": " ba."},
+        ]
+
+        def llm_segment_fn(texts):
+            return [5]  # out of range for a 3-sentence window -> rejected
+
+        passages = make_topic_passages("L21_V001", rows, llm_segment_fn)
+
+        self.assertEqual(len(passages), 1)
+        self.assertEqual(passages[0].text, "một. hai. ba.")
+
+    def test_oversized_topic_is_split_by_max_duration(self):
+        rows = [{"offset": float(i * 10), "token": f" s{i}."} for i in range(10)]
+
+        def llm_segment_fn(texts):
+            return []  # one continuous topic, per the LLM
+
+        config = TopicChunkConfig(max_duration_seconds=30, min_duration_seconds=1)
+        passages = make_topic_passages("L21_V001", rows, llm_segment_fn, config=config)
+
+        self.assertGreater(len(passages), 1)
+        for passage in passages:
+            self.assertLessEqual(passage.end_sec - passage.start_sec, 30)
+
+
+class TopicChunkConfigJsonTests(unittest.TestCase):
+    def test_config_json_round_trip(self):
+        config = TopicChunkConfig(
+            sentences_per_batch=40, batch_overlap_sentences=5,
+            min_duration_seconds=12.0, target_duration_seconds=35.0,
+            max_duration_seconds=60.0, overlap_sentences=1,
+            fallback_context_window_sentences=2, fallback_breakpoint_percentile=20.0,
+        )
+
+        self.assertEqual(TopicChunkConfig.from_json(config.to_json()), config)
+
+    def test_from_json_fills_missing_keys_with_defaults(self):
+        self.assertEqual(TopicChunkConfig.from_json({}), TopicChunkConfig())
+
+    def test_overlap_sentences_defaults_to_zero_unlike_semantic_duration(self):
+        # Confirmed decision: a genuine topic/story cut should be clean --
+        # overlap is what let a duplicated sentence anchor a merged hit on
+        # the wrong passage in the case that motivated this strategy.
+        self.assertEqual(TopicChunkConfig().overlap_sentences, 0)
 
 
 class FusionTests(unittest.TestCase):

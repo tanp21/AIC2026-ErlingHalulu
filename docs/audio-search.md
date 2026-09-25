@@ -128,39 +128,53 @@ instead of "Martin Laas"), which matters for keyword search even though it's
 otherwise a subtitle-quality change. Local `uv run uvicorn` still needs the
 export above to match.
 
-Only **capitalisation and punctuation restoration** is enabled. It does not
-improve recall either, but it takes subtitle cues from 0% to 50–74% ending at a
-real sentence boundary. Boilerplate removal, confidence filtering, and number
-normalisation are built and tested but **off**: each moves gold-video recall by
-at most one query out of 48, in both directions. Full numbers in
-`docs/reports/audio-transcript-cleaning.md`.
+Only **capitalisation and punctuation restoration** is enabled, via the
+Gemini API (`scripts/audio/gemini_clean.py`) — it does not improve recall
+either, but it takes subtitle cues from 0% to 50–74% ending at a real
+sentence boundary. An earlier local-model restorer (`dragonSwing/xlm-roberta-capu`)
+and a set of deterministic transforms (boilerplate removal, confidence
+filtering, number normalisation) were retired: each moved gold-video recall
+by at most one query out of 48, in both directions, and are no longer in the
+codebase. Full numbers in `docs/reports/audio-transcript-cleaning.md`
+(historical — describes the retired local-model pipeline).
 
-Restoration and embedding must run as **separate processes** — together they
-were OOM-killed on a machine with ~7 GB free.
+**Cleaning repairs; it never removes.** The corpus's definition is narrow —
+fix what the recogniser got wrong (spelling, tone marks, obvious mishearings),
+add punctuation and capitalisation, change nothing else. Gemini does not
+reliably obey that on its own: told only not to remove content, it went on
+deleting university ad reads, song lyrics and repeated formulas, and folding
+spoken formulas into notation. So the instruction now lists each of those
+explicitly as forbidden, and two guards back it up in
+`scripts/audio/gemini_clean.py`: a response is rejected (the raw words are kept
+and the chunk retried on the next run) if it comes back cut short, or if it
+drops more than `MAX_DELETED_PER_1000_WORDS` words per 1000. A chunk-level
+length check alone was not enough — a long video can lose a 668-word stretch
+and still come back at 98.6% overall. The prompt is part of the cache key, so
+editing it invalidates every cached response rather than silently replaying
+answers produced under the old wording.
 
 ```bash
-# What each transform does to recall. Pure Python, no Elasticsearch, no GPU.
-UV_CACHE_DIR=/tmp/aic_uv_cache uv run python -m scripts.benchmarks.bench_audio_search --sweep
+export GEMINI_API_KEY=...
 
-# Pick between the restoration models. Needs network the first time.
-UV_CACHE_DIR=/tmp/aic_uv_cache uv run python -m scripts.benchmarks.bench_audio_capu --write-config
-
-# Apply whatever benchmarks/audio/audio_config.json selected (~15 min on an RTX 3060).
+# Apply benchmarks/audio/audio_config.json's gemini_model (or pass --gemini-model
+# directly). Resumable: a killed run only re-pays for chunks without a cached
+# response (data/2026/audio/.gemini_cache/).
 UV_CACHE_DIR=/tmp/aic_uv_cache uv run python -m scripts.audio.build_clean_transcripts
 
 # Capitalisation and punctuation are invisible to BM25 — both this bench and
 # Elasticsearch's standard analyser lowercase and drop punctuation — so they can
 # only be measured against the embeddings. Compare the two parquets in a fresh
-# process so the restoration model is not resident alongside Qwen.
+# process so the corpus embedder is not resident alongside anything else.
 UV_CACHE_DIR=/tmp/aic_uv_cache uv run python -m scripts.benchmarks.bench_audio_search --dense \
   --transcripts data/2026/audio/step_data_clean.parquet \
   --baseline-transcripts data/2026/audio/step_data.parquet
 ```
 
-The restoration models are from 2022 and need `trust_remote_code`, a one-time
-download, and three compatibility shims (documented in `scripts/audio/capu.py`).
-Run all of this on the dev machine: the container is read-only with
-`HF_HUB_OFFLINE=1`.
+Restoration needs network access and a `GEMINI_API_KEY`; every other step is
+pure Python. Run this on the dev machine: the container is read-only and
+offline (`HF_HUB_OFFLINE=1`), and `GEMINI_API_KEY` is a dev-machine-only
+secret that is never part of `.env.secure` or read by anything under the
+Docker image.
 
 ## Build the transcript index
 

@@ -3,6 +3,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { fetchKeyframeContext } from "./api";
 import { captionsAround, loadVideoEvidence, ocrAround, speechAround } from "./agentEvidence";
 import type { VideoEvidence } from "./agentEvidence";
+import { Lit, STATUS_MARK } from "./checkView";
 import { highlight } from "./highlight";
 import { formatTimestamp } from "./results";
 import { VideoDialog } from "./videoDialog";
@@ -14,7 +15,6 @@ import type {
 const CHANNEL_LABELS: Record<string, string> = {
   visual: "V", similar: "S", audio: "A", ocr: "O", ocr_exact: "O", caption: "C", temporal: "T",
 };
-const STATUS_MARK: Record<AgentCheckStatus, string> = { supported: "✓", partial: "~", contradicted: "✗", not_mentioned: "·" };
 const STAGE_LABELS: Record<string, string> = {
   planning: "Planning the searches", searching: "Searching", rewriting: "Rewriting the searches",
   awaiting_review: "Waiting for your review", finalizing: "Finishing", done: "Done",
@@ -51,13 +51,6 @@ function conflictCount(summary: AgentSummary | null | undefined): number {
 /** How many more they say in part: right subject, but a count, a kind or an action is missing. */
 function partialCount(summary: AgentSummary | null | undefined): number {
   return summary ? new Set(summary.checks.filter((check) => check.status === "partial").map((check) => check.detail)).size : 0;
-}
-
-function Lit({ text, keywords }: { text: string; keywords: string[] }) {
-  const { segments } = useMemo(() => highlight(text, keywords), [text, keywords]);
-  return <>{segments.map((segment, index) => segment.hit
-    ? <mark key={index} className={`hit-${segment.hit}`}>{segment.text}</mark>
-    : <Fragment key={index}>{segment.text}</Fragment>)}</>;
 }
 
 /**
@@ -211,6 +204,7 @@ export function AgentReviewWorkspace({ run, onReview }: {
         <div className="review-brief-head">
           <span aria-live="polite">
             <b>{stage}</b> · {Math.round(progress?.elapsed ?? run.elapsed)}s
+            {" · "}<span className="agent-judge">judged by you (human review)</span>
             {progress?.total_candidates !== undefined && <> · {progress.total_candidates} candidates found, {candidates.length} shown</>}
             {progress?.summarizing && <> · <em>reading the words around each candidate…</em></>}
             {(review.pending_commands ?? 0) > 0 && <> · <em>{review.pending_commands} search request queued</em></>}

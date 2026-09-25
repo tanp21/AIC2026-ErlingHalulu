@@ -16,7 +16,14 @@ from . import search_core
 
 
 AUDIO_INDEX = os.environ.get("AIC_AUDIO_INDEX", "aic_audio_v1")
-EMBEDDING_DIM = 2560
+#: **Must equal the width of MODEL_NAME's output**, because it becomes the
+#: ``dims`` of the Elasticsearch ``dense_vector`` mapping (line 182). It was
+#: left at 2560 -- Qwen3-Embedding-*4B*'s width, from before the corpus was
+#: moved to 0.6B -- and the mismatch is not caught anywhere: ES rejects every
+#: document whose vector is narrower than the field, so a build fails with
+#: "N document(s) failed to index" only after embedding the whole corpus.
+#: 0.6B emits 1024.
+EMBEDDING_DIM = 1024
 QUERY_INSTRUCTION = (
     "Given a Vietnamese or English description, retrieve the video transcript "
     "passage that best matches the described spoken content."
@@ -278,7 +285,9 @@ def make_passages(
     return passages
 
 
-def _merge_cue_fragments_into_sentences(cues: list[dict]) -> list[dict]:
+def _merge_cue_fragments_into_sentences(
+    cues: list[dict], *, max_fragment_seconds: float = 30.0
+) -> list[dict]:
     """Rejoin ``build_transcript_cues``' fragments into whole sentences.
 
     Cues split on an 8-second gap or a 160-character cap whether or not that
@@ -287,12 +296,29 @@ def _merge_cue_fragments_into_sentences(cues: list[dict]) -> list[dict]:
     like ``"Nam."`` embeds nothing like the sentence it was cut from. A
     fragment that doesn't end in sentence punctuation is joined onto the
     next one until one does, or the cues run out.
+
+    ``max_fragment_seconds`` is a safety valve, not the normal path: a
+    cleaned transcript occasionally has no terminal punctuation at all for
+    a long stretch — a punctuation-restoration gap, confirmed on
+    L25_V049/L25_V061/L25_V034, each producing a single "sentence" spanning
+    23–31 minutes with no ``.!?…`` anywhere inside it. Left unbounded, that
+    one "sentence" swallows the whole stretch, and every downstream
+    consumer that special-cases "fewer than two sentences"
+    (``_stitch_topic_boundaries``, the semantic chunkers' single-sentence
+    fast path) never gets a chance to split it — there is nothing to split.
+    Past this duration with no terminal punctuation yet, the buffer is
+    flushed anyway. An approximate boundary, not a grammatical one, but
+    bounded is strictly better than unbounded for chunking purposes — the
+    same reasoning as ``build_audio_index.py``'s ``CUE_MAX_TOKENS`` guard
+    downstream, applied here at the source instead of after the fact.
     """
     sentences: list[dict] = []
     buffer: list[dict] = []
     for cue in cues:
         buffer.append(cue)
-        if cue["text"].rstrip().endswith((".", "!", "?", "…")):
+        ends_sentence = cue["text"].rstrip().endswith((".", "!", "?", "…"))
+        overran = cue["end"] - buffer[0]["start"] >= max_fragment_seconds
+        if ends_sentence or overran:
             sentences.append({
                 "start": buffer[0]["start"],
                 "end": buffer[-1]["end"],
@@ -793,6 +819,371 @@ def make_bounded_semantic_passages(
         sentences, scores, candidates, config, pause_boosted=pause_boosted,
         borderline_candidates=borderline_candidates, debug=debug
     )
+    return [_sentences_to_passage(video_id, group) for group in groups]
+
+
+#: Given one batch's ordered sentence texts, return sentence indices where a
+#: topic *ends* -- i.e. "boundary index = last sentence of the previous
+#: segment", matching ``_breakpoint_candidates``'s own boundary convention so
+#: this module never has to translate between two off-by-one conventions.
+#: The callback is never asked for and must never invent timestamps -- only
+#: sentence-index boundaries; ``start_sec``/``end_sec`` always come from the
+#: sentences' own already-known offsets. Injected the same way ``embed_cues``
+#: is for the two existing semantic chunkers, so this module never imports an
+#: LLM client.
+LlmSegmentFn = Callable[[list[str]], list[int]]
+
+
+@dataclass(frozen=True)
+class TopicChunkConfig:
+    """Hyperparameters for :func:`make_topic_passages`.
+
+    An LLM decides *where* a topic/story ends (see :data:`LlmSegmentFn`);
+    everything else here bounds how that decision becomes passages, so a
+    single very long story still yields Qwen3-Embedding-sized chunks (not
+    diluted the way an over-duration passage is), and a stray one-sentence
+    aside never becomes its own tiny passage.
+
+    ``sentences_per_batch``/``batch_overlap_sentences`` control how a
+    video's sentence stream is windowed before each window is handed to the
+    LLM (see ``_stitch_topic_boundaries``) -- a whole transcript is never
+    sent in one call. ``target_duration_seconds`` is not read by the LLM
+    decision itself; it only shapes the ``SemanticChunkConfig`` that
+    ``_split_oversized_topic_segment``'s embedding-based fallback builds when
+    an LLM-identified topic still needs splitting.
+
+    ``overlap_sentences`` defaults to 0, unlike ``SemanticChunkConfig``'s 1:
+    a genuine topic/story boundary is meant to be a clean cut, and overlap
+    between passages is exactly what let a duplicated carry-over sentence
+    anchor a merged hit on the wrong, unrelated passage in the case that
+    motivated this strategy (see docs/audio-search.md).
+    """
+
+    sentences_per_batch: int = 60
+    batch_overlap_sentences: int = 10
+    min_duration_seconds: float = 10.0
+    target_duration_seconds: float = 40.0
+    max_duration_seconds: float = 75.0
+    overlap_sentences: int = 0
+    fallback_context_window_sentences: int = 3
+    fallback_breakpoint_percentile: float = 15.0
+
+    def to_json(self) -> dict:
+        return {
+            "sentences_per_batch": self.sentences_per_batch,
+            "batch_overlap_sentences": self.batch_overlap_sentences,
+            "min_duration_seconds": self.min_duration_seconds,
+            "target_duration_seconds": self.target_duration_seconds,
+            "max_duration_seconds": self.max_duration_seconds,
+            "overlap_sentences": self.overlap_sentences,
+            "fallback_context_window_sentences": self.fallback_context_window_sentences,
+            "fallback_breakpoint_percentile": self.fallback_breakpoint_percentile,
+        }
+
+    @classmethod
+    def from_json(cls, data: dict) -> "TopicChunkConfig":
+        defaults = cls()
+        return cls(
+            sentences_per_batch=data.get("sentences_per_batch", defaults.sentences_per_batch),
+            batch_overlap_sentences=data.get(
+                "batch_overlap_sentences", defaults.batch_overlap_sentences
+            ),
+            min_duration_seconds=data.get(
+                "min_duration_seconds", defaults.min_duration_seconds
+            ),
+            target_duration_seconds=data.get(
+                "target_duration_seconds", defaults.target_duration_seconds
+            ),
+            max_duration_seconds=data.get(
+                "max_duration_seconds", defaults.max_duration_seconds
+            ),
+            overlap_sentences=data.get("overlap_sentences", defaults.overlap_sentences),
+            fallback_context_window_sentences=data.get(
+                "fallback_context_window_sentences",
+                defaults.fallback_context_window_sentences,
+            ),
+            fallback_breakpoint_percentile=data.get(
+                "fallback_breakpoint_percentile", defaults.fallback_breakpoint_percentile
+            ),
+        )
+
+
+def _validate_topic_boundaries(raw, window_len: int) -> list[int] | None:
+    """Sanity-check one window's proposed boundaries, or ``None`` if unusable.
+
+    ``raw`` must be a list of integers, strictly increasing (no duplicates),
+    each within ``[0, window_len - 2]`` -- a boundary can never be a window's
+    last sentence, since nothing would be left to start a new topic there.
+
+    An index equal to ``window_len - 1`` (the window's own last sentence) is
+    the one exception: it is *dropped*, not treated as fatal. Measured on a
+    real corpus run, DeepSeek appends exactly this value systematically --
+    it never appeared anywhere but as a harmless, systematic misreading of
+    "the last sentence can end a topic" as "the last sentence is itself a
+    boundary" -- and it showed up on ~12% of windows. Discarding the whole
+    response over just that one value threw away every genuine boundary
+    alongside it. Anything else invalid (out of range beyond that, not an
+    integer, not strictly increasing once that value is removed) still means
+    the model's response for this window cannot be trusted, and the caller
+    drops it rather than guessing what was meant.
+    """
+    if not isinstance(raw, list):
+        return None
+    indices = []
+    for item in raw:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            return None
+        value = int(item)
+        if value != item:
+            return None
+        indices.append(value)
+    indices = [index for index in indices if index != window_len - 1]
+    if any(index < 0 or index > window_len - 2 for index in indices):
+        return None
+    if indices != sorted(set(indices)):
+        return None
+    return indices
+
+
+def _stitch_topic_boundaries(
+    sentences: list[dict], llm_segment_fn: LlmSegmentFn, *,
+    sentences_per_batch: int, batch_overlap_sentences: int,
+) -> set[int]:
+    """Global topic-boundary sentence indices, from windowed LLM calls.
+
+    Slides a window of ``sentences_per_batch`` sentences over the whole
+    video, stepping by ``sentences_per_batch - batch_overlap_sentences``,
+    calling ``llm_segment_fn`` once per window with just that window's
+    texts. Each returned index is translated from batch-local to global.
+
+    Only a window's *core* region is trusted: the outer
+    ``batch_overlap_sentences // 2`` sentences on each edge are left for a
+    neighbouring window (which has fuller context there) to decide, except
+    at the video's very first/last window, whose outer edge has no
+    neighbour to defer to and is trusted outright. This is what keeps
+    "edge of window" artifacts out while still having every sentence
+    decided by at least one window with full context on both sides.
+
+    A single-window video (fewer sentences than ``sentences_per_batch``)
+    degrades to exactly one call, trusted in full, no special-casing needed.
+    """
+    n = len(sentences)
+    if n < 2:
+        return set()
+    batch = max(2, sentences_per_batch)
+    if n <= batch:
+        windows = [(0, n)]
+    else:
+        overlap = max(0, min(batch_overlap_sentences, batch - 1))
+        step = max(1, batch - overlap)
+        starts = list(range(0, n - batch, step))
+        starts.append(n - batch)
+        seen: set[int] = set()
+        windows = []
+        for start in starts:
+            if start in seen:
+                continue
+            seen.add(start)
+            windows.append((start, start + batch))
+    half_edge = batch_overlap_sentences // 2
+
+    boundaries: set[int] = set()
+    for window_index, (start, end) in enumerate(windows):
+        window = sentences[start:end]
+        if len(window) < 2:
+            continue
+        is_first = window_index == 0
+        is_last = window_index == len(windows) - 1
+        core_lo = start if is_first else start + half_edge
+        core_hi = end if is_last else end - half_edge
+        try:
+            raw = llm_segment_fn([sentence["text"] for sentence in window])
+        except Exception as exc:  # a bad call must not stop the whole video
+            logger.warning(
+                "topic segmenter call failed for sentences [%d:%d]: %s", start, end, exc
+            )
+            continue
+        indices = _validate_topic_boundaries(raw, len(window))
+        if indices is None:
+            if raw:
+                logger.warning(
+                    "topic segmenter returned malformed boundaries %r for a "
+                    "%d-sentence window; dropping this window's boundaries",
+                    raw, len(window),
+                )
+            continue
+        for local_index in indices:
+            global_index = start + local_index
+            if core_lo <= global_index < core_hi:
+                boundaries.add(global_index)
+    boundaries.discard(n - 1)  # the video's last sentence is never a boundary
+    return boundaries
+
+
+def _split_oversized_topic_segment(
+    sentences: list[dict], config: TopicChunkConfig,
+    embed_cues: Callable[[list[str]], Sequence[Sequence[float]]] | None,
+) -> list[list[dict]]:
+    """Split one LLM-identified topic segment longer than
+    ``config.max_duration_seconds`` -- the guard against a single continuous
+    story becoming one overlong passage, which dilutes Qwen3-Embedding's
+    centroid the same way merging unrelated topics does.
+
+    With ``embed_cues`` supplied, this is a thin wrapper around the
+    *existing* embedding-based bounded splitter
+    (``_change_scores``/``_breakpoint_candidates``/``_assemble_bounded_chunks``),
+    restricted to just this segment's own sentences -- no new algorithm, and
+    the fallback still respects local semantic structure. Without
+    ``embed_cues``, falls back to a blunt even split by sentence count into
+    ``ceil(duration / max_duration_seconds)`` pieces.
+    """
+    if len(sentences) == 1:
+        return [sentences]
+    if embed_cues is not None:
+        fallback_config = SemanticChunkConfig(
+            context_window_sentences=config.fallback_context_window_sentences,
+            breakpoint_percentile=config.fallback_breakpoint_percentile,
+            min_duration_seconds=config.min_duration_seconds,
+            target_duration_seconds=config.target_duration_seconds,
+            max_duration_seconds=config.max_duration_seconds,
+            overlap_sentences=0,
+        )
+        vectors = embed_cues([sentence["text"] for sentence in sentences])
+        scores = _change_scores(vectors, fallback_config.context_window_sentences)
+        candidates = _breakpoint_candidates(
+            scores,
+            percentile=fallback_config.breakpoint_percentile,
+            min_scores=fallback_config.min_scores_for_percentile,
+        )
+        return _assemble_bounded_chunks(sentences, scores, candidates, fallback_config)
+    duration = sentences[-1]["end"] - sentences[0]["start"]
+    pieces = max(1, math.ceil(duration / config.max_duration_seconds))
+    per_piece = math.ceil(len(sentences) / pieces)
+    return [sentences[i:i + per_piece] for i in range(0, len(sentences), per_piece)]
+
+
+def _merge_undersized_topic_segments(
+    groups: list[list[dict]], min_duration_seconds: float
+) -> list[list[dict]]:
+    """Fold any segment shorter than ``min_duration_seconds`` into whichever
+    adjacent segment is shorter, so a stray one-sentence aside never stands
+    alone as its own passage.
+
+    Unlike ``_assemble_bounded_chunks``'s own trailing-tail merge (which only
+    special-cases the *last* chunk), this handles an undersized segment
+    anywhere in the list -- including one wedged between two full-length
+    topics, which duration-bounded chunking never has to deal with but
+    LLM-identified topic segments can produce (a one-sentence aside is a
+    legitimate "topic" of its own to the LLM).
+    """
+    def duration(group: list[dict]) -> float:
+        return group[-1]["end"] - group[0]["start"]
+
+    groups = [list(group) for group in groups]
+    while len(groups) > 1:
+        undersized = next(
+            (index for index, group in enumerate(groups)
+             if duration(group) < min_duration_seconds),
+            None,
+        )
+        if undersized is None:
+            break
+        if undersized == 0:
+            target = 1
+        elif undersized == len(groups) - 1:
+            target = undersized - 1
+        elif duration(groups[undersized - 1]) <= duration(groups[undersized + 1]):
+            target = undersized - 1
+        else:
+            target = undersized + 1
+        if target < undersized:
+            groups[target] = groups[target] + groups[undersized]
+        else:
+            groups[target] = groups[undersized] + groups[target]
+        del groups[undersized]
+    return groups
+
+
+def make_topic_passages(
+    video_id: str,
+    rows: Sequence[dict],
+    llm_segment_fn: LlmSegmentFn,
+    *,
+    embed_cues: Callable[[list[str]], Sequence[Sequence[float]]] | None = None,
+    config: TopicChunkConfig | None = None,
+    debug: list[dict] | None = None,
+) -> list[Passage]:
+    """Topic/story-based chunking: an LLM (injected as ``llm_segment_fn``,
+    never imported here -- see this module's existing ``embed_cues`` seam)
+    picks sentence-index boundaries; everything else is deterministic.
+    ``start_sec``/``end_sec`` always come from the sentences' own offsets,
+    never from the LLM, exactly like every other chunker in this module.
+
+    Order of operations: stitch LLM boundaries across the whole video
+    (``_stitch_topic_boundaries``) -> cut into raw topic segments -> split
+    any segment longer than ``config.max_duration_seconds``
+    (``_split_oversized_topic_segment``) -> merge any segment shorter than
+    ``config.min_duration_seconds`` into a neighbour
+    (``_merge_undersized_topic_segments``) -> apply
+    ``config.overlap_sentences`` between the final segments -> emit via the
+    existing :func:`_sentences_to_passage`.
+
+    ``debug``, if given a list, gets one dict appended per emitted passage
+    (``{"reason": "topic_segment", "duration": float}``) -- benchmark
+    instrumentation only, mirroring ``make_bounded_semantic_passages``'s own
+    ``debug`` convention; production callers never pass it.
+    """
+    config = config or TopicChunkConfig()
+    sentences = _merge_cue_fragments_into_sentences(build_transcript_cues(rows))
+    if not sentences:
+        return []
+    if len(sentences) == 1:
+        if debug is not None:
+            debug.append({
+                "reason": "topic_segment",
+                "duration": sentences[0]["end"] - sentences[0]["start"],
+            })
+        return [_sentences_to_passage(video_id, sentences)]
+
+    boundaries = _stitch_topic_boundaries(
+        sentences, llm_segment_fn,
+        sentences_per_batch=config.sentences_per_batch,
+        batch_overlap_sentences=config.batch_overlap_sentences,
+    )
+    raw_groups: list[list[dict]] = []
+    start = 0
+    for boundary in sorted(boundaries):
+        raw_groups.append(sentences[start:boundary + 1])
+        start = boundary + 1
+    raw_groups.append(sentences[start:])
+
+    groups: list[list[dict]] = []
+    for group in raw_groups:
+        span = group[-1]["end"] - group[0]["start"]
+        if span > config.max_duration_seconds:
+            groups.extend(_split_oversized_topic_segment(group, config, embed_cues))
+        else:
+            groups.append(group)
+
+    groups = _merge_undersized_topic_segments(groups, config.min_duration_seconds)
+
+    if config.overlap_sentences > 0:
+        overlapped: list[list[dict]] = []
+        for index, group in enumerate(groups):
+            if index == 0:
+                overlapped.append(list(group))
+                continue
+            carry = groups[index - 1][-config.overlap_sentences:]
+            overlapped.append(carry + list(group))
+        groups = overlapped
+
+    if debug is not None:
+        for group in groups:
+            debug.append({
+                "reason": "topic_segment",
+                "duration": group[-1]["end"] - group[0]["start"],
+            })
+
     return [_sentences_to_passage(video_id, group) for group in groups]
 
 

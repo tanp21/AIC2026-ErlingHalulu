@@ -7,6 +7,7 @@ from unittest.mock import patch
 import httpx
 
 from agent.llm import LLMError
+from agent.openrouter import OpenRouterClient
 from agent.vlm import (
     CANDIDATES, HttpVLM, LocalVLM, VLMError, align_ids, array_field, build_vision,
     compact_prompt, format_instruction, label_ids, spec,
@@ -268,7 +269,9 @@ class BuildVisionTests(unittest.TestCase):
                     gemini_thinking_level="low", vlm_url=None, vlm_model=None,
                     vlm_device=None, vlm_image_side=448, vlm_answer_side=1280,
                     vlm_max_new_tokens=128, vlm_max_tiles=6,
-                    deepseek_api_key="k", deepseek_base_url="https://api.deepseek.com")
+                    deepseek_api_key="k", deepseek_base_url="https://api.deepseek.com",
+                    openrouter_api_key="", openrouter_model="qwen/qwen3.7-flash",
+                    openrouter_base_url="https://openrouter.ai/api/v1")
         return SimpleNamespace(**{**base, **kwargs})
 
     def test_gemini_is_the_default_and_needs_a_key(self):
@@ -301,8 +304,18 @@ class BuildVisionTests(unittest.TestCase):
         self.assertFalse(vision.thinking)
 
     def test_an_unknown_backend_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "must be 'local', 'gemini' or 'deepseek'"):
+        with self.assertRaisesRegex(ValueError, "must be 'local', 'gemini', 'deepseek' or 'openrouter'"):
             build_vision(self.settings(vision="magic"))
+
+    def test_openrouter_is_a_backend_of_its_own(self):
+        vision = build_vision(self.settings(vision="openrouter", openrouter_api_key="sk-or-x"))
+
+        self.assertIsInstance(vision, OpenRouterClient)
+        self.assertEqual(vision.model, "qwen/qwen3.7-flash")
+
+    def test_openrouter_without_a_key_says_which_one_is_missing(self):
+        with self.assertRaisesRegex(ValueError, "OPENROUTER_API_KEY"):
+            build_vision(self.settings(vision="openrouter", openrouter_api_key=""))
 
 
 class CompactPromptTests(unittest.TestCase):

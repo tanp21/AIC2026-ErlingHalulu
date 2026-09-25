@@ -18,7 +18,7 @@ import httpx
 import numpy as np
 from fastapi import HTTPException
 
-from . import core, frame_maps
+from . import core, frame_maps, object_search
 
 CORE_API_VERSION = "1"
 DEFAULT_TIMEOUT = 60.0
@@ -115,6 +115,39 @@ def known_videos(profile: str | None) -> set[str]:
     if remote():
         return set(_fetch_catalog(profile)["video_ids"])
     return set(core.load_meta(profile)[3])
+
+
+def object_catalog():
+    if remote():
+        return _request("GET", "/core/object/catalog")
+    return object_search.catalog()
+
+
+def object_video_detections(video_id):
+    if remote():
+        return _request("GET", f"/core/object/{video_id}/detections")
+    return object_search.video_detections(video_id)
+
+
+def search_objects(profile, query, k):
+    if remote():
+        return _request("POST", "/core/object/search", json={
+            "profile": profile, "query": query.model_dump(), "k": k,
+        })
+    return object_search.search(profile, query, k)
+
+
+def match_objects(profile, query, points):
+    matches = []
+    for start in range(0, len(points), 500):
+        batch = points[start:start + 500]
+        if remote():
+            matches.extend(_request("POST", "/core/object/match", json={
+                "profile": profile, "query": query.model_dump(), "points": batch,
+            })["matches"])
+        else:
+            matches.extend(object_search.match_frames(profile, query, batch))
+    return matches
 
 
 def encode_text(text: str) -> np.ndarray:

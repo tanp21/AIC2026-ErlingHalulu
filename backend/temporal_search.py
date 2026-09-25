@@ -203,6 +203,8 @@ def build_sequences(candidates_by_event, max_gap_seconds, scoring_method, candid
                 indexes.reverse()
                 events = [layers[index][candidate] for index, candidate in enumerate(indexes)]
                 visual_score = _final_score(state["value"], event_count, scoring_method)
+                modalities = {event.get("source", "visual") for event in events}
+                sequence_source = next(iter(modalities)) if len(modalities) == 1 else "mixed"
                 paths.append({
                     "video_id": video_id,
                     "start_time": events[0]["time"],
@@ -210,7 +212,7 @@ def build_sequences(candidates_by_event, max_gap_seconds, scoring_method, candid
                     "events": events,
                     "visual_score": visual_score,
                     "score": visual_score,
-                    "source": "visual",
+                    "source": sequence_source,
                 })
 
     paths.sort(key=lambda path: (

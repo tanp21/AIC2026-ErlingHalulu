@@ -5,8 +5,10 @@ must increase strictly and each adjacent pair must be no more than the requested
 gap (1–600 seconds, default 120). A video may contribute multiple sequences;
 score-ordered temporal NMS keeps every non-overlapping interval.
 
-The visual stage batch-encodes all event descriptions and searches the exact Flat
-index. Dynamic programming keeps the best prefix for each endpoint. The production
+The visual stage batch-encodes text event descriptions and searches the exact Flat
+index. Events may also use uploaded images or indexed keyframe references through
+`POST /search/temporal/image` (multipart); all event vectors are searched in their
+submitted order. Dynamic programming keeps the best prefix for each endpoint. The production
 candidate depth and sequence scorer are loaded from
 `benchmarks/temporal/temporal_config.json`; they are deliberately selected by the benchmark
 rather than hardcoded.
@@ -54,6 +56,7 @@ JSON report, a Markdown table, and the production config in `benchmarks/temporal
 ## API
 
 - `POST /search/temporal`: starts a snapshot-backed search.
+- `POST /search/temporal/image`: starts a snapshot-backed search with text, uploaded-image, or keyframe-reference events.
 - `POST /search/temporal/next`: fetches the next 20 video groups.
 
 The ranked pool contains at most 1,000 sequences. Videos are ranked by their best

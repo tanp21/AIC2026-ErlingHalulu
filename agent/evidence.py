@@ -23,6 +23,7 @@ Two things this module is careful about, both learned on a real query:
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -126,20 +127,27 @@ class EvidenceStore:
 
     Thread-safe: candidates of one video are summarised from several threads, and a
     video costs three requests however many of its moments are looked at.
+
+    `maxsize` bounds it least-recently-used. An agent run touches a few dozen videos and
+    then throws the store away, so the bound never bites there; the Search tab's checker
+    keeps one store for the life of the server process, where an unbounded cache would
+    eventually hold every video's transcript, OCR and captions at once.
     """
 
     #: The store's kinds and the client method each is fetched with.
     METHODS = {"transcript": "transcript", "ocr": "ocr", "captions": "caption_windows"}
 
-    def __init__(self, search):
+    def __init__(self, search, maxsize: int = 192):
         self.search = search
+        self.maxsize = max(1, int(maxsize))
         self._lock = threading.Lock()
-        self._cache: dict[tuple[str, str], list] = {}
+        self._cache: OrderedDict[tuple[str, str], list] = OrderedDict()
 
     def _get(self, kind: str, video_id: str) -> list:
         key = (kind, video_id)
         with self._lock:
             if key in self._cache:
+                self._cache.move_to_end(key)
                 return self._cache[key]
         fetch = getattr(self.search, self.METHODS[kind], None)
         try:
@@ -149,6 +157,9 @@ class EvidenceStore:
             value = []
         with self._lock:
             self._cache[key] = value
+            self._cache.move_to_end(key)
+            while len(self._cache) > self.maxsize:
+                self._cache.popitem(last=False)
         return value
 
     def transcript(self, video_id: str) -> list:
@@ -338,15 +349,20 @@ def excerpts_of(span: dict[str, list[dict]], term_sets_by_detail: list[dict[str,
     return found
 
 
-def select_excerpts(excerpts: list[dict], group: list[dict], detail_count: int, per_detail: int) -> list[dict]:
+def select_excerpts(excerpts: list[dict], group: list[dict], detail_count: int, per_detail: int,
+                    *, before: float = BEFORE_SECONDS, after: float = AFTER_SECONDS) -> list[dict]:
     """For each candidate and detail its best `per_detail` sentences within reach, numbered `e1`...
 
     Chosen per candidate so a moment with little around it is not crowded out by one in the
     middle of a rich stretch of the same video; a sentence two candidates share is kept once.
+
+    `before`/`after` are how far "within reach" is. The agent keeps the measured defaults; the
+    Search tab's checker widens them to the window the person asked it to check, and leans on
+    `proximity` and the excerpt's own timestamp to say how far away the evidence was.
     """
     chosen: dict[int, dict] = {}
     for item in group:
-        low, high = item["time"] - BEFORE_SECONDS, item["time"] + AFTER_SECONDS
+        low, high = item["time"] - before, item["time"] + after
         near = [(index, e) for index, e in enumerate(excerpts) if e["end"] >= low and e["at"] <= high]
         for detail in range(detail_count):
             best = sorted((pair for pair in near if detail in pair[1]["scores"]),
@@ -402,14 +418,24 @@ def _prior_weight(entry: dict) -> float:
     return PRIOR_MIN + (PRIOR_MAX - PRIOR_MIN) * entry.get("distinctiveness", 1.0)
 
 
-def query_details(deepseek, task, plan=None) -> QueryDetails:
-    """The query as 3-8 short details with the words that would mention each; empty if DeepSeek fails."""
+def query_details(client, task, plan=None, *, system: str = DETAILS_SYSTEM) -> QueryDetails:
+    """The query as 3-8 short details with the words that would mention each; empty if the model fails.
+
+    `client` is anything with DeepSeek's `chat_json` -- the agent hands it its own DeepSeek
+    client, the Search tab's checker hands it an `OpenRouterClient`, which accepts and
+    ignores `thinking` for exactly this reason.
+
+    `system` defaults to `DETAILS_SYSTEM`, the agent's own prompt. The checker passes
+    `agent.prompts.CHECK_DETAILS_SYSTEM` instead, which adds a note about `task.text` possibly
+    being labelled by search channel (`agent.checker.CheckQuery.description`) -- the agent's own
+    `task.text` is never labelled, so its calls are unaffected by that note either way.
+    """
     messages = [
-        {"role": "system", "content": DETAILS_SYSTEM},
+        {"role": "system", "content": system},
         {"role": "user", "content": f"Loại: {task.kind}\nTruy vấn:\n{task.text}{_plan_reading(plan)}"},
     ]
     try:
-        data = deepseek.chat_json(messages, thinking=False, max_tokens=1500, temperature=0)
+        data = client.chat_json(messages, thinking=False, max_tokens=1500, temperature=0)
     except LLMError as exc:
         logger.warning("evidence: query details failed: %s", exc)
         return QueryDetails()

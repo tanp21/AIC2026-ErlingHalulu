@@ -215,10 +215,40 @@ class HumanJudgeReviewTests(unittest.TestCase):
 
 
 class ForbiddenVision(FakeGemini):
-    """A human-judged run must never hand a frame to anything."""
+    """A human-judged run must never hand a frame to anything.
+
+    Nothing that *decides* -- verify, falsify, pick, sequence -- may see a frame when the
+    person judges. The checklist and the Q&A answer reading do reach a model on purpose
+    (they are hints shown beside the person, never decisions), so tests that exercise those
+    pass a client that answers instead of this one.
+    """
 
     def judge(self, images, prompt, schema, **kwargs):
         raise AssertionError("a human-judged run sent a frame to a model")
+
+
+class ReadingDeepSeek(FakeDeepSeek):
+    """DeepSeek as the second answer reader: it judges frames, which `FakeDeepSeek` cannot."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.answer_prompts = []
+
+    def judge(self, images, prompt, schema, **_):
+        if schema is ANSWER_SCHEMA:
+            self.answer_prompts.append(prompt)
+            return {"answer": "con nghêu", "confidence": 9, "evidence": "thấy trên đĩa trắng"}
+        return {"candidates": []}
+
+
+class ReadingSearch(FakeSearch):
+    """A server with the on-screen text and the shot caption a Q&A answer is read from."""
+
+    def captions(self, video_id):
+        return [{"start": 0.0, "end": 30.0, "text": "a woman in a white apron"}]
+
+    def ocr(self, video_id):
+        return [{"start": 4.0, "end": 9.0, "text": "NGHÊU HẤP BIA"}]
 
 
 def run_with_reviewer(script, *, task=None, plan=None, search=None, options=None, deepseek=None):
@@ -237,6 +267,51 @@ def run_with_reviewer(script, *, task=None, plan=None, search=None, options=None
                        mode="fast", judge="human", **(options or {}))
     result = agent.run(task or task_from_text("q-kis", "thuyền đỏ"), review=review, progress=watch)
     return result, review, seen
+
+
+class AnswerReadingTests(unittest.TestCase):
+    """In human review a Q&A query is read by BOTH models, from the frame and the words.
+
+    The person still submits the answer; these are chips beside them. They are the one place
+    the pixels are searched for the answer, and both models read the *same* moment so their
+    readings can be compared with each other and with the transcript.
+    """
+
+    def test_both_models_read_the_frames_speech_and_on_screen_text(self):
+        gemini, deepseek = FakeGemini(reading="con nghêu"), ReadingDeepSeek()
+        review, seen = HumanReview(judge="human"), []
+
+        def watch(snapshot):
+            seen.append(snapshot)
+            if (snapshot["stage"] == "awaiting_review" and snapshot.get("suggested_answers")
+                    and not review.decided()):
+                review.finish()
+
+        make_agent(deepseek, gemini, ReadingSearch(HITS), mode="fast", judge="human").run(
+            task_from_text("q-qa", "Con gì được đặt lên đĩa trắng?"), review=review, progress=watch)
+
+        chips = next(s["suggested_answers"] for s in reversed(seen) if s.get("suggested_answers"))
+        self.assertEqual([chip["source"] for chip in chips][:2], ["gemini", "deepseek"])
+        self.assertTrue(all(chip["answer"] and chip["cid"] for chip in chips))
+        self.assertIn("NGHÊU HẤP BIA", gemini.answer_prompt)     # the on-screen text reached the model
+        self.assertIn("xin chào", gemini.answer_prompt)          # so did the speech
+        self.assertIn("NGHÊU HẤP BIA", deepseek.answer_prompts[0])
+
+    def test_a_model_that_cannot_read_leaves_the_other_model_s_chip_alone(self):
+        review, seen = HumanReview(judge="human"), []
+
+        def watch(snapshot):
+            seen.append(snapshot)
+            if (snapshot["stage"] == "awaiting_review" and snapshot.get("suggested_answers")
+                    and not review.decided()):
+                review.finish()
+
+        make_agent(ReadingDeepSeek(), ForbiddenVision(), ReadingSearch(HITS),
+                   mode="fast", judge="human").run(
+            task_from_text("q-qa", "Con gì được đặt lên đĩa trắng?"), review=review, progress=watch)
+
+        chips = next(s["suggested_answers"] for s in reversed(seen) if s.get("suggested_answers"))
+        self.assertIn("deepseek", [chip["source"] for chip in chips])
 
 
 class HumanJudgedRunTests(unittest.TestCase):

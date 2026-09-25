@@ -1,0 +1,20 @@
+# Pins for the Kaggle OCR notebook's pip-install cell (notebooks/kaggle_ocr_batch2_m01_m05.py).
+# Matches what is actually installed in .venv-ocr (the production OCR venv, which has no
+# committed requirements file of its own -- this doubles as filling that gap).
+#
+# onnxruntime-gpu is deliberately NOT listed here, and the notebook installs it on its own,
+# last, with a version pin (ORT_GPU_VERSION):
+#
+#   * rapidocr_onnxruntime declares `onnxruntime>=1.7.0`, and the plain CPU wheel and the GPU
+#     build own the *same* site-packages/onnxruntime/ tree (all 317 files of the CPU wheel are
+#     also claimed by the GPU one), so whichever pip writes last wins. Listing both here would
+#     make that a coin flip.
+#   * The pin is load-bearing. From 1.27.0 the wheels published as `onnxruntime-gpu` are built
+#     against CUDA 13 and link libcudart.so.13; Kaggle's image is CUDA 12.8 (torch bundles
+#     libnvrtc.so.12.8). Installing the newest build there yields an ORT whose CUDA provider
+#     .so cannot dlopen -- and ORT does not raise, it silently runs the detector on CPU.
+#     1.26.0 is the last CUDA-12 line.
+rapidocr_onnxruntime==1.4.4
+vietocr==0.3.13
+opencv-python-headless==5.0.0.93
+pyyaml

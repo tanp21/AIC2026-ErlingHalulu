@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """Write cleaned transcript parquets beside the raw ones.
 
-Reads ``data/2026/audio/step_data.parquet``, applies the pipeline described by
-``benchmarks/audio/audio_config.json``, and writes ``step_data_clean.parquet`` and
-``transcription_clean.parquet`` in the same schema. Raw files are never touched,
-so a bad run is undone by deleting the output.
+Reads ``data/2026/audio/step_data.parquet``, restores capitalisation and
+punctuation via the Gemini API (:mod:`scripts.audio.gemini_clean`), and writes
+``step_data_clean.parquet`` and ``transcription_clean.parquet`` in the same
+schema. Raw files are never touched, so a bad run is undone by deleting the
+output.
 
 Same schema is the point: ``backend.audio_search.make_passages`` and
 ``backend.audio_search.build_transcript_cues`` consume the cleaned rows unchanged, and
 ``backend.audio_search.TRANSCRIPT_PATH`` falls back to the raw file when the clean one
 is absent. Nothing downstream has to know which it got.
 
-    uv run python -m scripts.audio.build_clean_transcripts --config benchmarks/audio/audio_config.json
+    export GEMINI_API_KEY=...
+    uv run python -m scripts.audio.build_clean_transcripts --gemini-model gemini-flash-lite-latest
 
-Restoration needs a GPU and a model that was downloaded while the network was
-up; every other step is pure Python. Run this on the dev machine, never in the
-container.
+Needs the network and a Gemini API key; every other step is pure Python. Run
+this on the dev machine, never in the container.
 """
 from __future__ import annotations
 
@@ -35,20 +36,15 @@ RAW_STEP_DATA = AUDIO_DIR / "step_data.parquet"
 GENERATED_DIR = AUDIO_DIR / "generated"
 CLEAN_STEP_DATA = GENERATED_DIR / "step_data_clean.parquet"
 CLEAN_TRANSCRIPTS = GENERATED_DIR / "transcription_clean.parquet"
-CONFIG = ROOT / "benchmarks" / "audio_config.json"
+CONFIG = ROOT / "benchmarks" / "audio" / "audio_config.json"
 
 
 def load_config(path: Path) -> CleanConfig:
-    """Read the benchmark-selected pipeline, or fall back to an inert one."""
+    """Read the configured pipeline, or fall back to an inert one."""
     if not path.exists():
         return CleanConfig()
     payload = json.loads(path.read_text(encoding="utf-8"))
-    config = CleanConfig.from_json(payload.get("clean", {}))
-    # bench_audio_capu records its winner separately from the lexical sweep.
-    capu = payload.get("capu", {}).get("model_id")
-    if capu and not config.capu_model:
-        config = CleanConfig(**{**config.__dict__, "capu_model": capu})
-    return config
+    return CleanConfig.from_json(payload.get("clean", {}))
 
 
 def write(words_by_video, step_data_path: Path, transcript_path: Path) -> None:
@@ -95,14 +91,12 @@ def main():
     parser.add_argument("--config", type=Path, default=CONFIG)
     parser.add_argument("--step-data-out", type=Path, default=CLEAN_STEP_DATA)
     parser.add_argument("--transcripts-out", type=Path, default=CLEAN_TRANSCRIPTS)
-    parser.add_argument("--device", default=None, help="override AUDIO_EMBED_DEVICE")
     parser.add_argument("--videos", default=None,
                         help="comma-separated audio_key allowlist, e.g. "
                              "L27_V010,L23_V013 — clean only these videos "
                              "instead of the whole corpus (for pilot runs)")
     parser.add_argument("--gemini-model", default=None,
-                        help="use Gemini instead of capu; overrides "
-                             "--config's capu_model for this run")
+                        help="overrides --config's gemini_model for this run")
     parser.add_argument("--gemini-concurrency", type=int, default=None)
     parser.add_argument("--gemini-rpm", type=float, default=None,
                         help="cap dispatch to this many requests/minute across "
@@ -116,9 +110,8 @@ def main():
 
     config = load_config(args.config)
     if args.gemini_model:
-        config = CleanConfig(**{**config.__dict__, "capu_model": None,
-                                "gemini_model": args.gemini_model})
-    print(f"[clean] config: {config.label or 'raw (no transform enabled)'}")
+        config = CleanConfig(gemini_model=args.gemini_model)
+    print(f"[clean] config: {config.label}")
 
     raw = load_words(args.source)
     if args.videos:
@@ -130,13 +123,7 @@ def main():
     before = sum(len(words) for words in raw.values())
     print(f"[clean] {len(raw)} videos, {before:,} words from {args.source.name}")
 
-    capu = None
     gemini = None
-    if config.capu_model:
-        from scripts.audio.capu import CapuModel
-
-        print(f"[clean] loading {config.capu_model}")
-        capu = CapuModel(config.capu_model, device=args.device).load()
     if config.gemini_model:
         from scripts.audio.gemini_clean import GeminiCleaner, CONCURRENCY
 
@@ -149,7 +136,7 @@ def main():
             requests_per_minute=args.gemini_rpm,
         ).load()
 
-    cleaned = clean_corpus(raw, config, capu=capu, gemini=gemini)
+    cleaned = clean_corpus(raw, config, gemini=gemini)
     after = sum(len(words) for words in cleaned.values())
     print(f"[clean] {after:,} words after cleaning "
           f"({after - before:+,}, {after / before:.1%} of source)")

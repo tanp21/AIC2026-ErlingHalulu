@@ -23,6 +23,15 @@ class RuntimeMountTests(unittest.TestCase):
             Path("/data/2026/videos/L21/L21_V015.mp4"),
         )
 
+    def test_video_metadata_uses_batch2_mov_when_mp4_is_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            source = data_dir / "2026" / "videos" / "N023" / "N023_V002.mov"
+            source.parent.mkdir(parents=True)
+            source.touch()
+            row = {"year": "2026", "group": "N023", "video_id": "N023_V002"}
+            self.assertEqual(core.mounted_video_path(row, data_dir), source)
+
     def test_streaming_path_prefers_faststart_copy_when_present(self):
         row = {"year": "2026", "group": "L21", "video_id": "L21_V015", "path": "/data/2026/videos/L21/L21_V015.mp4"}
         with tempfile.TemporaryDirectory() as directory:
@@ -33,6 +42,20 @@ class RuntimeMountTests(unittest.TestCase):
             faststart.parent.mkdir(parents=True)
             faststart.write_bytes(b"remuxed")
             self.assertEqual(shots.streaming_path(row, data_dir), faststart)
+
+    def test_dres_player_can_request_the_original_video_timeline(self):
+        from backend import app as app_module
+
+        row = {"path": "/data/2026/videos/L21/L21_V015.mp4"}
+        with patch.object(app_module, "resolve", return_value=row), patch.object(
+            app_module.shots, "streaming_path", return_value=Path("/data/2026/videos_faststart/L21/L21_V015.mp4")
+        ):
+            self.assertEqual(app_module.get_video("L21_V015", original=True).path, row["path"])
+            self.assertEqual(app_module.get_video("L21_V015", original=False).path,
+                             Path("/data/2026/videos_faststart/L21/L21_V015.mp4"))
+
+        with patch.object(app_module, "resolve", return_value={"path": "/data/2026/videos/N023/N023_V002.mov"}):
+            self.assertEqual(app_module.get_video("N023_V002", original=True).media_type, "video/quicktime")
 
     def test_frame_map_directory_follows_index_mount(self):
         self.assertEqual(
@@ -80,6 +103,11 @@ class RuntimeMountTests(unittest.TestCase):
         self.assertIn("create_host_path: false", compose)
         self.assertIn("backend/shot_labels.py", dockerfile)
         self.assertIn("mkdir /cache /workspace /labels", dockerfile)
+
+    def test_query_refine_module_is_shipped_in_the_image(self):
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        self.assertIn("backend/query_refine.py", dockerfile)
+        self.assertIn("backend/query_expansion.py", dockerfile)
 
     def test_public_ingress_grants_identity_by_tailscale_serve_header(self):
         compose = (ROOT / "compose.yaml").read_text()
