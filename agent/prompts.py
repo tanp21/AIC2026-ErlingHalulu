@@ -1,17 +1,12 @@
 """Every prompt the agent sends, in one place so they can be tuned together."""
 
-CORPUS = """The corpus is about 870 Vietnamese TV videos (groups L21-L30): news bulletins and \
-reports, cooking shows, travel/culture features, sports (cycling races, lion and dragon \
-dances), agriculture and rural life, and recorded school lectures with slides. Keyframes \
-were sampled every few seconds; each has a PE-Core CLIP embedding. Speech was transcribed \
-by Vietnamese ASR. On-screen text was OCR'd once per shot. Broadcaster overlays (channel \
-logos, clocks, tickers) are noise, not content."""
+CORPUS = """The corpus is Vietnamese TV and online video of many kinds (news, reports, interviews, cooking, travel and culture, sports and performances, agriculture, recorded lectures with slides, and more). Keyframes were sampled every few seconds; each has a PE-Core CLIP embedding. Speech was transcribed by Vietnamese ASR. On-screen text was OCR'd once per shot. Broadcaster overlays (channel logos, clocks, tickers) are noise, not content."""
 
 TASKS = """Task types:
 - kis: find the described clip; the answer is a video and a frame inside that clip.
 - qa: find the clip AND answer the question about it. The answer must come from the video \
 (on-screen text, a count, an object, or speech) and is compared as an exact string, so it \
-must be short and literal (e.g. "5", "2.15", "Đèo Tà Pứa").
+must be short and literal (a number, a name, a few words).
 - trake: find N events, in order, inside ONE video; the answer is the first frame of each \
 event."""
 
@@ -47,19 +42,16 @@ VBS-style video retrieval competition.
 
 {CHANNELS}
 
-Resolve indirect descriptions into concrete names before searching (a riddle-like \
-description of a well-known animal, object or place becomes its name). When you are not \
-sure of the name, add a web-search question to "lookups" instead of guessing.
+Resolve an indirect description into a concrete name only when you are sure of it; when \
+you are not, ask the web in "lookups" instead of guessing. When the question asks WHAT a \
+thing is, its name is the answer: never guess a name and search it. Describe that thing only \
+by what a camera shows, keep any name for it out of visual_en and transcript_vi, and put the \
+question in "lookups".
 
-But when the question itself asks WHAT a thing is ("X là gì", "là con gì"), the answer is \
-the name, so never guess one and search it: a wrong guess finds nothing, while the visible \
-description finds the clip. Describe the unknown thing only by what a camera shows (size, \
-colour, count, what is done with it, what is next to it), keep any name out of visual_en \
-and transcript_vi, and put the question in "lookups".
-
-Examples in these rules only illustrate a KIND of case. Never reuse their words, objects \
-or phrases in a plan: every caption, phrase and question comes from the query in front of \
-you.
+The query may be a full description or a few keywords typed by a person. Either way it is \
+the only source of content: every caption, phrase and question you write comes from it. \
+These instructions contain no examples on purpose -- do not bring in people, objects, \
+places or topics the query does not mention.
 
 Reply with one JSON object and nothing else:
 {{
@@ -69,7 +61,7 @@ Reply with one JSON object and nothing else:
       "visual_en": ["English caption", "paraphrase 1", "paraphrase 2", "paraphrase 3"]}}
   ],
   "target_scene": 0,
-  "readings_en": ["a different plausible picture of the ambiguous part"],
+  "readings_en": ["another plausible picture of an ambiguous part"],
   "events_en": [],
   "transcript_vi": ["spoken phrase"],
   "caption_en": ["English sentence as a shot caption would word it"],
@@ -81,61 +73,47 @@ Reply with one JSON object and nothing else:
 }}
 
 Rules:
-- scenes: one entry per visually distinct scene, in time order (usually 1-3). Things the \
-query places together on ONE slide, screen or frame are ONE scene whose caption names all \
-of them -- never separate scenes, never a temporal search. When that caption has to name \
-several separate pictures, also put each picture alone in readings_en (up to 2): CLIP \
-blurs a long list, and the moment matching every single-picture search is the one holding \
-them all.
-- Say what KIND of footage it is when the query does (a lecture slide, a news studio, a \
-cooking show, a stage performance): it keeps the search inside that kind of video.
-- visual_en: the caption first, then 3-4 paraphrases of THAT caption which keep every \
-detail (same counts, colours, clothing, quoted text, names) and change only word order, \
-synonyms or grammar. Never shorten to a subset of the details and never add details.
-- Write only what a camera shows, and never more than the query states. A camera cannot \
-show how people are related, so a Vietnamese relationship or role word (mẹ con, cha con, \
-vợ chồng, anh em, bà cháu, người con, đồng nghiệp, ...) is translated as the bare count -- \
-"two people", "the person" -- and the words mother, father, son, daughter, child, husband, \
-wife, sibling, parent, family, colleague never appear in visual_en, not even beside the \
-count. Gender, age and clothing only as far as the query itself states them. A guess about \
-who the people are may go in readings_en, never in visual_en. This bans inventing, not \
-dropping: keep every detail the query states or plainly implies (a question about a number \
-shown on a device implies a readable display, so the caption says so).
-- Never settle an interaction the query leaves open (holding a phone is not a call; a \
-microphone is not an interview; people at a table are not eating) unless the query says \
-so. If the query can be pictured in several ways, keep the caption to what is certain and \
-put the other pictures in readings_en.
-- readings_en: kis and qa only, 0-2 entries, each ONE English caption of ONE frame, \
-searched on its own. Use them for (a) another plausible picture of an ambiguous part -- it \
-changes only HOW stated details look (sitting or walking, indoors or outdoors, close-up or \
-wide), adds no person, object or action, and differs from the caption in something a \
-camera would show, not in wording; (b) a cautious version that keeps only what is certain; \
-or (c) each picture of a one-frame list alone (see scenes). Never chain scenes ("... then \
-..."), never repeat a visual_en wording; leave it empty when none applies.
-- target_scene: index of the scene whose frame should be submitted — the scene the query \
+- Faithful to the query. A caption states what the query states, as a camera would show \
+it, and nothing more: no person, object, action, interaction, emotion, gender, age or \
+relationship the query does not state -- a camera cannot show how people are related, so \
+people are described by what is visible, and by their count when nothing else is given. Do \
+not drop any detail the query states or plainly implies either (a question about something \
+written or displayed implies it is legible on screen).
+- scenes: one entry per visually distinct scene, in time order (usually 1-3). A new scene \
+needs the query to say one thing comes AFTER another. Everything the query says one frame, \
+slide or screen contains -- however many items, joined by commas, "và" or a list -- is ONE \
+scene whose caption names all of them: never separate scenes, never a temporal search.
+- visual_en: the caption first, then 3-4 paraphrases of THAT caption that keep every detail \
+(counts, colours, clothing, quoted text, names) and change only word order, synonyms or \
+grammar. Never shorten to a subset of the details and never add one.
+- If the query says what kind of footage it is (a lecture slide, a studio, a performance, a \
+report), the caption says so too: it keeps the search inside that kind of video.
+- readings_en: kis and qa only, 0-2 entries, each ONE English caption of ONE frame, searched \
+on its own. Use them (a) for another plausible picture of a part the query leaves open -- \
+it changes only how the stated details look, adds nothing, and differs from the caption in \
+something a camera would show; (b) for a cautious caption that keeps only what is certain; \
+or (c) when one frame holds several separate pictures, for each picture alone, since CLIP \
+blurs a long list. Never chain scenes, never repeat a visual_en wording; leave it empty \
+when none applies.
+- target_scene: index of the scene whose frame should be submitted -- the scene the query \
 asks to find exactly, otherwise the first scene.
-- events_en: trake only — exactly one English caption per listed event, in order, each \
-describing the frame at the START of that event. Empty for kis/qa.
-- transcript_vi: news, reports, cooking shows, interviews and lectures are narrated, so \
-give 1-3 phrases the narrator would likely say about THIS clip's topic (place and person \
-names, dish and ingredient names, the subject a lecture's pictures illustrate), rarest and \
-most specific first. Leave it empty when the clip is plausibly unnarrated or the query \
-gives no topic to guess from.
-- caption_en: 1-2 entries for the target scene, phrased as a caption sentence and carrying \
-the details CLIP drops (exact counts, what is written on screen, the order of actions \
-inside the shot). Leave empty only when the scene has no such detail.
-- ocr: only distinctive strings (names, titles, slogans, numbers with context); never \
-generic words or units.
-- topic: what the clip is about, one of cooking, festival (festival, custom, ritual, \
-procession, lion dance), place (landmark, pagoda, bridge, pass, village, beauty spot), \
-event (news event, ceremony, disaster, competition), person (a named or describable public \
-figure), sport, lecture, nature, other.
-- lookups: 0-3 Google-Search questions (in Vietnamese) whose answers make the clip \
-findable or answer the question. Search is cheap and runs beside the searches, so ask \
-whenever the query points at something the web knows and the corpus would NAME: which \
-festival, place, event or person it is, and where. For qa whose answer is world knowledge \
-or a fact about such a thing, ask the question itself. Leave it empty only for a generic \
-scene the web cannot identify.
+- events_en: trake only -- exactly one English caption per event the query lists (E1, E2, \
+...), in order, each describing the frame at the START of that event. Context written \
+before the list (an opening shot, the setting) is NOT an event: it goes in scenes only. \
+Empty for kis/qa.
+- transcript_vi: 1-3 Vietnamese phrases a narrator, interviewee or lecturer of THIS clip \
+would say, taken from the query's own words or from a topic it clearly implies, rarest and \
+most specific first. Empty when the query gives nothing to say.
+- caption_en: 1-2 entries for the target scene, phrased as a shot-caption sentence, carrying \
+what CLIP drops (exact counts, text written on screen, the order of actions inside the \
+shot). Empty when the scene has none of that.
+- ocr: only distinctive strings the query quotes or clearly implies are written on screen; \
+never generic words or units.
+- topic: one of cooking, festival, place, event, person, sport, lecture, nature, other.
+- lookups: 0-3 Vietnamese Google-Search questions whose answers make the clip findable or \
+answer the question: which named thing (festival, place, event, person, dish, ...) the query \
+points at and where it is. For qa whose answer is world knowledge, ask the question itself. \
+Empty when the query points at nothing the web could name.
 - question_vi and answer_source: qa only. answer_source is one of on_screen_text, \
 visual_count, visual_attribute, speech, world_knowledge."""
 
@@ -280,8 +258,8 @@ REWRITE_SYSTEM = f"""You run the second and last search round for one query of A
 
 You see the query, the round-1 plan, web notes and the round-1 candidates with Gemini's 0-10 verdicts (reasons name what matched or was contradicted). Write up to 6 NEW queries that fix what round 1 missed:
 - visual: rewrite the caption around the detail the verdicts found missing or wrong, or the scene's most distinctive element; give "paraphrases" (faithful rewordings). When a promising video is known (a candidate scored 5+ or several channels agree), add a visual query with "video_ids" to pin the exact moment inside it.
-- Never name what the picture cannot show: a relationship ("mother and child") or a guessed gender or age costs the right video, where the bare count ("two people") finds it. Write an alternative reading as its own query instead of putting the guess in a caption.
-- audio: Vietnamese phrases a narrator would say, especially names from the web notes (dish names, places, people, organisations), numbers as digits.
+- Stay faithful to the query: a caption states only what the query states and a camera could show -- no guessed person, relationship, gender, age, object or action. Write an alternative reading as its own query instead of putting a guess in a caption. Use only the query, the verdicts and the web notes; nothing else.
+- audio: Vietnamese phrases a narrator would say, especially names from the web notes, numbers as digits.
 - ocr: exact on-screen strings the query quotes or the web notes name.
 - caption: an English sentence naming the details CLIP cannot encode (counts, on-screen sentences, the order of actions in one shot); add "video_ids" to read inside a promising video.
 - temporal: 2-6 ordered English captions for consecutive scenes of one video.
@@ -297,23 +275,25 @@ Their note for this round: {hint}"""
 _DETAILS_TEMPLATE = """Bạn chuẩn bị một truy vấn tìm video (tiếng Việt) để một người đối chiếu từng chi tiết với lời thoại, chữ trên màn hình và mô tả cảnh (tiếng Anh) quanh mỗi ứng viên.
 Kho video: __CORPUS__
 
-Tách truy vấn thành 3-8 chi tiết có thể kiểm chứng riêng lẻ:
-- "vi": một cụm ngắn (tối đa 10 từ) tiếng Việt, giữ nguyên số liệu, tên riêng, màu sắc, số lượng, hành động truy vấn nêu. Không thêm chi tiết truy vấn không nói.
-- Mỗi chi tiết chỉ nói về MỘT người hay MỘT vật cùng thuộc tính hoặc hành động của nó, vì một câu mô tả hiếm khi nêu cả hai vật trong cùng một câu. Câu có hai vật liên hệ với nhau phải TÁCH: "Năm người chơi đùa bên cạnh một con vật màu vàng" thành "nhóm năm người chơi đùa" và "một con vật màu vàng"; "cô gái đặt bốn con tôm lên đĩa trắng" giữ một chi tiết vì đó là một hành động.
+Truy vấn có thể là một đoạn mô tả đầy đủ hoặc vài từ khoá do người dùng gõ. Mọi chi tiết đều lấy từ chính truy vấn; không thêm người, vật, hành động hay chủ đề mà truy vấn không nói. Các ký hiệu A, B, X trong hướng dẫn này chỉ là chỗ trống, không phải nội dung.
+
+Tách truy vấn thành 3-8 chi tiết có thể kiểm chứng riêng lẻ (ít hơn nếu truy vấn ngắn):
+- "vi": một cụm ngắn (tối đa 10 từ) tiếng Việt, giữ nguyên số liệu, tên riêng, màu sắc, số lượng, hành động truy vấn nêu.
+- Mỗi chi tiết chỉ nói về MỘT người hay MỘT vật cùng thuộc tính hoặc hành động của nó. Câu có hai vật liên hệ với nhau phải TÁCH ("A đứng cạnh B" thành một chi tiết về A và một chi tiết về B); một hành động của một người lên một vật ("A đặt B lên C") giữ thành một chi tiết.
 - KHÔNG đưa câu hỏi (Hỏi ...?) vào danh sách chi tiết: câu hỏi được trả lời riêng. Với chuỗi sự kiện (TRAKE): mỗi sự kiện là một chi tiết, giữ thứ tự.
-- "meaning_en": MỘT câu tiếng Anh nói một mô tả cảnh phải nêu gì để chi tiết này đúng, gọi tên chuẩn của vật/loài/màu (dùng kiến thức của bạn về tên gọi Việt - Anh: "hoa riềng tía" là hoa riềng đỏ, tiếng Anh red ginger hay torch ginger, bông đỏ đến đỏ tía, không phải hoa tím lavender).
-- Nếu chi tiết dùng từ "giống", "trông như", "như" (X trông giống Y chứ không khẳng định là Y), GIỮ NGUYÊN ý "trông giống" đó trong "meaning_en" ("an object that LOOKS LIKE a pumpkin", không phải "a pumpkin"), và đưa các thứ có thể là vật thật hoặc đạo cụ/mô hình giống nó vào "same_en" (ví dụ một cái gối, đạo cụ trang trí hình quả bí cũng tính là khớp, không cần đúng là trái bí thật).
-- Chi tiết nói màu "xanh" một mình, KHÔNG kèm "dương"/"lá"/"lục"/"biển"/"da trời"/"ngọc": từ này trong tiếng Việt vốn mơ hồ giữa xanh dương (blue) và xanh lá (green) -- một cái áo hay xe "màu xanh" người viết truy vấn có thể đang nhìn thấy màu lục, ngọc hay dương mà đều gọi chung là "xanh". "meaning_en" phải nói "a blue or green ..." (không chọn hẳn một màu), và "same_en" phải liệt kê cả hai: ["blue", "green", "teal"]. Chỉ thu hẹp về một màu khi truy vấn tự nói rõ ("xanh dương", "xanh lá", "xanh nước biển", "xanh lục", "xanh da trời" đều là chỉ định rõ, giữ đúng nghĩa đó).
-- "same_en": tối đa 5 tên/cụm tiếng Anh mà một mô tả có thể dùng và VẪN LÀ CÙNG thứ đó (đồng nghĩa, tên gọi khác, tên khoa học phổ thông).
-- "different_en": tối đa 5 thứ dễ nhầm nhưng KHÁC (hoa vàng, hoa cúc, hoa hồng, lavender, tôm khi chi tiết nói nghêu...).
-- "same_en" và "different_en" CHỈ dành cho chi tiết nêu một loại vật, màu hay số lượng dễ nhầm. Với hành động, diễn biến hay quan hệ ("mang đi giấu", "thức dậy", "đứng cạnh") để [] cho cả hai.
-- Nếu chi tiết chỉ nói chung chung ("một con vật", "một vật", "một người"), hãy đoán nó là gì theo kho video ở trên và mục "Cách kế hoạch tìm kiếm hiểu truy vấn" (ví dụ trong cảnh múa lân, "một con vật màu vàng" là lion / lion dance costume, không phải chó hay mèo), và đưa các khả năng đó vào "meaning_en", "same_en" và "terms_en" để một mô tả gọi thẳng tên nó vẫn khớp.
-- Chi tiết còn ẩn số (X, Y -- ví dụ "đặt lên 1 dĩa trắng 4 con X"): ẩn số KHÔNG được đoán thành một loài cụ thể trong "meaning_en", vì như vậy checklist sẽ đòi đúng loài đó và gọi khoảnh khắc đúng là mâu thuẫn khi nó dùng loài khác cũng hợp lệ. "meaning_en" phải nói rõ đây là vật chưa biết kèm các khả năng: "places four shellfish -- clam, mussel, oyster, snail or shrimp -- on a white plate"; đưa hết các khả năng vào "same_en". Phần phải kiểm tra là số lượng, màu sắc, hành động và các đồ vật đi kèm (dĩa trắng); còn X là con gì thì người trả lời câu hỏi quyết định, không phải checklist.
-- "terms_en": 3-8 từ khoá TIẾNG ANH (danh từ, động từ, tính từ, kể cả từ đồng nghĩa) mà một đoạn mô tả cảnh bằng tiếng Anh sẽ dùng khi nói về chi tiết này. Ví dụ "lọ hoa riềng tía" -> ["vase","ginger","flower","purple","red","bouquet"]. Chi tiết nói tới vật chưa biết (chữ X, Y là ẩn số) thì liệt kê các vật có thể là nó ("clam","shellfish","oyster","mussel","seafood").
-- "terms_vi": 2-6 từ hoặc cụm TIẾNG VIỆT mà người nói hoặc chữ trên màn hình sẽ dùng cho chi tiết này (kể cả từ đồng nghĩa).
+- "meaning_en": MỘT câu tiếng Anh nói một mô tả cảnh phải nêu gì để chi tiết này đúng, dùng tên tiếng Anh chuẩn của vật, loài hay màu mà chi tiết gọi tên.
+- Nếu chi tiết dùng từ "giống", "trông như", "như" (A trông giống B chứ không khẳng định là B), GIỮ NGUYÊN ý "trông giống" trong "meaning_en" ("something that looks like B", không phải "B"), và đưa các thứ có thể là vật thật, đạo cụ hay mô hình giống B vào "same_en".
+- Chi tiết nói màu "xanh" một mình, KHÔNG kèm "dương"/"lá"/"lục"/"biển"/"da trời"/"ngọc": từ này trong tiếng Việt vốn mơ hồ giữa xanh dương (blue) và xanh lá (green). "meaning_en" phải nói "a blue or green ..." và "same_en" có cả "blue", "green".
+- "same_en": tối đa 5 tên/cụm tiếng Anh mà một mô tả có thể dùng và VẪN LÀ CÙNG thứ đó (đồng nghĩa, tên gọi khác).
+- "different_en": tối đa 5 thứ dễ nhầm với nó nhưng KHÁC.
+- "same_en" và "different_en" CHỈ dành cho chi tiết nêu một loại vật, màu hay số lượng dễ nhầm. Với hành động, diễn biến hay quan hệ để [] cho cả hai.
+- Chi tiết chỉ nói chung chung ("một vật", "một con vật", "một người"): giữ đúng mức chung chung đó trong "meaning_en"; chỉ khi chính truy vấn cho biết nó là gì mới được gọi tên.
+- Chi tiết còn ẩn số (X, Y): KHÔNG đoán ẩn số thành một thứ cụ thể trong "meaning_en" -- checklist sẽ đòi đúng thứ đó và gọi khoảnh khắc đúng là mâu thuẫn. "meaning_en" nói rõ đây là vật chưa biết, giữ nguyên số lượng, hành động và vị trí mà truy vấn nêu.
+- "terms_en": 3-8 từ khoá TIẾNG ANH (danh từ, động từ, tính từ, kể cả đồng nghĩa) mà một đoạn mô tả cảnh tiếng Anh sẽ dùng khi nói về chi tiết này. Chi tiết có ẩn số thì dùng các từ chỉ loại vật chung chung.
+- "terms_vi": 2-6 từ hoặc cụm TIẾNG VIỆT mà người nói hoặc chữ trên màn hình sẽ dùng cho chi tiết này (kể cả đồng nghĩa).
 - "distinctiveness": một số 0.0-1.0 nói chi tiết này giúp phân biệt ĐÚNG khoảnh khắc với các cảnh khác cùng loại trong kho video đến mức nào -- không phải nó có đúng hay không, mà nó có ĐẶC TRƯNG hay không.
-  * THẤP (0.1-0.3): chi tiết mà gần như MỌI cảnh cùng loại trong truy vấn này đều có, hoặc có thể suy ra thẳng từ ngữ cảnh nên không còn là ẩn số. Ví dụ trong một truy vấn về múa lân, "một con vật màu vàng" gần như chắc chắn là con lân/đầu lân -- gần như mọi cảnh múa lân đều có nó, nên biết chi tiết này đúng không giúp chọn ĐÚNG cảnh nào trong số đó.
-  * CAO (0.7-1.0): một hành động, mối quan hệ, đồ vật hay số liệu cụ thể chỉ xảy ra ở đúng khoảnh khắc này, không phải ở những cảnh khác cùng chủ đề (ví dụ "mang vật giống trái bí đỏ đi giấu", "người đàn ông thức dậy không thấy bí đỏ", "đánh thức con vật dậy" -- mỗi cái chỉ đúng ở một cảnh cụ thể của câu chuyện).
+  * THẤP (0.1-0.3): gần như MỌI cảnh cùng loại với truy vấn này đều có nó, hoặc nó suy ra thẳng từ những chi tiết khác.
+  * CAO (0.7-1.0): một hành động, mối quan hệ, đồ vật hay số liệu cụ thể chỉ xảy ra ở đúng khoảnh khắc này, không phải ở những cảnh khác cùng chủ đề.
   * TRUNG BÌNH (0.4-0.6) cho phần còn lại.
 Nếu truy vấn có câu hỏi, thêm "question": {"terms_en": [...], "terms_vi": [...]} gồm từ khoá của thứ cần trả lời; nếu không có thì "question": null.
 Trả về một đối tượng JSON: {"details": [{"vi": "...", "meaning_en": "...", "same_en": ["..."], "different_en": ["..."], "terms_en": ["..."], "terms_vi": ["..."], "distinctiveness": 0.5}], "question": null}"""
@@ -335,21 +315,21 @@ Nếu truy vấn ở trên được gắn nhãn theo từng phần (ví dụ "M�
 
 CHECK_DETAILS_SYSTEM = DETAILS_SYSTEM + CHECK_DETAILS_NOTE
 
-MATCH_SYSTEM = """Bạn giúp một người kiểm tra các khung hình ứng viên của một truy vấn tìm video. Bạn KHÔNG nhìn thấy hình. Với mỗi chi tiết của truy vấn, bạn nhận một danh sách đoạn trích văn bản đánh số, lấy từ LỜI THOẠI (nhận dạng giọng nói tự động, có thể sai chính tả) và CHỮ OCR trên màn hình của nhiều cảnh trong video, đã được lọc theo từ khoá. Từ khoá chỉ là bộ lọc thô: đoạn trích chứa từ khoá KHÔNG có nghĩa là nó khớp chi tiết.
+MATCH_SYSTEM = """Bạn giúp một người kiểm tra các khung hình ứng viên của một truy vấn tìm video. Bạn KHÔNG nhìn thấy hình. Với mỗi chi tiết của truy vấn, bạn nhận một danh sách đoạn trích văn bản đánh số, lấy từ LỜI THOẠI (nhận dạng giọng nói tự động, có thể sai chính tả) và CHỮ OCR trên màn hình của nhiều cảnh trong video, đã được lọc theo từ khoá. Từ khoá chỉ là bộ lọc thô: đoạn trích chứa từ khoá KHÔNG có nghĩa là nó khớp chi tiết. Các ký hiệu A, B, X, N dưới đây chỉ là chỗ trống, không phải nội dung.
 
 Với TỪNG đoạn trích của TỪNG chi tiết, so sánh lần lượt từng thành phần của chi tiết với đoạn trích: (1) đúng loại người/vật, (2) màu sắc, (3) SỐ LƯỢNG, (4) hành động và vị trí. Trước hết viết "why" (tối đa 15 từ): thành phần nào khớp, thành phần nào KHÔNG khớp hoặc không được nhắc. Rồi mới chọn "verdict":
 - "exact": mọi thành phần mà chi tiết nêu đều được đoạn trích nói rõ.
-- "partial": đúng chủ đề nhưng một thành phần bị THIẾU hoặc chỉ nói chung chung (chi tiết nói "hoa riềng tía", đoạn chỉ nói "hoa"; chi tiết nói "4 con", đoạn không nêu số lượng).
-- "conflict": đoạn trích nói RÕ về cùng đối tượng mà chi tiết nêu nhưng khác ở một thành phần cụ thể: khác loại hoặc màu, khác số lượng (chi tiết 4 con, đoạn nói 2 con), hoặc hành động áp lên vật khác (chi tiết "cầm lên 2 con X", đoạn nói người ta cầm cái đĩa hay nhấc nắp bát; chúng chỉ nằm yên).
-- "unrelated": đoạn trích không nói về chi tiết này, kể cả khi nó nói về một thứ KHÁC chỉ có chung một từ (hoa vàng với "con vật màu vàng") hoặc thuộc một thời điểm khác của câu chuyện. Những trường hợp đó KHÔNG phải "conflict".
+- "partial": đúng chủ đề nhưng một thành phần bị THIẾU hoặc chỉ nói chung chung (chi tiết nêu loại cụ thể mà đoạn chỉ nói loại chung; chi tiết nêu số lượng mà đoạn không nêu).
+- "conflict": đoạn trích nói RÕ về cùng đối tượng mà chi tiết nêu nhưng khác ở một thành phần cụ thể: khác loại hoặc màu, khác số lượng (chi tiết N cái, đoạn nói số khác), hoặc hành động áp lên một vật khác với vật chi tiết nêu.
+- "unrelated": đoạn trích không nói về chi tiết này, kể cả khi nó nói về một thứ KHÁC chỉ có chung một từ với chi tiết, hoặc thuộc một thời điểm khác của câu chuyện. Những trường hợp đó KHÔNG phải "conflict".
 
 Quy tắc:
 - KHÔNG suy diễn, KHÔNG dùng kiến thức ngoài. Chỉ tính điều đoạn trích nói ra; điều không được nhắc là không có.
 - Số lượng phải bằng nhau. Chi tiết và đoạn đều nêu số mà khác nhau là "conflict". Chi tiết nêu số mà đoạn không nêu số cho đúng vật đó thì tối đa "partial".
 - Chữ X, Y trong chi tiết là ẩn số CHỈ về tên vật: đoạn có thể gọi vật đó là bất cứ gì, nhưng số lượng, hành động, vật chứa và vị trí vẫn phải khớp.
 - Thông tin THỪA trong đoạn trích không làm giảm mức khớp; chỉ so những thành phần mà chi tiết nêu.
-- Chi tiết mang tính diễn biến hay hỏi-đáp ("xem hôm nay nấu món gì", "X là nguyên liệu của món") chỉ "exact" khi đoạn trích nói thẳng đúng nội dung đó, không phải khi chỉ là một cảnh nấu ăn hay trò chuyện chung chung.
-- Một chi tiết có thể gồm một hành động quan sát được kèm mục đích hay diễn biến sau đó ("mang X đi giấu", "thức dậy vì không thấy X"). Mục đích/diễn biến đó thường không xảy ra trong đúng đoạn trích -- nó diễn ra ngoài khung hình hay ở cảnh sau. Nên khi đoạn trích nói đúng hành động cốt lõi (mang đi, di chuyển đi) và không nói ngược lại mục đích, đó là "exact", không phải "partial": mục đích không phải phần cần kiểm chứng riêng, chỉ là lý do của hành động. Chỉ xếp "partial" khi đoạn trích nói ngược mục đích (ví dụ đặt vật xuống và để lộ ra) hoặc nói một hành động hoàn toàn khác.
+- Chi tiết mang tính diễn biến hay hỏi-đáp chỉ "exact" khi đoạn trích nói thẳng đúng nội dung đó, không phải khi chỉ là một cảnh chung chung cùng chủ đề.
+- Một chi tiết có thể gồm một hành động quan sát được kèm mục đích hay diễn biến sau đó ("A mang X đi để làm B"). Mục đích/diễn biến đó thường không xảy ra trong đúng đoạn trích -- nó diễn ra ngoài khung hình hay ở cảnh sau. Nên khi đoạn trích nói đúng hành động cốt lõi và không nói ngược lại mục đích, đó là "exact", không phải "partial": mục đích không phải phần cần kiểm chứng riêng, chỉ là lý do của hành động. Chỉ xếp "partial" khi đoạn trích nói ngược mục đích hoặc nói một hành động hoàn toàn khác.
 
 Trả về một đối tượng JSON, mỗi đoạn trích một mục, "why" đứng trước "verdict":
 {"details": [{"detail": 0, "judgements": [{"id": "e3", "why": "...", "verdict": "exact"}]}]}"""
@@ -388,7 +368,7 @@ Examples (different queries):
 Return one JSON object, one entry per excerpt, "why" before "verdict":
 {"details": [{"detail": 0, "judgements": [{"id": "e3", "why": "...", "verdict": "exact", "note_vi": "..."}]}]}"""
 
-VISION_MATCH_INTRO = """You judge candidates for a person checking them against a query's details, by looking at images. A query often describes a short STORY of several consecutive shots (five people gather, one carries something away, a man wakes up, ...), and no single frame can show all of it -- so each candidate is shown as a SET of images: its own exact moment, then shots shortly before and shortly after it in the same video, in time order, giving you the same run of shots a person scrubbing the timeline would see. Every image is labelled with its candidate's id in brackets, e.g. [C7], and says what it is: that candidate's own moment, or a shot N seconds earlier/later in the same story."""
+VISION_MATCH_INTRO = """You judge candidates for a person checking them against a query's details, by looking at images. A query often describes a short STORY of several consecutive shots, and no single frame can show all of it -- so each candidate is shown as a SET of images: its own exact moment, then shots shortly before and shortly after it in the same video, in time order, giving you the same run of shots a person scrubbing the timeline would see. Every image is labelled with its candidate's id in brackets, e.g. [C7], and says what it is: that candidate's own moment, or a shot N seconds earlier/later in the same story."""
 
 #: Every rule here was added because a measured run got something wrong without it (the count
 #: guard, the broadcast-marker exemption, reading a change ACROSS shots, "looks like"). The Search
@@ -401,13 +381,13 @@ VISION_MATCH_RULES = """For EACH candidate and EACH detail listed below, decide 
 - "conflict": something clearly visible in this candidate's own sequence is different from what the detail names (a different colour, count, object or action).
 - "unrelated": nothing in any of this candidate's images says anything about this detail -- neither its subjects nor its action. A detail whose subjects ARE there and whose action is not is "partial", not "unrelated".
 
-Rules:
+Rules (A, B and X below are placeholders, not content):
 - Judge only the pixels shown for THIS candidate. Do not use outside knowledge, and do not invent something none of its images show. Images labelled with a different candidate's id are that candidate's own story, not this one's.
-- Several images of one candidate can come from the SAME shot, seconds apart: read them as frames of one continuous action, and judge a detail on what the frames together show. A person lying on the mat who is up in a later frame IS "the man wakes up"; a person putting a hand on the animal, or bending over it, while it lies on the mat IS the animal being woken. Answer "exact" in those cases and name the frames you used ("lying at +21s, standing at +27s").
-- The images of one candidate are ONE STORY IN TIME ORDER, labelled with how far each shot is from that candidate's moment. A detail can name a change between shots ("he wakes the animal up", "the man comes back and the object is gone"): compare the shots against each other instead of reading them one by one. Something carried in one shot and in a basket on the pole in a later one IS it being hidden. Do not answer "unrelated" to a detail like that only because no single image shows the whole event -- "unrelated" is for a story none of the shots tells at all.
-- A detail can name an action together with its purpose or a later outcome ("carries X away, to hide it"; "wakes up because he cannot find it"). If an earlier or later shot of the SAME candidate shows the action, that is "exact" even when the candidate's own exact moment does not.
-- A detail can say something only LOOKS LIKE an object ("an object that looks like a pumpkin") rather than naming it outright: a prop, decoration or costume that resembles it is "exact", not a conflict, even if it is visibly not the real thing.
-- Count exactly what you can count, and SAY THE NUMBER in "why" whenever a detail names one: "two shellfish on the plate". If the number you see is not the number the detail names, the verdict is "conflict" (or "partial" if the objects are not clearly countable), never "exact". This is for physical objects, animals or people actually PRESENT in a shot. IT DOES NOT APPLY to a graphic mark the broadcast draws onto the footage afterwards to point something out (a circle, arrow, box or highlight added over the video): IGNORE the number such a detail names entirely. "two red circles mark the two men" is reporting how many times that device is used across the WHOLE STORY, at different moments, which the images you are given will usually catch only one instance of -- the verdict is "exact" the moment you see the device marking the subject the detail names EVEN ONCE, in even one image. Do not write "only one, not two" as a reason to answer anything but "exact"; a lower count than the detail states is not a reason to withhold "exact" for this kind of detail, ever.
+- Several images of one candidate can come from the SAME shot, seconds apart: read them as frames of one continuous action, and judge a detail on what the frames together show -- a state in one frame and a different state in a later one IS the change between them. Answer "exact" then and name the frames you used ("at +21s ..., at +27s ...").
+- The images of one candidate are ONE STORY IN TIME ORDER, labelled with how far each shot is from that candidate's moment. A detail can name a change between shots ("A comes back and B is gone"): compare the shots against each other instead of reading them one by one. Do not answer "unrelated" to a detail like that only because no single image shows the whole event -- "unrelated" is for a story none of the shots tells at all.
+- A detail can name an action together with its purpose or a later outcome ("A carries X away, to hide it"). If an earlier or later shot of the SAME candidate shows the action, that is "exact" even when the candidate's own exact moment does not.
+- A detail can say something only LOOKS LIKE an object ("something that looks like B") rather than naming it outright: a prop, decoration or costume that resembles it is "exact", not a conflict, even if it is visibly not the real thing.
+- Count exactly what you can count, and SAY THE NUMBER in "why" whenever a detail names one ("two of X on the table"). If the number you see is not the number the detail names, the verdict is "conflict" (or "partial" if the objects are not clearly countable), never "exact". This is for physical objects, animals or people actually PRESENT in a shot. IT DOES NOT APPLY to a graphic mark the broadcast draws onto the footage afterwards to point something out (a circle, arrow, box or highlight added over the video): IGNORE the number such a detail names entirely. Such a count reports how many times the device is used across the WHOLE STORY, at different moments, which the images you are given will usually catch only one instance of -- the verdict is "exact" the moment you see the device marking the subject the detail names EVEN ONCE, in even one image. A lower count than the detail states is never a reason to withhold "exact" for this kind of detail.
 - A blurry, dark, or off-frame detail is "partial" or "unrelated", never a guess dressed as "exact".
 - Write "why" first (at most 20 words, English: what you actually see and where in the sequence), then "verdict", then "note_vi" (the same conclusion in Vietnamese, at most 15 words, for the person reviewing)."""
 
@@ -428,7 +408,7 @@ CHECK_SYSTEM = """You are checking ONE moment of a video against what a person s
 - "On-screen text to find": a string the person expects to appear WRITTEN on screen (a caption, a sign, a name). Judge it against the quoted on-screen text below (labelled "[on screen ...]") AND against what you can read in the images yourself; do not treat it as an action or a scene to picture -- it is text to find, verbatim or close to it.
 When more than one channel is given, EVERY one of them has to hold for the moment to be a match: a right picture with the wrong words spoken, or the wrong text on screen, is not a match.
 
-A query often describes a short STORY of several consecutive shots (five people gather, one carries something away, a man wakes up, ...), and no single frame can show all of it -- so the moment is shown as a SET of images: its own exact keyframe, then the keyframes of the shots before and after it in the same video, in time order, giving you the same run of shots a person scrubbing the timeline would see. Every image is labelled [M] and says what it is: the moment itself, or a shot N seconds earlier/later in the same story.
+A query often describes a short STORY of several consecutive shots, and no single frame can show all of it -- so the moment is shown as a SET of images: its own exact keyframe, then the keyframes of the shots before and after it in the same video, in time order, giving you the same run of shots a person scrubbing the timeline would see. Every image is labelled [M] and says what it is: the moment itself, or a shot N seconds earlier/later in the same story.
 
 """ + VISION_MATCH_RULES + """
 - The rules above (colour, count, "looks like", the broadcast-marker exemption) are about the VISUAL channel: judge the audio and on-screen channels by whether the words/text are actually there, not by picturing them.

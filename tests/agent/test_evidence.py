@@ -306,7 +306,7 @@ class RareWordsTests(unittest.TestCase):
         self.assertIn("Never call those \"conflict\"", MATCH_CAPTION_SYSTEM)
         self.assertIn("yellow lion costume lies", MATCH_CAPTION_SYSTEM)       # the worked example that is exact
         self.assertIn("TÁCH", DETAILS_SYSTEM)                                  # one thing per detail
-        self.assertIn("lion dance", DETAILS_SYSTEM)                            # the corpus: what a vague "animal" is here
+        self.assertIn("không phải nội dung", DETAILS_SYSTEM)                   # its placeholders are not content
 
 
 class QueryDetailsTests(unittest.TestCase):
@@ -322,7 +322,8 @@ class QueryDetailsTests(unittest.TestCase):
         self.assertEqual(found["meaning_en"], "A vase of red ginger (torch ginger) flowers.")
         self.assertEqual(found["same_en"], ["red ginger", "torch ginger", "a", "b", "c"])       # five at most
         self.assertEqual(found["different_en"], ["lavender", "yellow daisy"])
-        self.assertIn("riềng tía", DETAILS_SYSTEM)      # the prompt spells the equivalence out
+        self.assertIn("tên tiếng Anh chuẩn", DETAILS_SYSTEM)   # asks for the canonical English name
+        self.assertNotIn("riềng", DETAILS_SYSTEM)                # without an example from a past query to copy
 
 
     def test_details_carry_their_terms_are_unique_capped_and_never_the_question(self):

@@ -757,17 +757,21 @@ direction, not exact margin.
 
 - Prompts: all in `agent/prompts.py`. Iterate with `python -m agent plan`, which is
   cheap and fast.
-- **The planner prompt states rules, not cases.** It once carried the stories of the queries
-  its rules came from ("hai mẹ con", the fish on a scale, "4 con X", the tug-of-war slide),
-  and the planner copied their words into other plans -- a lecture query searched the speech
-  for the very topic words an example had used. Those stories now live here, and the prompt
-  says an example only illustrates a kind of case. `python -m scripts.benchmarks.check_planner
-  --runs 3` replans each of those queries and checks the property its rule protects (no
-  relationship words in a caption, the scale's display kept, the unknown "X" never named, one
-  slide planned as one lecture scene, no phrase copied from the prompt, ...). Run it after any
-  prompt edit: the first general rewrite lost "hai mẹ con" 3 times out of 3 until the rule
-  listed the words a caption must not contain. 18/18 with the current prompt; 11/12 with
-  thinking on (the miss was the check's own stale word list, since fixed).
+- **The prompts carry no examples from past queries.** At the venue the team types short
+  keyword queries of its own ("hai người trò chuyện. Cảnh sau là một người đang trả lời phỏng
+  vấn, đằng sau có người phụ nữ da đen bước qua"), already stripped of what the organisers'
+  wording would mislead a search with, so the prompts only have to be faithful: state what the
+  query states, invent nothing, drop nothing. Examples taken from earlier queries leaked into
+  plans (a lecture query searched the speech for the topic words an example had used), so the
+  planner, the rewrite round, the checklist (`DETAILS_SYSTEM`) and the judge rubrics
+  (`VISION_MATCH_RULES`, `MATCH_SYSTEM`, `CHECK_SYSTEM`) now state rules only, with A/B/X as
+  placeholders where a rule needs a shape. `CORPUS` no longer lists groups or genres of one
+  year's data. The stories behind the rules are in this document, not in the prompts.
+  `python -m scripts.benchmarks.check_planner --runs 3` replans keyword queries of the kinds
+  each rule is for and checks the property it protects (nothing invented for "hai người", a
+  display kept for a question about a number on screen, an unknown "X" never named, one slide
+  planned as one scene, the events of a TRAKE list and not its context sentence, ...). Run it
+  after any prompt edit: 24/24 with the current prompt, 12/12 with thinking on.
 - Budgets: `--mode`, `--time-budget` (default 20 s fast, 300 s deep), `--max-steps`
   (deep), and `AgentOptions` / `FAST_DEFAULTS` in `agent/orchestrator.py`
   (`verify_top`, `verify_chunk`, `accept_score`, `early_stop_score`, `trake_refine`).

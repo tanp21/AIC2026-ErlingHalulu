@@ -30,10 +30,12 @@ def spoken(plan):
     return " ".join(plan.transcript_vi).lower()
 
 
-def no_relationship(plan):
-    """"hai mẹ con": a relationship no picture shows is the bare count, never a guessed gender or age."""
-    first = " ".join(scene.visual_en[0] for scene in plan.scenes).lower()
-    return not re.search(r"\b(mother|son|daughter|child|kid|parent|family|young man|older woman|old woman)\b", first)
+def nothing_invented(plan):
+    """"hai người trò chuyện": the caption keeps "two people" and invents no gender, age or relationship."""
+    first = plan.scenes[0].visual_en[0].lower()
+    return ("two people" in first or "two persons" in first) and not re.search(
+        r"\b(man|men|woman|women|boy|girl|mother|father|son|daughter|child|kid|couple|family|"
+        r"young|old|elderly|video call|interview)\b", first)
 
 
 def scale_display(plan):
@@ -74,26 +76,22 @@ def trake_events(plan):
     return len(plan.events_en) == 3
 
 
+# Written the way the team types queries into the agent at the venue: short, and already
+# stripped of what the organisers' wording would mislead a search with.
 CASES = [
-    ("hai mẹ con", "kis", "Đoạn phim bắt đầu với cảnh hai mẹ con cầm điện thoại trò chuyện, sau đó chuyển "
-     "sang cảnh người con trả lời phỏng vấn, phía sau có một phụ nữ da đen đang bước qua.", [no_relationship]),
-    ("cân cá (p1-3)", "qa", "Hình ảnh một con cá được đặt lên cân, sau đó có cảnh một con cá khác cùng loại bị "
-     "một người cầm đuôi. Con số hiển thị cuối cùng trên cân là bao nhiêu?", [scale_display]),
-    ("4 con X (p2-30)", "qa", "Một cô gái đeo tạp dề màu trắng, bên cạnh là một lọ hoa riềng tía. Sau đó cô gái "
-     "này đặt lên 1 dĩa trắng 4 con X, được biết X là nguyên liệu cho món ăn trong tập này. Sau đó người này lại "
-     "cầm lên 2 con X. Sau đó người này đối thoại với một người đối diện để xem hôm nay nấu món gì. Hỏi X là con gì?",
-     [unnamed_x]),
-    ("slide kéo co", "kis", "Đây là một đoạn trong bài giảng. Trên slide bao gồm:\n- Một nhóm nhân vật người 3D "
-     "màu trắng vây quanh một nhân vật màu đỏ ở chính giữa.\n- Hai nhân vật hoạt hình nam đang trong tư thế thi "
-     "đấu kéo co, đối đầu nhau với sợi dây thừng.", [one_slide, no_prompt_words]),
-    ("bún gà (p1-18)", "kis", "Cảnh quay cho thấy hành động trình bày món ăn sau khi hoàn thành giai đoạn chế "
-     "biến. Bún được cho đầu tiên vào một chén rỗng, sau đó đầu bếp lần lượt cho từng vá nước dùng cùng các "
-     "nguyên liệu như thịt gà, cà rốt, sả, nấm mèo vào chén bún, và kết thúc bằng việc thả một cọng ngò lên "
-     "trên cùng.", [cooking]),
-    ("múa lân (p1-16)", "trake", "Đoạn video bắt đầu bằng ảnh cận đầu một con lân trắng, mũi đỏ, bên cạnh lá cờ "
-     "trắng viền đỏ.\nE1 Khoảnh khắc đầu tiên xuất hiện đầy đủ hai con rồng vàng đang xoay vòng.\nE2 Khoảnh khắc "
-     "đầu tiên con lân hoàn tất cú xoay người trên các thanh trụ.\nE3 Khoảnh khắc đầu tiên dùi chạm vào kẻng đồng "
-     "múa lân.", [trake_events]),
+    ("hai người + phỏng vấn", "kis", "hai người trò chuyện. Cảnh sau là một người đang trả lời phỏng vấn, "
+     "đằng sau có người phụ nữ da đen bước qua.", [nothing_invented]),
+    ("cân cá", "qa", "cá đặt lên cân, sau đó người cầm đuôi một con cá khác. Con số cuối cùng hiển thị trên "
+     "cân là bao nhiêu?", [scale_display]),
+    ("4 con X", "qa", "cô gái đeo tạp dề trắng, cạnh lọ hoa riềng tía, đặt 4 con X lên dĩa trắng rồi cầm lên "
+     "2 con. X là con gì?", [unnamed_x]),
+    ("slide kéo co", "kis", "slide bài giảng có hình nhóm người 3D màu trắng vây quanh một người màu đỏ, và "
+     "hình hai nhân vật hoạt hình nam kéo co", [one_slide, no_prompt_words]),
+    ("bún gà", "kis", "đầu bếp cho bún vào chén, chan nước dùng với thịt gà, cà rốt, sả, nấm mèo, cuối cùng "
+     "đặt một cọng ngò lên trên", [cooking]),
+    ("múa lân", "trake", "múa lân, mở đầu cận đầu lân trắng mũi đỏ cạnh lá cờ trắng viền đỏ\n"
+     "E1 hai con rồng vàng xoay vòng\nE2 lân xoay người trên các thanh trụ rồi đặt chân xuống trụ\n"
+     "E3 dùi chạm vào kẻng đồng", [trake_events]),
 ]
 
 
